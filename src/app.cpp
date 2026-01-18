@@ -27,6 +27,9 @@ void App::run() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
+    // Set Wayland app_id for desktop integration (icon in Alt+Tab, etc.)
+    glfwWindowHintString(GLFW_WAYLAND_APP_ID, "pex");
+
     // Create window
     GLFWwindow* window = glfwCreateWindow(1400, 900, "PEX - Process Explorer for Linux", nullptr, nullptr);
     if (!window) {
