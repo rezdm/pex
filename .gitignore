@@ -38,4 +38,8 @@
 *.app
 
 # debug information files
-*.dwo
+*s.dwo
+
+
+build/
+.claude/
