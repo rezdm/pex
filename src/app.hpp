@@ -32,7 +32,8 @@ public:
 private:
     void refresh_processes();
     void build_process_tree();
-    void calculate_tree_totals(ProcessNode& node);
+
+    static void calculate_tree_totals(ProcessNode& node);
     void render();
     void render_menu_bar();
     void render_toolbar();
@@ -40,19 +41,21 @@ private:
     void render_process_tree_node(ProcessNode& node, int depth);
     void render_process_list();
     void render_details_panel();
-    void render_file_handles_tab();
-    void render_network_tab();
+    void render_file_handles_tab() const;
+    void render_network_tab() const;
     void render_threads_tab();
-    void render_memory_tab();
-    void render_environment_tab();
+    void render_memory_tab() const;
+    void render_environment_tab() const;
     void refresh_selected_details();
 
     void handle_search_input();
     void handle_keyboard_navigation();
     std::vector<ProcessNode*> get_visible_items();
-    void collect_visible_items(ProcessNode* node, std::vector<ProcessNode*>& items);
+
+    static void collect_visible_items(ProcessNode* node, std::vector<ProcessNode*>& items);
     ProcessNode* find_matching_process(const std::string& search, ProcessNode* start_node);
-    ProcessNode* search_subtree(std::vector<std::unique_ptr<ProcessNode>>& nodes, const std::string& search);
+
+    static ProcessNode* search_subtree(std::vector<std::unique_ptr<ProcessNode>>& nodes, const std::string& search);
 
     static std::string format_bytes(int64_t bytes);
     static std::string format_time(std::chrono::system_clock::time_point tp);

@@ -3,7 +3,6 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
-#include <cstring>
 #include <unistd.h>
 #include <pwd.h>
 #include <sys/stat.h>
@@ -114,8 +113,7 @@ std::optional<ProcessInfo> ProcfsReader::get_process_info(int pid) {
     info.start_time = std::chrono::system_clock::from_time_t(static_cast<time_t>(start_seconds));
 
     // Read statm for memory info
-    std::string statm = read_file(proc_path + "/statm");
-    if (!statm.empty()) {
+    if (std::string statm = read_file(proc_path + "/statm"); !statm.empty()) {
         std::istringstream statm_iss(statm);
         uint64_t size, resident;
         statm_iss >> size >> resident;
@@ -123,15 +121,14 @@ std::optional<ProcessInfo> ProcfsReader::get_process_info(int pid) {
         info.virtual_memory = static_cast<int64_t>(size * page_size);
         info.resident_memory = static_cast<int64_t>(resident * page_size);
 
-        auto mem_info = sys.get_memory_info();
-        if (mem_info.total > 0) {
+        if (auto mem_info = SystemInfo::get_memory_info(); mem_info.total > 0) {
             info.memory_percent = static_cast<double>(info.resident_memory) / mem_info.total * 100.0;
         }
     }
 
     // Read cmdline
     std::string cmdline = read_file(proc_path + "/cmdline");
-    std::replace(cmdline.begin(), cmdline.end(), '\0', ' ');
+    std::ranges::replace(cmdline, '\0', ' ');
     if (!cmdline.empty() && cmdline.back() == ' ') {
         cmdline.pop_back();
     }
@@ -241,7 +238,7 @@ std::vector<FileHandleInfo> ProcfsReader::get_file_handles(int pid) {
             } else if (handle.path.starts_with("anon_inode:")) {
                 handle.type = "anon_inode";
             } else if (handle.path.starts_with("/")) {
-                struct stat st;
+                struct stat st{};
                 if (stat(handle.path.c_str(), &st) == 0) {
                     if (S_ISREG(st.st_mode)) handle.type = "file";
                     else if (S_ISDIR(st.st_mode)) handle.type = "dir";
@@ -296,7 +293,7 @@ std::map<int, NetworkConnectionInfo> ProcfsReader::parse_net_file(const std::str
             // IPv4
             unsigned int ip = 0;
             std::from_chars(ip_hex.data(), ip_hex.data() + ip_hex.size(), ip, 16);
-            unsigned char* bytes = reinterpret_cast<unsigned char*>(&ip);
+            auto bytes = reinterpret_cast<unsigned char*>(&ip);
             return std::format("{}.{}.{}.{}:{}", bytes[0], bytes[1], bytes[2], bytes[3], port);
         }
     };
@@ -375,14 +372,14 @@ std::vector<NetworkConnectionInfo> ProcfsReader::get_network_connections(int pid
     auto udp6 = parse_net_file("/proc/net/udp6", "udp6");
 
     for (int inode : socket_inodes) {
-        if (auto it = tcp.find(inode); it != tcp.end()) {
-            result.push_back(it->second);
-        } else if (auto it = tcp6.find(inode); it != tcp6.end()) {
-            result.push_back(it->second);
-        } else if (auto it = udp.find(inode); it != udp.end()) {
-            result.push_back(it->second);
-        } else if (auto it = udp6.find(inode); it != udp6.end()) {
-            result.push_back(it->second);
+        if (auto itTcp4 = tcp.find(inode); itTcp4 != tcp.end()) {
+            result.push_back(itTcp4->second);
+        } else if (auto itTcp6 = tcp6.find(inode); itTcp6 != tcp6.end()) {
+            result.push_back(itTcp6->second);
+        } else if (auto itUdp4 = udp.find(inode); itUdp4 != udp.end()) {
+            result.push_back(itUdp4->second);
+        } else if (auto itUdp6 = udp6.find(inode); itUdp6 != udp6.end()) {
+            result.push_back(itUdp6->second);
         }
     }
 

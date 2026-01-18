@@ -28,12 +28,12 @@ void App::handle_search_input() {
         }
     }
 
-    // If we have search text and it changed, find match
+    // If we have search text, and it changed, find match
     if (!search_text_.empty()) {
         // Check if current selection still matches
         if (selected_process_) {
             std::string name_lower = selected_process_->info.name;
-            std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
+            std::ranges::transform(name_lower, name_lower.begin(), ::tolower);
             if (name_lower.starts_with(search_text_)) {
                 return; // Current selection still matches
             }

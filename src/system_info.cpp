@@ -70,15 +70,15 @@ MemoryInfo SystemInfo::get_memory_info() {
     return info;
 }
 
-int SystemInfo::get_processor_count() {
+int SystemInfo::get_processor_count() const {
     return processor_count_;
 }
 
-long SystemInfo::get_clock_ticks_per_second() {
+long SystemInfo::get_clock_ticks_per_second() const {
     return clock_ticks_;
 }
 
-uint64_t SystemInfo::get_boot_time_ticks() {
+uint64_t SystemInfo::get_boot_time_ticks() const {
     return boot_time_ticks_;
 }
 

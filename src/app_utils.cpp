@@ -12,7 +12,7 @@ std::string App::format_bytes(int64_t bytes) {
 }
 
 std::string App::format_time(std::chrono::system_clock::time_point tp) {
-    auto time_t_val = std::chrono::system_clock::to_time_t(tp);
+    const auto time_t_val = std::chrono::system_clock::to_time_t(tp);
     std::tm tm_val;
     localtime_r(&time_t_val, &tm_val);
     char buf[32];

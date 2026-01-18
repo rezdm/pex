@@ -29,7 +29,7 @@ void App::render_details_panel() {
     }
 }
 
-void App::render_file_handles_tab() {
+void App::render_file_handles_tab() const {
     if (ImGui::BeginTable("FileHandles", 3,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
             ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter)) {
@@ -54,7 +54,7 @@ void App::render_file_handles_tab() {
     }
 }
 
-void App::render_network_tab() {
+void App::render_network_tab() const {
     if (ImGui::BeginTable("Network", 4,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
             ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter)) {
@@ -142,7 +142,7 @@ void App::render_threads_tab() {
     ImGui::EndChild();
 }
 
-void App::render_memory_tab() {
+void App::render_memory_tab() const {
     if (ImGui::BeginTable("Memory", 4,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
             ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter)) {
@@ -170,7 +170,7 @@ void App::render_memory_tab() {
     }
 }
 
-void App::render_environment_tab() {
+void App::render_environment_tab() const {
     if (ImGui::BeginTable("Environment", 2,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
             ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter |

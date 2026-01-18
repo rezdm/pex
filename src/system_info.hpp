@@ -33,11 +33,12 @@ class SystemInfo {
 public:
     static SystemInfo& instance();
 
-    CpuTimes get_cpu_times();
-    MemoryInfo get_memory_info();
-    int get_processor_count();
-    long get_clock_ticks_per_second();
-    uint64_t get_boot_time_ticks();
+    static CpuTimes get_cpu_times();
+
+    static MemoryInfo get_memory_info();
+    [[nodiscard]] int get_processor_count() const;
+    [[nodiscard]] long get_clock_ticks_per_second() const;
+    [[nodiscard]] uint64_t get_boot_time_ticks() const;
 
 private:
     SystemInfo();
