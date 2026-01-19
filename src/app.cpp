@@ -11,7 +11,7 @@
 namespace pex {
 
 App::App() {
-    previous_system_cpu_times_ = SystemInfo::instance().get_cpu_times();
+    previous_system_cpu_times_ = SystemInfo::get_cpu_times();
     last_refresh_ = std::chrono::steady_clock::now();
     last_key_time_ = std::chrono::steady_clock::now();
 }
@@ -31,13 +31,13 @@ void App::run() {
     glfwWindowHintString(GLFW_WAYLAND_APP_ID, "pex");
 
     // Create window
-    GLFWwindow* window = glfwCreateWindow(1400, 900, "PEX - Process Explorer for Linux", nullptr, nullptr);
-    if (!window) {
+    window_ = glfwCreateWindow(1400, 900, "PEX - Process Explorer for Linux", nullptr, nullptr);
+    if (!window_) {
         glfwTerminate();
         throw std::runtime_error("Failed to create GLFW window");
     }
 
-    glfwMakeContextCurrent(window);
+    glfwMakeContextCurrent(window_);
     glfwSwapInterval(1); // Enable vsync
 
     // Set window icon from embedded resource
@@ -51,7 +51,7 @@ void App::run() {
             icon.width = width;
             icon.height = height;
             icon.pixels = pixels;
-            glfwSetWindowIcon(window, 1, &icon);
+            glfwSetWindowIcon(window_, 1, &icon);
             stbi_image_free(pixels);
         }
     }
@@ -72,16 +72,22 @@ void App::run() {
     style.ScrollbarRounding = 2.0f;
 
     // Setup Platform/Renderer backends
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplGlfw_InitForOpenGL(window_, true);
     ImGui_ImplOpenGL3_Init("#version 330");
 
     // Initial data load
     refresh_processes();
 
     // Main loop
-    while (!glfwWindowShouldClose(window)) {
+    while (!glfwWindowShouldClose(window_)) {
         // Wait for events - blocks until event or timeout (saves CPU when idle)
         glfwWaitEventsTimeout(refresh_interval_ms_ / 1000.0);
+
+        // Handle focus request from another instance
+        if (focus_requested_.exchange(false)) {
+            glfwFocusWindow(window_);
+            glfwRequestWindowAttention(window_);
+        }
 
         auto now = std::chrono::steady_clock::now();
 
@@ -110,13 +116,13 @@ void App::run() {
         // Rendering
         ImGui::Render();
         int display_w, display_h;
-        glfwGetFramebufferSize(window, &display_w, &display_h);
+        glfwGetFramebufferSize(window_, &display_w, &display_h);
         glViewport(0, 0, display_w, display_h);
         glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-        glfwSwapBuffers(window);
+        glfwSwapBuffers(window_);
 
         // Sleep briefly to reduce CPU usage
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
@@ -127,8 +133,13 @@ void App::run() {
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
 
-    glfwDestroyWindow(window);
+    glfwDestroyWindow(window_);
     glfwTerminate();
+}
+
+void App::request_focus() {
+    focus_requested_ = true;
+    glfwPostEmptyEvent(); // Wake up the event loop
 }
 
 void App::render() {

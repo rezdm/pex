@@ -79,6 +79,7 @@ add_executable(pex
     src/app_input.cpp
     src/app_utils.cpp
     src/stb_impl.cpp
+    src/single_instance.cpp
 )
 
 target_include_directories(pex PRIVATE src ${stb_SOURCE_DIR} ${CMAKE_BINARY_DIR}/generated)

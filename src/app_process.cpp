@@ -6,7 +6,7 @@
 namespace pex {
 
 void App::refresh_processes() {
-    auto current_cpu_times = SystemInfo::instance().get_cpu_times();
+    auto current_cpu_times = SystemInfo::get_cpu_times();
     uint64_t total_cpu_delta = current_cpu_times.total() - previous_system_cpu_times_.total();
 
     auto processes = reader_.get_all_processes();
@@ -116,7 +116,7 @@ void App::refresh_processes() {
     }
 
     // Update system stats
-    auto mem_info = SystemInfo::instance().get_memory_info();
+    auto mem_info = SystemInfo::get_memory_info();
     memory_used_ = mem_info.used;
     memory_total_ = mem_info.total;
 
@@ -153,11 +153,11 @@ void App::refresh_selected_details() {
     if (!selected_process_) return;
 
     int pid = selected_process_->info.pid;
-    file_handles_ = reader_.get_file_handles(pid);
-    network_connections_ = reader_.get_network_connections(pid);
-    threads_ = reader_.get_threads(pid);
-    memory_maps_ = reader_.get_memory_maps(pid);
-    environment_vars_ = reader_.get_environment_variables(pid);
+    file_handles_ = ProcfsReader::get_file_handles(pid);
+    network_connections_ = ProcfsReader::get_network_connections(pid);
+    threads_ = ProcfsReader::get_threads(pid);
+    memory_maps_ = ProcfsReader::get_memory_maps(pid);
+    environment_vars_ = ProcfsReader::get_environment_variables(pid);
     selected_thread_idx_ = -1;
 }
 

@@ -9,6 +9,9 @@
 #include <string>
 #include <memory>
 #include <chrono>
+#include <atomic>
+
+struct GLFWwindow;
 
 namespace pex {
 
@@ -28,6 +31,7 @@ class App {
 public:
     App();
     void run();
+    void request_focus();
 
 private:
     void refresh_processes();
@@ -50,7 +54,7 @@ private:
 
     void handle_search_input();
     void handle_keyboard_navigation();
-    std::vector<ProcessNode*> get_visible_items();
+    std::vector<ProcessNode*> get_visible_items() const;
 
     static void collect_visible_items(ProcessNode* node, std::vector<ProcessNode*>& items);
     ProcessNode* find_matching_process(const std::string& search, ProcessNode* start_node);
@@ -91,6 +95,10 @@ private:
     int64_t memory_total_ = 0;
 
     std::chrono::steady_clock::time_point last_refresh_;
+
+    // Window pointer for focus handling
+    GLFWwindow* window_ = nullptr;
+    std::atomic<bool> focus_requested_{false};
 };
 
 } // namespace pex

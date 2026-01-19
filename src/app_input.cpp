@@ -89,7 +89,7 @@ void App::collect_visible_items(ProcessNode* node, std::vector<ProcessNode*>& it
     }
 }
 
-std::vector<ProcessNode*> App::get_visible_items() {
+std::vector<ProcessNode*> App::get_visible_items() const {
     std::vector<ProcessNode*> items;
     if (is_tree_view_) {
         // For tree view, only collect expanded items
