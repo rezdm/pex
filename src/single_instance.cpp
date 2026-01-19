@@ -46,11 +46,11 @@ bool SingleInstance::try_become_primary() {
         return true; // Can't create socket, assume we're primary
     }
 
-    struct sockaddr_un addr{};
+    sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, socket_path_.c_str(), sizeof(addr.sun_path) - 1);
 
-    if (connect(client_fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0) {
+    if (connect(client_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
         // Connected to existing instance - send raise command
         const char* cmd = "RAISE\n";
         ssize_t written = write(client_fd, cmd, strlen(cmd));
@@ -69,7 +69,7 @@ bool SingleInstance::try_become_primary() {
         return true; // Can't create server socket, proceed anyway
     }
 
-    if (bind(server_fd_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
+    if (bind(server_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
         close(server_fd_);
         server_fd_ = -1;
         return true; // Can't bind, proceed anyway

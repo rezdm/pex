@@ -70,7 +70,7 @@ MemoryInfo SystemInfo::get_memory_info() {
     return info;
 }
 
-int SystemInfo::get_processor_count() const {
+unsigned int SystemInfo::get_processor_count() const {
     return processor_count_;
 }
 

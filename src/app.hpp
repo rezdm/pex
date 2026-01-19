@@ -5,7 +5,6 @@
 #include "system_info.hpp"
 #include <vector>
 #include <map>
-#include <set>
 #include <string>
 #include <memory>
 #include <chrono>
@@ -35,7 +34,7 @@ public:
 
 private:
     void refresh_processes();
-    void build_process_tree();
+    //void build_process_tree();
 
     static void calculate_tree_totals(ProcessNode& node);
     void render();
@@ -54,7 +53,7 @@ private:
 
     void handle_search_input();
     void handle_keyboard_navigation();
-    std::vector<ProcessNode*> get_visible_items() const;
+    [[nodiscard]] std::vector<ProcessNode*> get_visible_items() const;
 
     static void collect_visible_items(ProcessNode* node, std::vector<ProcessNode*>& items);
     ProcessNode* find_matching_process(const std::string& search, ProcessNode* start_node);

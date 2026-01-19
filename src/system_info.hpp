@@ -36,13 +36,13 @@ public:
     static CpuTimes get_cpu_times();
 
     static MemoryInfo get_memory_info();
-    [[nodiscard]] int get_processor_count() const;
+    [[nodiscard]] unsigned int get_processor_count() const;
     [[nodiscard]] long get_clock_ticks_per_second() const;
     [[nodiscard]] uint64_t get_boot_time_ticks() const;
 
 private:
     SystemInfo();
-    int processor_count_ = 1;
+    unsigned int processor_count_ = 1;
     long clock_ticks_ = 100;
     uint64_t boot_time_ticks_ = 0;
 };

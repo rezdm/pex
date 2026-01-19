@@ -12,7 +12,7 @@ void App::refresh_processes() {
     auto processes = reader_.get_all_processes();
 
     // Calculate CPU percentages
-    int proc_count = SystemInfo::instance().get_processor_count();
+    unsigned int proc_count = SystemInfo::instance().get_processor_count();
     for (auto& proc : processes) {
         auto it = previous_cpu_times_.find(proc.pid);
         if (it != previous_cpu_times_.end() && total_cpu_delta > 0) {
