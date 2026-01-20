@@ -5,6 +5,7 @@
 #include <GLFW/glfw3.h>
 #include <thread>
 #include <csignal>
+#include <format>
 #include "stb_image.h"
 #include "pex_icon.hpp"
 
@@ -12,6 +13,8 @@ namespace pex {
 
 App::App() {
     previous_system_cpu_times_ = SystemInfo::get_cpu_times();
+    previous_per_cpu_times_ = SystemInfo::get_per_cpu_times();
+    per_cpu_usage_.resize(previous_per_cpu_times_.size(), 0.0);
     last_refresh_ = std::chrono::steady_clock::now();
     last_key_time_ = std::chrono::steady_clock::now();
 }
@@ -156,6 +159,7 @@ void App::render() {
 
     render_menu_bar();
     render_toolbar();
+    render_system_panel();
 
     // Main content area with splitter
     float available_height = ImGui::GetContentRegionAvail().y - 25; // Reserve space for status bar
@@ -226,6 +230,171 @@ void App::render_menu_bar() {
 
         ImGui::EndMenuBar();
     }
+}
+
+void App::render_system_panel() {
+    // Compact bytes format like htop: "6.77G" instead of "6.77 GB"
+    auto format_compact = [](int64_t bytes) -> std::string {
+        if (bytes < 1024) return std::format("{}B", bytes);
+        if (bytes < 1024 * 1024) return std::format("{:.0f}K", bytes / 1024.0);
+        if (bytes < 1024LL * 1024 * 1024) return std::format("{:.2f}G", bytes / (1024.0 * 1024 * 1024));
+        return std::format("{:.2f}G", bytes / (1024.0 * 1024 * 1024));
+    };
+
+    // Toggle button for collapsing
+    const char* toggle_label = show_system_panel_ ? "[-] System" : "[+] System";
+    if (ImGui::Button(toggle_label)) {
+        show_system_panel_ = !show_system_panel_;
+    }
+
+    if (!show_system_panel_) {
+        return;
+    }
+
+    // Get current system info
+    auto mem_info = SystemInfo::get_memory_info();
+    auto swap_info = SystemInfo::get_swap_info();
+    auto load = SystemInfo::get_load_average();
+    auto uptime = SystemInfo::get_uptime();
+
+    int cpu_count = static_cast<int>(per_cpu_usage_.size());
+
+    // Two-column layout: CPUs on left, stats on right
+    float available_width = ImGui::GetContentRegionAvail().x;
+    float stats_width = 350.0f; // Fixed width for stats panel
+    float cpu_width = available_width - stats_width - 10.0f;
+
+    if (cpu_width < 200.0f) {
+        // Window too narrow - stack vertically instead
+        cpu_width = available_width;
+        stats_width = available_width;
+    }
+
+    // Calculate CPU grid dimensions based on available width
+    float cpu_item_width = 120.0f; // Width per CPU entry
+    int cpu_cols = std::max(1, static_cast<int>(cpu_width / cpu_item_width));
+    int cpu_rows = (cpu_count + cpu_cols - 1) / cpu_cols;
+
+    // Begin two-column table
+    bool side_by_side = (available_width - stats_width - 10.0f) >= 200.0f;
+
+    if (side_by_side) {
+        if (ImGui::BeginTable("SystemPanelLayout", 2, ImGuiTableFlags_None)) {
+            ImGui::TableSetupColumn("CPUs", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Stats", ImGuiTableColumnFlags_WidthFixed, stats_width);
+
+            ImGui::TableNextRow();
+
+            // Left column - CPUs
+            ImGui::TableNextColumn();
+            if (ImGui::BeginTable("CPUGrid", cpu_cols, ImGuiTableFlags_None)) {
+                for (int i = 0; i < cpu_count; i++) {
+                    if (i % cpu_cols == 0) ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+
+                    double usage = per_cpu_usage_[i];
+                    ImVec4 bar_color;
+                    if (usage < 25.0) bar_color = ImVec4(0.0f, 0.8f, 0.0f, 1.0f);
+                    else if (usage < 50.0) bar_color = ImVec4(0.5f, 0.8f, 0.0f, 1.0f);
+                    else if (usage < 75.0) bar_color = ImVec4(0.8f, 0.8f, 0.0f, 1.0f);
+                    else bar_color = ImVec4(0.8f, 0.2f, 0.0f, 1.0f);
+
+                    ImGui::Text("%2d[", i);
+                    ImGui::SameLine(0, 0);
+                    ImGui::PushStyleColor(ImGuiCol_PlotHistogram, bar_color);
+                    ImGui::ProgressBar(static_cast<float>(usage / 100.0), ImVec2(40, 12), "");
+                    ImGui::PopStyleColor();
+                    ImGui::SameLine(0, 0);
+                    ImGui::Text("]%5.1f%%", usage);
+                }
+                ImGui::EndTable();
+            }
+
+            // Right column - Stats
+            ImGui::TableNextColumn();
+
+            // Memory
+            float mem_ratio = mem_info.total > 0 ? static_cast<float>(mem_info.used) / mem_info.total : 0.0f;
+            ImGui::Text("Mem[");
+            ImGui::SameLine(0, 0);
+            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.0f, 0.6f, 0.0f, 1.0f));
+            ImGui::ProgressBar(mem_ratio, ImVec2(120, 12), "");
+            ImGui::PopStyleColor();
+            ImGui::SameLine(0, 0);
+            ImGui::Text("] %s/%s", format_compact(mem_info.used).c_str(), format_compact(mem_info.total).c_str());
+
+            // Swap
+            float swap_ratio = swap_info.total > 0 ? static_cast<float>(swap_info.used) / swap_info.total : 0.0f;
+            ImGui::Text("Swp[");
+            ImGui::SameLine(0, 0);
+            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.6f, 0.0f, 0.0f, 1.0f));
+            ImGui::ProgressBar(swap_ratio, ImVec2(120, 12), "");
+            ImGui::PopStyleColor();
+            ImGui::SameLine(0, 0);
+            ImGui::Text("] %s/%s", format_compact(swap_info.used).c_str(), format_compact(swap_info.total).c_str());
+
+            // Tasks
+            ImGui::Text("Tasks: %d, %d thr; %d running", process_count_, thread_count_, running_count_);
+
+            // Load
+            ImGui::Text("Load average: %.2f %.2f %.2f", load.one_min, load.five_min, load.fifteen_min);
+
+            // Uptime
+            uint64_t secs = uptime.uptime_seconds;
+            uint64_t days = secs / 86400;
+            secs %= 86400;
+            uint64_t hours = secs / 3600;
+            secs %= 3600;
+            uint64_t mins = secs / 60;
+            secs %= 60;
+            if (days > 0) {
+                ImGui::Text("Uptime: %lu day%s, %02lu:%02lu:%02lu", days, days > 1 ? "s" : "", hours, mins, secs);
+            } else {
+                ImGui::Text("Uptime: %02lu:%02lu:%02lu", hours, mins, secs);
+            }
+
+            ImGui::EndTable();
+        }
+    } else {
+        // Narrow window - stack vertically: stats first (compact), then CPUs
+        // Stats row
+        float mem_ratio = mem_info.total > 0 ? static_cast<float>(mem_info.used) / mem_info.total : 0.0f;
+        ImGui::Text("Mem[");
+        ImGui::SameLine(0, 0);
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.0f, 0.6f, 0.0f, 1.0f));
+        ImGui::ProgressBar(mem_ratio, ImVec2(80, 12), "");
+        ImGui::PopStyleColor();
+        ImGui::SameLine(0, 0);
+        ImGui::Text("]%s/%s", format_compact(mem_info.used).c_str(), format_compact(mem_info.total).c_str());
+        ImGui::SameLine();
+        ImGui::Text("Tasks:%d Load:%.1f", process_count_, load.one_min);
+
+        // CPUs in grid
+        if (ImGui::BeginTable("CPUGrid", cpu_cols, ImGuiTableFlags_None)) {
+            for (int i = 0; i < cpu_count; i++) {
+                if (i % cpu_cols == 0) ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+
+                double usage = per_cpu_usage_[i];
+                ImVec4 bar_color;
+                if (usage < 25.0) bar_color = ImVec4(0.0f, 0.8f, 0.0f, 1.0f);
+                else if (usage < 50.0) bar_color = ImVec4(0.5f, 0.8f, 0.0f, 1.0f);
+                else if (usage < 75.0) bar_color = ImVec4(0.8f, 0.8f, 0.0f, 1.0f);
+                else bar_color = ImVec4(0.8f, 0.2f, 0.0f, 1.0f);
+
+                ImGui::Text("%2d[", i);
+                ImGui::SameLine(0, 0);
+                ImGui::PushStyleColor(ImGuiCol_PlotHistogram, bar_color);
+                ImGui::ProgressBar(static_cast<float>(usage / 100.0), ImVec2(30, 12), "");
+                ImGui::PopStyleColor();
+                ImGui::SameLine(0, 0);
+                ImGui::Text("]%4.0f%%", usage);
+            }
+            ImGui::EndTable();
+        }
+    }
+
+    ImGui::Separator();
 }
 
 void App::render_toolbar() {

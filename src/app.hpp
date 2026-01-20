@@ -40,6 +40,7 @@ private:
     void render();
     void render_menu_bar();
     void render_toolbar();
+    void render_system_panel();
     void render_process_tree();
     void render_process_tree_node(ProcessNode& node, int depth);
     void render_process_list();
@@ -95,6 +96,13 @@ private:
     double cpu_usage_ = 0.0;
     int64_t memory_used_ = 0;
     int64_t memory_total_ = 0;
+
+    // System panel
+    bool show_system_panel_ = true;
+    std::vector<CpuTimes> previous_per_cpu_times_;
+    std::vector<double> per_cpu_usage_;
+    int thread_count_ = 0;
+    int running_count_ = 0;
 
     std::chrono::steady_clock::time_point last_refresh_;
 

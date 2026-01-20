@@ -46,6 +46,26 @@ CpuTimes SystemInfo::get_cpu_times() {
     return times;
 }
 
+std::vector<CpuTimes> SystemInfo::get_per_cpu_times() {
+    std::vector<CpuTimes> result;
+    std::ifstream stat("/proc/stat");
+    std::string line;
+
+    while (std::getline(stat, line)) {
+        // Look for lines starting with "cpu" followed by a digit (cpu0, cpu1, etc.)
+        if (line.starts_with("cpu") && line.size() > 3 && std::isdigit(line[3])) {
+            CpuTimes times;
+            std::istringstream iss(line);
+            std::string cpu;
+            iss >> cpu >> times.user >> times.nice >> times.system >> times.idle
+                >> times.iowait >> times.irq >> times.softirq >> times.steal;
+            result.push_back(times);
+        }
+    }
+
+    return result;
+}
+
 MemoryInfo SystemInfo::get_memory_info() {
     MemoryInfo info;
     std::ifstream meminfo("/proc/meminfo");
@@ -67,6 +87,63 @@ MemoryInfo SystemInfo::get_memory_info() {
     }
 
     info.used = info.total - info.available;
+    return info;
+}
+
+SwapInfo SystemInfo::get_swap_info() {
+    SwapInfo info;
+    std::ifstream meminfo("/proc/meminfo");
+    std::string line;
+
+    while (std::getline(meminfo, line)) {
+        std::istringstream iss(line);
+        std::string key;
+        int64_t value;
+        std::string unit;
+
+        iss >> key >> value >> unit;
+
+        if (key == "SwapTotal:") {
+            info.total = value * 1024;
+        } else if (key == "SwapFree:") {
+            info.free = value * 1024;
+        }
+    }
+
+    info.used = info.total - info.free;
+    return info;
+}
+
+LoadAverage SystemInfo::get_load_average() {
+    LoadAverage load;
+    std::ifstream loadavg("/proc/loadavg");
+
+    if (loadavg) {
+        std::string running_total;
+        loadavg >> load.one_min >> load.five_min >> load.fifteen_min >> running_total;
+
+        // Parse "running/total" format
+        size_t slash = running_total.find('/');
+        if (slash != std::string::npos) {
+            load.running_tasks = std::stoi(running_total.substr(0, slash));
+            load.total_tasks = std::stoi(running_total.substr(slash + 1));
+        }
+    }
+
+    return load;
+}
+
+UptimeInfo SystemInfo::get_uptime() {
+    UptimeInfo info;
+    std::ifstream uptime("/proc/uptime");
+
+    if (uptime) {
+        double uptime_sec, idle_sec;
+        uptime >> uptime_sec >> idle_sec;
+        info.uptime_seconds = static_cast<uint64_t>(uptime_sec);
+        info.idle_seconds = static_cast<uint64_t>(idle_sec);
+    }
+
     return info;
 }
 

@@ -125,6 +125,32 @@ void App::refresh_processes() {
         cpu_usage_ = static_cast<double>(active_delta) / total_cpu_delta * 100.0;
     }
 
+    // Calculate per-CPU usage
+    auto current_per_cpu = SystemInfo::get_per_cpu_times();
+    if (current_per_cpu.size() == previous_per_cpu_times_.size()) {
+        per_cpu_usage_.resize(current_per_cpu.size());
+        for (size_t i = 0; i < current_per_cpu.size(); i++) {
+            uint64_t total_delta = current_per_cpu[i].total() - previous_per_cpu_times_[i].total();
+            if (total_delta > 0) {
+                uint64_t active_delta = current_per_cpu[i].active() - previous_per_cpu_times_[i].active();
+                per_cpu_usage_[i] = static_cast<double>(active_delta) / total_delta * 100.0;
+            } else {
+                per_cpu_usage_[i] = 0.0;
+            }
+        }
+    }
+    previous_per_cpu_times_ = std::move(current_per_cpu);
+
+    // Count threads and running processes
+    thread_count_ = 0;
+    running_count_ = 0;
+    for (const auto& [pid, node] : process_map_) {
+        thread_count_ += node->info.thread_count;
+        if (node->info.state_char == 'R') {
+            running_count_++;
+        }
+    }
+
     previous_system_cpu_times_ = current_cpu_times;
     process_count_ = static_cast<int>(processes.size());
 
