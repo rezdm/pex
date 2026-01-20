@@ -218,6 +218,9 @@ void App::render_menu_bar() {
                     kill(selected_process_->info.pid, SIGTERM);
                 }
             }
+            if (ImGui::MenuItem("Kill Tree", nullptr, false, selected_process_ != nullptr)) {
+                kill_process_tree(selected_process_);
+            }
             ImGui::EndMenu();
         }
 
@@ -238,6 +241,11 @@ void App::render_toolbar() {
 
     if (ImGui::Button("Kill") && selected_process_) {
         kill(selected_process_->info.pid, SIGTERM);
+    }
+    ImGui::SameLine();
+
+    if (ImGui::Button("Kill Tree") && selected_process_) {
+        kill_process_tree(selected_process_);
     }
     ImGui::SameLine();
 

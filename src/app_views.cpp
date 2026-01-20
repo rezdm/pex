@@ -77,6 +77,8 @@ void App::render_process_tree_node(ProcessNode& node, int depth) {
     // Store row bounds for click detection on other columns
     ImVec2 row_min = ImGui::GetItemRectMin();
     ImVec2 row_max = ImGui::GetItemRectMax();
+    float row_y_min = row_min.y;
+    float row_y_max = row_max.y;
 
     // Other columns
     ImGui::TableNextColumn();
@@ -121,13 +123,13 @@ void App::render_process_tree_node(ProcessNode& node, int depth) {
     ImGui::TableNextColumn();
     ImGui::Text("%s", node.info.command_line.c_str());
 
-    // Handle row click - check if any column in this row was clicked
-    row_max.x = ImGui::GetWindowPos().x + ImGui::GetWindowWidth();
-    row_min.x = ImGui::GetWindowPos().x;
-    if (ImGui::IsMouseClicked(0) && !ImGui::IsItemClicked()) {
+    // Handle row click - only if click is within the table (not on toolbar buttons, etc.)
+    if (ImGui::IsMouseClicked(0) && !ImGui::IsItemClicked() && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows)) {
         ImVec2 mouse_pos = ImGui::GetMousePos();
-        if (mouse_pos.x >= row_min.x && mouse_pos.x <= row_max.x &&
-            mouse_pos.y >= row_min.y && mouse_pos.y <= row_max.y) {
+        float win_x = ImGui::GetWindowPos().x;
+        float win_w = ImGui::GetWindowWidth();
+        if (mouse_pos.x >= win_x && mouse_pos.x <= win_x + win_w &&
+            mouse_pos.y >= row_y_min && mouse_pos.y <= row_y_max) {
             selected_process_ = &node;
             selected_pid_ = node.info.pid;
             refresh_selected_details();
@@ -252,7 +254,7 @@ void App::render_process_list() {
             ImVec2 row_max = ImGui::GetItemRectMax();
             row_max.x = row_min.x + ImGui::GetWindowWidth();
 
-            if (ImGui::IsMouseClicked(0)) {
+            if (ImGui::IsMouseClicked(0) && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows)) {
                 ImVec2 mouse_pos = ImGui::GetMousePos();
                 if (mouse_pos.x >= row_min.x && mouse_pos.x <= row_max.x &&
                     mouse_pos.y >= row_min.y && mouse_pos.y <= row_max.y) {

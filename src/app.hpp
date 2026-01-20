@@ -63,6 +63,9 @@ private:
     static std::string format_bytes(int64_t bytes);
     static std::string format_time(std::chrono::system_clock::time_point tp);
 
+    static void collect_subtree_pids(const ProcessNode* node, std::vector<int>& pids);
+    static void kill_process_tree(const ProcessNode* node);
+
     ProcfsReader reader_;
     std::vector<std::unique_ptr<ProcessNode>> process_tree_;
     std::map<int, ProcessNode*> process_map_;
