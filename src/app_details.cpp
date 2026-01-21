@@ -84,7 +84,7 @@ void App::render_network_tab() const {
 
 void App::render_threads_tab() {
     // Split view: threads list on left, stack on right
-    float width = ImGui::GetContentRegionAvail().x;
+    const float width = ImGui::GetContentRegionAvail().x;
 
     ImGui::BeginChild("ThreadsList", ImVec2(width * 0.4f, 0), true);
     if (ImGui::BeginTable("Threads", 5,
@@ -105,7 +105,7 @@ void App::render_threads_tab() {
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
 
-            bool is_selected = (i == selected_thread_idx_);
+            const bool is_selected = (i == selected_thread_idx_);
             if (ImGui::Selectable("##row", is_selected,
                     ImGuiSelectableFlags_SpanAllColumns)) {
                 selected_thread_idx_ = i;

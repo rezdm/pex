@@ -116,14 +116,13 @@ SwapInfo SystemInfo::get_swap_info() {
 
 LoadAverage SystemInfo::get_load_average() {
     LoadAverage load;
-    std::ifstream loadavg("/proc/loadavg");
 
-    if (loadavg) {
+    if (std::ifstream loadavg("/proc/loadavg"); loadavg) {
         std::string running_total;
         loadavg >> load.one_min >> load.five_min >> load.fifteen_min >> running_total;
 
         // Parse "running/total" format
-        size_t slash = running_total.find('/');
+        const size_t slash = running_total.find('/');
         if (slash != std::string::npos) {
             load.running_tasks = std::stoi(running_total.substr(0, slash));
             load.total_tasks = std::stoi(running_total.substr(slash + 1));

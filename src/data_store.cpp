@@ -1,5 +1,6 @@
 #include "data_store.hpp"
 #include <algorithm>
+#include <ranges>
 #include <set>
 
 namespace pex {
@@ -51,7 +52,7 @@ void DataStore::stop() {
     }
 }
 
-void DataStore::set_refresh_interval(int ms) {
+void DataStore::set_refresh_interval(const int ms) {
     refresh_interval_ms_ = ms;
     cv_.notify_all(); // Wake up thread to adjust timing
 }
@@ -61,7 +62,7 @@ int DataStore::get_refresh_interval() const {
 }
 
 std::shared_ptr<DataSnapshot> DataStore::get_snapshot() const {
-    std::lock_guard<std::mutex> lock(data_mutex_);
+    std::lock_guard lock(data_mutex_);
     return current_snapshot_;
 }
 
@@ -70,7 +71,7 @@ void DataStore::refresh_now() {
 }
 
 void DataStore::set_on_data_updated(std::function<void()> callback) {
-    std::lock_guard<std::mutex> lock(data_mutex_);
+    std::lock_guard lock(data_mutex_);
     on_data_updated_ = std::move(callback);
 }
 
@@ -79,7 +80,7 @@ void DataStore::collection_thread_func() {
     collect_data();
 
     while (running_) {
-        std::unique_lock<std::mutex> lock(cv_mutex_);
+        std::unique_lock lock(cv_mutex_);
         cv_.wait_for(lock, std::chrono::milliseconds(refresh_interval_ms_), [this] {
             return !running_;
         });
@@ -104,8 +105,7 @@ void DataStore::collect_data() {
     // Calculate CPU percentages
     unsigned int proc_count = SystemInfo::instance().get_processor_count();
     for (auto& proc : processes) {
-        auto it = previous_cpu_times_.find(proc.pid);
-        if (it != previous_cpu_times_.end() && total_cpu_delta > 0) {
+        if (auto it = previous_cpu_times_.find(proc.pid); it != previous_cpu_times_.end() && total_cpu_delta > 0) {
             uint64_t user_delta = proc.user_time - it->second.first;
             uint64_t kernel_delta = proc.kernel_time - it->second.second;
             uint64_t process_delta = user_delta + kernel_delta;
@@ -127,8 +127,7 @@ void DataStore::collect_data() {
     // Find root nodes
     std::set<int> root_pids;
     for (auto& [pid, node] : nodes) {
-        int ppid = node->info.parent_pid;
-        if (ppid == pid || !nodes.contains(ppid)) {
+        if (int ppid = node->info.parent_pid; ppid == pid || !nodes.contains(ppid)) {
             root_pids.insert(pid);
         }
     }
@@ -136,8 +135,7 @@ void DataStore::collect_data() {
     // Build children map
     std::map<int, std::vector<int>> children_map;
     for (auto& [pid, node] : nodes) {
-        int ppid = node->info.parent_pid;
-        if (ppid != pid && nodes.contains(ppid)) {
+        if (int ppid = node->info.parent_pid; ppid != pid && nodes.contains(ppid)) {
             children_map[ppid].push_back(pid);
         }
     }
@@ -145,11 +143,9 @@ void DataStore::collect_data() {
     // Recursive function to attach children
     std::function<void(ProcessNode*, std::map<int, std::unique_ptr<ProcessNode>>&)> attach_children;
     attach_children = [&](ProcessNode* parent, std::map<int, std::unique_ptr<ProcessNode>>& all_nodes) {
-        auto it = children_map.find(parent->info.pid);
-        if (it != children_map.end()) {
+        if (const auto it = children_map.find(parent->info.pid); it != children_map.end()) {
             for (int child_pid : it->second) {
-                auto child_it = all_nodes.find(child_pid);
-                if (child_it != all_nodes.end()) {
+                if (auto child_it = all_nodes.find(child_pid); child_it != all_nodes.end()) {
                     auto child = std::move(child_it->second);
                     attach_children(child.get(), all_nodes);
                     parent->children.push_back(std::move(child));
@@ -160,8 +156,7 @@ void DataStore::collect_data() {
 
     // Build root nodes with their children
     for (int root_pid : root_pids) {
-        auto it = nodes.find(root_pid);
-        if (it != nodes.end()) {
+        if (auto it = nodes.find(root_pid); it != nodes.end()) {
             auto root = std::move(it->second);
             attach_children(root.get(), nodes);
             new_snapshot->process_tree.push_back(std::move(root));
@@ -169,8 +164,8 @@ void DataStore::collect_data() {
     }
 
     // Sort tree by PID
-    std::sort(new_snapshot->process_tree.begin(), new_snapshot->process_tree.end(),
-        [](const auto& a, const auto& b) { return a->info.pid < b->info.pid; });
+    std::ranges::sort(new_snapshot->process_tree,
+                      [](const auto& a, const auto& b) { return a->info.pid < b->info.pid; });
 
     // Build process map and calculate tree totals
     for (auto& root : new_snapshot->process_tree) {
@@ -181,7 +176,7 @@ void DataStore::collect_data() {
     // Count threads and running processes
     new_snapshot->thread_count = 0;
     new_snapshot->running_count = 0;
-    for (const auto& [pid, node] : new_snapshot->process_map) {
+    for (const auto &node: new_snapshot->process_map | std::views::values) {
         new_snapshot->thread_count += node->info.thread_count;
         if (node->info.state_char == 'R') {
             new_snapshot->running_count++;
@@ -204,8 +199,7 @@ void DataStore::collect_data() {
     if (current_per_cpu.size() == previous_per_cpu_times_.size()) {
         new_snapshot->per_cpu_usage.resize(current_per_cpu.size());
         for (size_t i = 0; i < current_per_cpu.size(); i++) {
-            uint64_t delta_total = current_per_cpu[i].total() - previous_per_cpu_times_[i].total();
-            if (delta_total > 0) {
+            if (uint64_t delta_total = current_per_cpu[i].total() - previous_per_cpu_times_[i].total(); delta_total > 0) {
                 uint64_t delta_active = current_per_cpu[i].active() - previous_per_cpu_times_[i].active();
                 new_snapshot->per_cpu_usage[i] = static_cast<double>(delta_active) / delta_total * 100.0;
             } else {
@@ -228,7 +222,7 @@ void DataStore::collect_data() {
     // Atomically swap the snapshot
     std::function<void()> callback;
     {
-        std::lock_guard<std::mutex> lock(data_mutex_);
+        std::lock_guard lock(data_mutex_);
         current_snapshot_ = new_snapshot;
         callback = on_data_updated_;
     }

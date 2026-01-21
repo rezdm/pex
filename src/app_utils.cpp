@@ -18,7 +18,7 @@ std::string App::format_bytes(int64_t bytes) {
     return std::format("{:.2f} GB", bytes / (1024.0 * 1024 * 1024));
 }
 
-std::string App::format_time(std::chrono::system_clock::time_point tp) {
+std::string App::format_time(const std::chrono::system_clock::time_point tp) {
     const auto time_t_val = std::chrono::system_clock::to_time_t(tp);
     std::tm tm_val;
     localtime_r(&time_t_val, &tm_val);
@@ -48,7 +48,7 @@ static int get_ppid(int pid) {
 }
 
 // Build current process tree from /proc and collect all descendants
-static void collect_descendants_from_proc(int root_pid, std::vector<int>& result) {
+static void collect_descendants_from_proc(const int root_pid, std::vector<int>& result) {
     // Build parent -> children map by scanning /proc
     std::map<int, std::vector<int>> children_map;
     std::set<int> all_pids;
@@ -91,13 +91,13 @@ static void collect_descendants_from_proc(int root_pid, std::vector<int>& result
 }
 
 // Post-order traversal to get kill order (children before parents)
-static void postorder_kill_order(int pid, const std::map<int, std::vector<int>>& children_map,
+static void postorder_kill_order(const int pid, const std::map<int, std::vector<int>>& children_map,
                                   std::set<int>& visited, std::vector<int>& order) {
-    if (visited.count(pid)) return;
+    if (visited.contains(pid)) return;
     visited.insert(pid);
 
-    if (auto it = children_map.find(pid); it != children_map.end()) {
-        for (int child : it->second) {
+    if (const auto it = children_map.find(pid); it != children_map.end()) {
+        for (const int child : it->second) {
             postorder_kill_order(child, children_map, visited, order);
         }
     }
@@ -107,7 +107,7 @@ static void postorder_kill_order(int pid, const std::map<int, std::vector<int>>&
 void App::kill_process_tree(const ProcessNode* node) {
     if (!node) return;
 
-    int root_pid = node->info.pid;
+    const int root_pid = node->info.pid;
 
     // Build fresh parent -> children map from /proc
     std::map<int, std::vector<int>> children_map;
@@ -123,8 +123,7 @@ void App::kill_process_tree(const ProcessNode* node) {
 
     // Second pass: build children map only for descendants
     for (int pid : descendants) {
-        int ppid = get_ppid(pid);
-        if (ppid > 0 && descendant_set.count(ppid)) {
+        if (int ppid = get_ppid(pid); ppid > 0 && descendant_set.contains(ppid)) {
             children_map[ppid].push_back(pid);
         }
     }
@@ -135,7 +134,7 @@ void App::kill_process_tree(const ProcessNode* node) {
     postorder_kill_order(root_pid, children_map, visited, kill_order);
 
     // Kill in post-order (leaves first, root last)
-    for (int pid : kill_order) {
+    for (const int pid : kill_order) {
         kill(pid, SIGKILL);
     }
 }

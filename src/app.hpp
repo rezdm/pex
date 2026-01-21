@@ -3,7 +3,6 @@
 #include "data_store.hpp"
 #include "procfs_reader.hpp"
 #include <vector>
-#include <map>
 #include <set>
 #include <string>
 #include <memory>
@@ -36,19 +35,21 @@ private:
     void render_environment_tab() const;
     void refresh_selected_details();
 
-    void handle_search_input();
     void handle_keyboard_navigation();
     [[nodiscard]] std::vector<ProcessNode*> get_visible_items() const;
 
     static void collect_visible_items(ProcessNode* node, std::vector<ProcessNode*>& items);
-    ProcessNode* find_matching_process(const std::string& search, ProcessNode* start_node);
 
-    static ProcessNode* search_subtree(std::vector<std::unique_ptr<ProcessNode>>& nodes, const std::string& search);
+    void search_select_first();
+    void search_next();
+    void search_previous();
+    [[nodiscard]] bool current_selection_matches() const;
+    [[nodiscard]] std::vector<ProcessNode*> find_matching_processes() const;
 
     static std::string format_bytes(int64_t bytes);
     static std::string format_time(std::chrono::system_clock::time_point tp);
 
-    void kill_process_tree(const ProcessNode* node);
+    static void kill_process_tree(const ProcessNode* node);
 
     // Data store (runs in background thread)
     DataStore data_store_;
@@ -71,8 +72,8 @@ private:
     int details_pid_ = -1;  // PID for which details were fetched
 
     // Search
-    std::string search_text_;
-    std::chrono::steady_clock::time_point last_key_time_;
+    char search_buffer_[256] = {};
+    bool scroll_to_selected_ = false;
 
     // System panel
     bool show_system_panel_ = true;

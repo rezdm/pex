@@ -5,91 +5,6 @@
 
 namespace pex {
 
-void App::handle_search_input() {
-    if (!current_data_) return;
-
-    ImGuiIO& io = ImGui::GetIO();
-
-    // Only handle when this window is focused
-    if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) return;
-
-    for (int i = 0; i < io.InputQueueCharacters.Size; i++) {
-        ImWchar c = io.InputQueueCharacters[i];
-        if (c >= 'a' && c <= 'z') {
-            search_text_ += static_cast<char>(c);
-            last_key_time_ = std::chrono::steady_clock::now();
-        } else if (c >= 'A' && c <= 'Z') {
-            search_text_ += static_cast<char>(c - 'A' + 'a');
-            last_key_time_ = std::chrono::steady_clock::now();
-        } else if (c >= '0' && c <= '9') {
-            search_text_ += static_cast<char>(c);
-            last_key_time_ = std::chrono::steady_clock::now();
-        } else if (c == '-' || c == '_' || c == '.') {
-            search_text_ += static_cast<char>(c);
-            last_key_time_ = std::chrono::steady_clock::now();
-        }
-    }
-
-    // If we have search text, and it changed, find match
-    if (!search_text_.empty()) {
-        // Check if current selection still matches
-        ProcessNode* selected = nullptr;
-        if (selected_pid_ > 0) {
-            if (auto it = current_data_->process_map.find(selected_pid_); it != current_data_->process_map.end()) {
-                selected = it->second;
-            }
-        }
-
-        if (selected) {
-            std::string name_lower = selected->info.name;
-            std::ranges::transform(name_lower, name_lower.begin(), ::tolower);
-            if (name_lower.starts_with(search_text_)) {
-                return; // Current selection still matches
-            }
-        }
-
-        // Search for match
-        ProcessNode* match = nullptr;
-        if (is_tree_view_) {
-            match = find_matching_process(search_text_, selected);
-        } else {
-            match = search_subtree(current_data_->process_tree, search_text_);
-        }
-
-        if (match) {
-            selected_pid_ = match->info.pid;
-            refresh_selected_details();
-        }
-    }
-}
-
-ProcessNode* App::find_matching_process(const std::string& search, ProcessNode* start_node) {
-    if (!current_data_) return nullptr;
-
-    // First search in current selection's children
-    if (start_node) {
-        auto match = search_subtree(start_node->children, search);
-        if (match) return match;
-    }
-
-    // Then search from top
-    return search_subtree(current_data_->process_tree, search);
-}
-
-ProcessNode* App::search_subtree(std::vector<std::unique_ptr<ProcessNode>>& nodes, const std::string& search) {
-    for (auto& node : nodes) {
-        std::string name_lower = node->info.name;
-        std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
-        if (name_lower.starts_with(search)) {
-            return node.get();
-        }
-
-        auto match = search_subtree(node->children, search);
-        if (match) return match;
-    }
-    return nullptr;
-}
-
 void App::collect_visible_items(ProcessNode* node, std::vector<ProcessNode*>& items) {
     items.push_back(node);
     if (node->is_expanded) {
@@ -131,9 +46,19 @@ void App::handle_keyboard_navigation() {
         return;
     }
 
+    // F3 / Shift+F3 for search next/previous
+    if (ImGui::IsKeyPressed(ImGuiKey_F3)) {
+        if (ImGui::GetIO().KeyShift) {
+            search_previous();
+        } else {
+            search_next();
+        }
+        return;
+    }
+
     if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) return;
 
-    auto visible_items = get_visible_items();
+    const auto visible_items = get_visible_items();
     if (visible_items.empty()) return;
 
     // Find current selection index by PID
@@ -146,7 +71,7 @@ void App::handle_keyboard_navigation() {
     }
 
     int new_idx = current_idx;
-    int page_size = 20; // Items per page for PageUp/PageDown
+    constexpr int page_size = 20; // Items per page for PageUp/PageDown
 
     if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
         new_idx = (current_idx < 0) ? 0 : std::min(current_idx + 1, static_cast<int>(visible_items.size()) - 1);
@@ -166,6 +91,97 @@ void App::handle_keyboard_navigation() {
         selected_pid_ = visible_items[new_idx]->info.pid;
         refresh_selected_details();
     }
+}
+
+std::vector<ProcessNode*> App::find_matching_processes() const {
+    std::vector<ProcessNode*> matches;
+    if (!current_data_ || search_buffer_[0] == '\0') return matches;
+
+    std::string search_lower = search_buffer_;
+    std::transform(search_lower.begin(), search_lower.end(), search_lower.begin(), ::tolower);
+
+    const auto visible = get_visible_items();
+    for (auto* node : visible) {
+        std::string name_lower = node->info.name;
+        std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
+        if (name_lower.find(search_lower) != std::string::npos) {
+            matches.push_back(node);
+        }
+    }
+    return matches;
+}
+
+bool App::current_selection_matches() const {
+    if (!current_data_ || search_buffer_[0] == '\0' || selected_pid_ <= 0) return false;
+
+    const auto it = current_data_->process_map.find(selected_pid_);
+    if (it == current_data_->process_map.end()) return false;
+
+    std::string search_lower = search_buffer_;
+    std::transform(search_lower.begin(), search_lower.end(), search_lower.begin(), ::tolower);
+
+    std::string name_lower = it->second->info.name;
+    std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
+
+    return name_lower.find(search_lower) != std::string::npos;
+}
+
+void App::search_select_first() {
+    // If current selection already matches, don't change it
+    if (current_selection_matches()) return;
+
+    const auto matches = find_matching_processes();
+    if (matches.empty()) return;
+
+    // Select first match
+    selected_pid_ = matches[0]->info.pid;
+    scroll_to_selected_ = true;
+    refresh_selected_details();
+}
+
+void App::search_next() {
+    const auto matches = find_matching_processes();
+    if (matches.empty()) return;
+
+    // Find current selection in matches
+    int current_match_idx = -1;
+    for (int i = 0; i < static_cast<int>(matches.size()); i++) {
+        if (matches[i]->info.pid == selected_pid_) {
+            current_match_idx = i;
+            break;
+        }
+    }
+
+    // Select next match (or first if none selected)
+    const int next_idx = (current_match_idx + 1) % static_cast<int>(matches.size());
+    selected_pid_ = matches[next_idx]->info.pid;
+    scroll_to_selected_ = true;
+    refresh_selected_details();
+}
+
+void App::search_previous() {
+    const auto matches = find_matching_processes();
+    if (matches.empty()) return;
+
+    // Find current selection in matches
+    int current_match_idx = -1;
+    for (int i = 0; i < static_cast<int>(matches.size()); i++) {
+        if (matches[i]->info.pid == selected_pid_) {
+            current_match_idx = i;
+            break;
+        }
+    }
+
+    // Select previous match (or last if none selected)
+    int prev_idx;
+    if (current_match_idx <= 0) {
+        prev_idx = static_cast<int>(matches.size()) - 1;
+    } else {
+        prev_idx = current_match_idx - 1;
+    }
+    selected_pid_ = matches[prev_idx]->info.pid;
+    scroll_to_selected_ = true;
+    refresh_selected_details();
 }
 
 } // namespace pex

@@ -12,8 +12,6 @@
 namespace pex {
 
 App::App() {
-    last_key_time_ = std::chrono::steady_clock::now();
-
     // Set up callback to wake up UI when new data is available
     data_store_.set_on_data_updated([this]() {
         if (window_) {
@@ -50,7 +48,7 @@ void App::run() {
     {
         int width, height, channels;
         unsigned char* pixels = stbi_load_from_memory(
-            pex_icon_data, static_cast<int>(pex_icon_size),
+            pex_icon_data, pex_icon_size,
             &width, &height, &channels, 4);
         if (pixels) {
             GLFWimage icon;
@@ -99,8 +97,8 @@ void App::run() {
         }
 
         // Get latest data snapshot (lock-free read of shared_ptr)
-        auto new_data = data_store_.get_snapshot();
-        bool data_changed = !current_data_ ||
+        const auto new_data = data_store_.get_snapshot();
+        const bool data_changed = !current_data_ ||
             (new_data && new_data->timestamp != current_data_->timestamp);
         current_data_ = new_data;
 
@@ -114,16 +112,6 @@ void App::run() {
         // Refresh details when data updates
         if (data_changed) {
             refresh_selected_details();
-        }
-
-        auto now = std::chrono::steady_clock::now();
-
-        // Reset search after 1 second of no typing
-        if (!search_text_.empty()) {
-            auto since_key = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_key_time_).count();
-            if (since_key > 1000) {
-                search_text_.clear();
-            }
         }
 
         // Start the Dear ImGui frame
@@ -166,13 +154,13 @@ void App::render() {
     if (!current_data_) return;
 
     // Create main window that fills the viewport
-    ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->Pos);
     ImGui::SetNextWindowSize(viewport->Size);
 
-    ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
-                                    ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-                                    ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_MenuBar;
+    constexpr ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
+                                              ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                                              ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_MenuBar;
 
     ImGui::Begin("PEX", nullptr, window_flags);
 
@@ -181,13 +169,12 @@ void App::render() {
     render_system_panel();
 
     // Main content area with splitter
-    float available_height = ImGui::GetContentRegionAvail().y - 25; // Reserve space for status bar
-    float upper_height = available_height * 0.6f;
-    float lower_height = available_height * 0.4f;
+    const float available_height = ImGui::GetContentRegionAvail().y - 25; // Reserve space for status bar
+    const float upper_height = available_height * 0.6f;
+    const float lower_height = available_height * 0.4f;
 
     // Upper pane - Process list/tree
     ImGui::BeginChild("ProcessPane", ImVec2(0, upper_height), true);
-    handle_search_input();
     handle_keyboard_navigation();
     if (is_tree_view_) {
         render_process_tree();
@@ -206,11 +193,6 @@ void App::render() {
                 current_data_->process_count, current_data_->cpu_usage,
                 format_bytes(current_data_->memory_used).c_str(),
                 format_bytes(current_data_->memory_total).c_str());
-
-    if (!search_text_.empty()) {
-        ImGui::SameLine();
-        ImGui::Text("| Search: %s", search_text_.c_str());
-    }
 
     ImGui::End();
 }
@@ -236,9 +218,9 @@ void App::render_menu_bar() {
         }
 
         if (ImGui::BeginMenu("Process")) {
-            ProcessNode* selected = nullptr;
+            const ProcessNode* selected = nullptr;
             if (current_data_ && selected_pid_ > 0) {
-                if (auto it = current_data_->process_map.find(selected_pid_); it != current_data_->process_map.end()) {
+                if (const auto it = current_data_->process_map.find(selected_pid_); it != current_data_->process_map.end()) {
                     selected = it->second;
                 }
             }
@@ -259,6 +241,39 @@ void App::render_menu_bar() {
 }
 
 void App::render_toolbar() {
+    // Search box
+    ImGui::Text("Search:");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(150);
+    if (ImGui::InputText("##search", search_buffer_, sizeof(search_buffer_),
+            ImGuiInputTextFlags_EnterReturnsTrue)) {
+        search_next();
+    }
+    // Also search on text change - but stay on current if it still matches
+    if (ImGui::IsItemEdited() && search_buffer_[0] != '\0') {
+        search_select_first();
+    }
+    ImGui::SameLine();
+
+    if (ImGui::Button("^")) {
+        search_previous();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Find previous (Shift+F3)");
+    }
+    ImGui::SameLine();
+
+    if (ImGui::Button("v")) {
+        search_next();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Find next (F3)");
+    }
+    ImGui::SameLine();
+
+    ImGui::Spacing();
+    ImGui::SameLine();
+
     if (ImGui::Button("Refresh")) {
         data_store_.refresh_now();
     }
@@ -269,9 +284,9 @@ void App::render_toolbar() {
     }
     ImGui::SameLine();
 
-    ProcessNode* selected = nullptr;
+    const ProcessNode* selected = nullptr;
     if (current_data_ && selected_pid_ > 0) {
-        if (auto it = current_data_->process_map.find(selected_pid_); it != current_data_->process_map.end()) {
+        if (const auto it = current_data_->process_map.find(selected_pid_); it != current_data_->process_map.end()) {
             selected = it->second;
         }
     }
@@ -291,14 +306,13 @@ void App::render_toolbar() {
     ImGui::SetNextItemWidth(100);
     const char* intervals[] = {"500ms", "1s", "2s", "5s"};
     int current_interval = 1;
-    int refresh_ms = data_store_.get_refresh_interval();
-    if (refresh_ms <= 500) current_interval = 0;
+    if (const int refresh_ms = data_store_.get_refresh_interval(); refresh_ms <= 500) current_interval = 0;
     else if (refresh_ms <= 1000) current_interval = 1;
     else if (refresh_ms <= 2000) current_interval = 2;
     else current_interval = 3;
 
     if (ImGui::Combo("##interval", &current_interval, intervals, IM_ARRAYSIZE(intervals))) {
-        const int values[] = {500, 1000, 2000, 5000};
+        constexpr int values[] = {500, 1000, 2000, 5000};
         data_store_.set_refresh_interval(values[current_interval]);
     }
 }
@@ -329,13 +343,13 @@ void App::render_system_panel() {
     const auto& mem_info_total = current_data_->memory_total;
     const auto& swap_info = current_data_->swap_info;
     const auto& load = current_data_->load_average;
-    const auto& uptime = current_data_->uptime_info;
+    const auto&[uptime_seconds, idle_seconds] = current_data_->uptime_info;
     const auto& per_cpu_usage = current_data_->per_cpu_usage;
 
-    int cpu_count = static_cast<int>(per_cpu_usage.size());
+    const int cpu_count = static_cast<int>(per_cpu_usage.size());
 
     // Two-column layout: CPUs on left, stats on right
-    float available_width = ImGui::GetContentRegionAvail().x;
+    const float available_width = ImGui::GetContentRegionAvail().x;
     float stats_width = 350.0f;
     float cpu_width = available_width - stats_width - 10.0f;
 
@@ -344,12 +358,10 @@ void App::render_system_panel() {
         stats_width = available_width;
     }
 
-    float cpu_item_width = 120.0f;
-    int cpu_cols = std::max(1, static_cast<int>(cpu_width / cpu_item_width));
+    constexpr float cpu_item_width = 120.0f;
+    const int cpu_cols = std::max(1, static_cast<int>(cpu_width / cpu_item_width));
 
-    bool side_by_side = (available_width - stats_width - 10.0f) >= 200.0f;
-
-    if (side_by_side) {
+    if ((available_width - stats_width - 10.0f) >= 200.0f) {
         if (ImGui::BeginTable("SystemPanelLayout", 2, ImGuiTableFlags_None)) {
             ImGui::TableSetupColumn("CPUs", ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableSetupColumn("Stats", ImGuiTableColumnFlags_WidthFixed, stats_width);
@@ -363,7 +375,7 @@ void App::render_system_panel() {
                     if (i % cpu_cols == 0) ImGui::TableNextRow();
                     ImGui::TableNextColumn();
 
-                    double usage = per_cpu_usage[i];
+                    const double usage = per_cpu_usage[i];
                     ImVec4 bar_color;
                     if (usage < 25.0) bar_color = ImVec4(0.0f, 0.8f, 0.0f, 1.0f);
                     else if (usage < 50.0) bar_color = ImVec4(0.5f, 0.8f, 0.0f, 1.0f);
@@ -385,7 +397,7 @@ void App::render_system_panel() {
             ImGui::TableNextColumn();
 
             // Memory
-            float mem_ratio = mem_info_total > 0 ? static_cast<float>(mem_info_used) / static_cast<float>(mem_info_total) : 0.0f;
+            const float mem_ratio = mem_info_total > 0 ? static_cast<float>(mem_info_used) / static_cast<float>(mem_info_total) : 0.0f;
             ImGui::Text("Mem[");
             ImGui::SameLine(0, 0);
             ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.0f, 0.6f, 0.0f, 1.0f));
@@ -395,7 +407,7 @@ void App::render_system_panel() {
             ImGui::Text("] %s/%s", format_compact(mem_info_used).c_str(), format_compact(mem_info_total).c_str());
 
             // Swap
-            float swap_ratio = swap_info.total > 0 ? static_cast<float>(swap_info.used) / static_cast<float>(swap_info.total) : 0.0f;
+            const float swap_ratio = swap_info.total > 0 ? static_cast<float>(swap_info.used) / static_cast<float>(swap_info.total) : 0.0f;
             ImGui::Text("Swp[");
             ImGui::SameLine(0, 0);
             ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.6f, 0.0f, 0.0f, 1.0f));
@@ -412,12 +424,12 @@ void App::render_system_panel() {
             ImGui::Text("Load average: %.2f %.2f %.2f", load.one_min, load.five_min, load.fifteen_min);
 
             // Uptime
-            uint64_t secs = uptime.uptime_seconds;
-            uint64_t days = secs / 86400;
+            uint64_t secs = uptime_seconds;
+            const uint64_t days = secs / 86400;
             secs %= 86400;
-            uint64_t hours = secs / 3600;
+            const uint64_t hours = secs / 3600;
             secs %= 3600;
-            uint64_t mins = secs / 60;
+            const uint64_t mins = secs / 60;
             secs %= 60;
             if (days > 0) {
                 ImGui::Text("Uptime: %lu day%s, %02lu:%02lu:%02lu", days, days > 1 ? "s" : "", hours, mins, secs);
@@ -429,7 +441,7 @@ void App::render_system_panel() {
         }
     } else {
         // Narrow window - stack vertically
-        float mem_ratio = mem_info_total > 0 ? static_cast<float>(mem_info_used) / static_cast<float>(mem_info_total) : 0.0f;
+        const float mem_ratio = mem_info_total > 0 ? static_cast<float>(mem_info_used) / static_cast<float>(mem_info_total) : 0.0f;
         ImGui::Text("Mem[");
         ImGui::SameLine(0, 0);
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.0f, 0.6f, 0.0f, 1.0f));
@@ -446,7 +458,7 @@ void App::render_system_panel() {
                 if (i % cpu_cols == 0) ImGui::TableNextRow();
                 ImGui::TableNextColumn();
 
-                double usage = per_cpu_usage[i];
+                const double usage = per_cpu_usage[i];
                 ImVec4 bar_color;
                 if (usage < 25.0) bar_color = ImVec4(0.0f, 0.8f, 0.0f, 1.0f);
                 else if (usage < 50.0) bar_color = ImVec4(0.5f, 0.8f, 0.0f, 1.0f);

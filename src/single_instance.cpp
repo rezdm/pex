@@ -41,7 +41,7 @@ bool SingleInstance::try_become_primary() {
     socket_path_ = get_socket_path();
 
     // Try to connect to existing instance
-    int client_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    const int client_fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (client_fd < 0) {
         return true; // Can't create socket, assume we're primary
     }
@@ -53,7 +53,7 @@ bool SingleInstance::try_become_primary() {
     if (connect(client_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
         // Connected to existing instance - send raise command
         const char* cmd = "RAISE\n";
-        ssize_t written = write(client_fd, cmd, strlen(cmd));
+        const ssize_t written = write(client_fd, cmd, strlen(cmd));
         (void)written; // Ignore result
         close(client_fd);
         return false; // Another instance is running
@@ -95,7 +95,7 @@ void SingleInstance::set_raise_callback(std::function<void()> callback) {
 
 void SingleInstance::listen_thread() const {
     while (running_) {
-        int client_fd = accept(server_fd_, nullptr, nullptr);
+        const int client_fd = accept(server_fd_, nullptr, nullptr);
         if (client_fd < 0) {
             if (!running_) {
                 break; // Server was shut down
@@ -105,7 +105,7 @@ void SingleInstance::listen_thread() const {
 
         // Read command
         char buffer[64];
-        ssize_t n = read(client_fd, buffer, sizeof(buffer) - 1);
+        const ssize_t n = read(client_fd, buffer, sizeof(buffer) - 1);
         close(client_fd);
 
         if (n > 0) {

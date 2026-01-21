@@ -40,11 +40,11 @@ void App::render_process_tree() {
     }
 }
 
-void App::render_process_tree_node(ProcessNode& node, int depth) {
+void App::render_process_tree_node(ProcessNode& node, const int depth) {
     ImGui::PushID(node.info.pid);
     ImGui::TableNextRow();
 
-    bool is_selected = (node.info.pid == selected_pid_);
+    const bool is_selected = (node.info.pid == selected_pid_);
 
     // Set row background for selected item
     if (is_selected) {
@@ -52,6 +52,11 @@ void App::render_process_tree_node(ProcessNode& node, int depth) {
             ImGui::GetColorU32(ImVec4(0.3f, 0.5f, 0.8f, 0.5f)));
         ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1,
             ImGui::GetColorU32(ImVec4(0.3f, 0.5f, 0.8f, 0.5f)));
+        // Scroll to selected item if requested
+        if (scroll_to_selected_) {
+            ImGui::SetScrollHereY(0.5f);
+            scroll_to_selected_ = false;
+        }
     }
 
     ImGui::TableNextColumn();
@@ -66,8 +71,8 @@ void App::render_process_tree_node(ProcessNode& node, int depth) {
     }
 
     // Use PID as unique ID to avoid collisions with same-named processes
-    std::string label = std::format("{}##{}", node.info.name, node.info.pid);
-    bool is_open = ImGui::TreeNodeEx(label.c_str(), flags);
+    const std::string label = std::format("{}##{}", node.info.name, node.info.pid);
+    const bool is_open = ImGui::TreeNodeEx(label.c_str(), flags);
 
     // Handle click on tree node
     if (ImGui::IsItemClicked()) {
@@ -76,10 +81,10 @@ void App::render_process_tree_node(ProcessNode& node, int depth) {
     }
 
     // Store row bounds for click detection on other columns
-    ImVec2 row_min = ImGui::GetItemRectMin();
-    ImVec2 row_max = ImGui::GetItemRectMax();
-    float row_y_min = row_min.y;
-    float row_y_max = row_max.y;
+    const ImVec2 row_min = ImGui::GetItemRectMin();
+    const ImVec2 row_max = ImGui::GetItemRectMax();
+    const float row_y_min = row_min.y;
+    const float row_y_max = row_max.y;
 
     // Other columns
     ImGui::TableNextColumn();
@@ -126,11 +131,10 @@ void App::render_process_tree_node(ProcessNode& node, int depth) {
 
     // Handle row click - only if click is within the table (not on toolbar buttons, etc.)
     if (ImGui::IsMouseClicked(0) && !ImGui::IsItemClicked() && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows)) {
-        ImVec2 mouse_pos = ImGui::GetMousePos();
-        float win_x = ImGui::GetWindowPos().x;
-        float win_w = ImGui::GetWindowWidth();
-        if (mouse_pos.x >= win_x && mouse_pos.x <= win_x + win_w &&
-            mouse_pos.y >= row_y_min && mouse_pos.y <= row_y_max) {
+        const ImVec2 mouse_pos = ImGui::GetMousePos();
+        const float win_x = ImGui::GetWindowPos().x;
+        if (const float win_w = ImGui::GetWindowWidth(); mouse_pos.x >= win_x && mouse_pos.x <= win_x + win_w &&
+                                                         mouse_pos.y >= row_y_min && mouse_pos.y <= row_y_max) {
             selected_pid_ = node.info.pid;
             refresh_selected_details();
         }
@@ -192,11 +196,11 @@ void App::render_process_list() {
             flatten(root.get());
         }
 
-        for (auto* node : flat_list) {
+        for (const auto* node : flat_list) {
             ImGui::PushID(node->info.pid);
             ImGui::TableNextRow();
 
-            bool is_selected = (node->info.pid == selected_pid_);
+            const bool is_selected = (node->info.pid == selected_pid_);
 
             // Set row background for selected item
             if (is_selected) {
@@ -204,6 +208,11 @@ void App::render_process_list() {
                     ImGui::GetColorU32(ImVec4(0.3f, 0.5f, 0.8f, 0.5f)));
                 ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1,
                     ImGui::GetColorU32(ImVec4(0.3f, 0.5f, 0.8f, 0.5f)));
+                // Scroll to selected item if requested
+                if (scroll_to_selected_) {
+                    ImGui::SetScrollHereY(0.5f);
+                    scroll_to_selected_ = false;
+                }
             }
 
             ImGui::TableNextColumn();
@@ -259,7 +268,7 @@ void App::render_process_list() {
             row_max.x = row_min.x + ImGui::GetWindowWidth();
 
             if (ImGui::IsMouseClicked(0) && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows)) {
-                ImVec2 mouse_pos = ImGui::GetMousePos();
+                const ImVec2 mouse_pos = ImGui::GetMousePos();
                 if (mouse_pos.x >= row_min.x && mouse_pos.x <= row_max.x &&
                     mouse_pos.y >= row_min.y && mouse_pos.y <= row_max.y) {
                     selected_pid_ = node->info.pid;
