@@ -79,6 +79,18 @@ void App::render_process_tree_node(ProcessNode& node, const int depth) {
         selected_pid_ = node.info.pid;
         refresh_selected_details();
     }
+    // Handle double-click to open popup
+    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
+        popup_pid_ = node.info.pid;
+        show_process_popup_ = true;
+        popup_cpu_user_history_.clear();
+        popup_cpu_kernel_history_.clear();
+        popup_memory_history_.clear();
+        popup_per_cpu_user_history_.clear();
+        popup_per_cpu_kernel_history_.clear();
+        popup_prev_utime_ = 0;
+        popup_prev_stime_ = 0;
+    }
 
     // Store row bounds for click detection on other columns
     const ImVec2 row_min = ImGui::GetItemRectMin();
@@ -200,10 +212,8 @@ void App::render_process_list() {
             ImGui::PushID(node->info.pid);
             ImGui::TableNextRow();
 
-            const bool is_selected = (node->info.pid == selected_pid_);
-
             // Set row background for selected item
-            if (is_selected) {
+            if ((node->info.pid == selected_pid_)) {
                 ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
                     ImGui::GetColorU32(ImVec4(0.3f, 0.5f, 0.8f, 0.5f)));
                 ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1,
@@ -267,12 +277,26 @@ void App::render_process_list() {
             ImVec2 row_max = ImGui::GetItemRectMax();
             row_max.x = row_min.x + ImGui::GetWindowWidth();
 
-            if (ImGui::IsMouseClicked(0) && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows)) {
+            if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows)) {
                 const ImVec2 mouse_pos = ImGui::GetMousePos();
                 if (mouse_pos.x >= row_min.x && mouse_pos.x <= row_max.x &&
                     mouse_pos.y >= row_min.y && mouse_pos.y <= row_max.y) {
-                    selected_pid_ = node->info.pid;
-                    refresh_selected_details();
+                    if (ImGui::IsMouseClicked(0)) {
+                        selected_pid_ = node->info.pid;
+                        refresh_selected_details();
+                    }
+                    // Handle double-click to open popup
+                    if (ImGui::IsMouseDoubleClicked(0)) {
+                        popup_pid_ = node->info.pid;
+                        show_process_popup_ = true;
+                        popup_cpu_user_history_.clear();
+                        popup_cpu_kernel_history_.clear();
+                        popup_memory_history_.clear();
+                        popup_per_cpu_user_history_.clear();
+                        popup_per_cpu_kernel_history_.clear();
+                        popup_prev_utime_ = 0;
+                        popup_prev_stime_ = 0;
+                    }
                 }
             }
 

@@ -3,7 +3,6 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include <GLFW/glfw3.h>
-#include <thread>
 #include <csignal>
 #include <format>
 #include "stb_image.h"
@@ -195,6 +194,9 @@ void App::render() {
                 format_bytes(current_data_->memory_total).c_str());
 
     ImGui::End();
+
+    // Process popup (shown when double-clicking a process)
+    render_process_popup();
 }
 
 void App::render_menu_bar() {
@@ -324,7 +326,7 @@ void App::render_toolbar() {
     }
 }
 
-void App::render_system_panel() {
+void App::render_system_panel() const {
     if (!current_data_) return;
 
     if (!show_system_panel_) {

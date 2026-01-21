@@ -23,7 +23,7 @@ private:
     void render();
     void render_menu_bar();
     void render_toolbar();
-    void render_system_panel();
+    void render_system_panel() const;
     void render_process_tree();
     void render_process_tree_node(ProcessNode& node, int depth);
     void render_process_list();
@@ -33,7 +33,9 @@ private:
     void render_threads_tab();
     void render_memory_tab() const;
     void render_environment_tab() const;
+    void render_process_popup();
     void refresh_selected_details();
+    void update_popup_history();
 
     void handle_keyboard_navigation();
     [[nodiscard]] std::vector<ProcessNode*> get_visible_items() const;
@@ -74,6 +76,21 @@ private:
     // Search
     char search_buffer_[256] = {};
     bool scroll_to_selected_ = false;
+
+    // Process popup (double-click)
+    bool show_process_popup_ = false;
+    int popup_pid_ = -1;
+    bool popup_show_tree_ = false;  // Toggle: false = process only, true = process + descendants
+    static constexpr size_t kHistorySize = 60;  // 60 data points
+    std::vector<float> popup_cpu_user_history_;
+    std::vector<float> popup_cpu_kernel_history_;
+    std::vector<float> popup_memory_history_;
+    std::vector<std::vector<float>> popup_per_cpu_user_history_;
+    std::vector<std::vector<float>> popup_per_cpu_kernel_history_;
+    uint64_t popup_prev_utime_ = 0;
+    uint64_t popup_prev_stime_ = 0;
+    std::chrono::steady_clock::time_point popup_last_update_;
+    static void collect_tree_pids(const ProcessNode* node, std::vector<int>& pids);
 
     // System panel
     bool show_system_panel_ = true;
