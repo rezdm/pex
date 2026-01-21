@@ -385,14 +385,12 @@ void App::render_system_panel() const {
                     else if (usage < 75.0) bar_color = ImVec4(0.8f, 0.8f, 0.0f, 1.0f);
                     else bar_color = ImVec4(0.8f, 0.2f, 0.0f, 1.0f);
 
-                    ImGui::AlignTextToFramePadding();
                     ImGui::Text("%2d[", i);
                     ImGui::SameLine(0, 0);
                     ImGui::PushStyleColor(ImGuiCol_PlotHistogram, bar_color);
                     ImGui::ProgressBar(static_cast<float>(usage / 100.0), ImVec2(40, 12), "");
                     ImGui::PopStyleColor();
                     ImGui::SameLine(0, 0);
-                    ImGui::AlignTextToFramePadding();
                     ImGui::Text("]%5.1f%%", usage);
                 }
                 ImGui::EndTable();
@@ -403,26 +401,22 @@ void App::render_system_panel() const {
 
             // Memory
             const float mem_ratio = mem_info_total > 0 ? static_cast<float>(mem_info_used) / static_cast<float>(mem_info_total) : 0.0f;
-            ImGui::AlignTextToFramePadding();
             ImGui::Text("Mem[");
             ImGui::SameLine(0, 0);
             ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.0f, 0.6f, 0.0f, 1.0f));
             ImGui::ProgressBar(mem_ratio, ImVec2(120, 12), "");
             ImGui::PopStyleColor();
             ImGui::SameLine(0, 0);
-            ImGui::AlignTextToFramePadding();
             ImGui::Text("] %s/%s", format_compact(mem_info_used).c_str(), format_compact(mem_info_total).c_str());
 
             // Swap
             const float swap_ratio = swap_info.total > 0 ? static_cast<float>(swap_info.used) / static_cast<float>(swap_info.total) : 0.0f;
-            ImGui::AlignTextToFramePadding();
             ImGui::Text("Swp[");
             ImGui::SameLine(0, 0);
             ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.6f, 0.0f, 0.0f, 1.0f));
             ImGui::ProgressBar(swap_ratio, ImVec2(120, 12), "");
             ImGui::PopStyleColor();
             ImGui::SameLine(0, 0);
-            ImGui::AlignTextToFramePadding();
             ImGui::Text("] %s/%s", format_compact(swap_info.used).c_str(), format_compact(swap_info.total).c_str());
 
             // Tasks
@@ -451,14 +445,12 @@ void App::render_system_panel() const {
     } else {
         // Narrow window - stack vertically
         const float mem_ratio = mem_info_total > 0 ? static_cast<float>(mem_info_used) / static_cast<float>(mem_info_total) : 0.0f;
-        ImGui::AlignTextToFramePadding();
         ImGui::Text("Mem[");
         ImGui::SameLine(0, 0);
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.0f, 0.6f, 0.0f, 1.0f));
         ImGui::ProgressBar(mem_ratio, ImVec2(80, 12), "");
         ImGui::PopStyleColor();
         ImGui::SameLine(0, 0);
-        ImGui::AlignTextToFramePadding();
         ImGui::Text("]%s/%s", format_compact(mem_info_used).c_str(), format_compact(mem_info_total).c_str());
         ImGui::SameLine();
         ImGui::Text("Tasks:%d Load:%.1f", current_data_->process_count, load.one_min);
@@ -476,14 +468,12 @@ void App::render_system_panel() const {
                 else if (usage < 75.0) bar_color = ImVec4(0.8f, 0.8f, 0.0f, 1.0f);
                 else bar_color = ImVec4(0.8f, 0.2f, 0.0f, 1.0f);
 
-                ImGui::AlignTextToFramePadding();
                 ImGui::Text("%2d[", i);
                 ImGui::SameLine(0, 0);
                 ImGui::PushStyleColor(ImGuiCol_PlotHistogram, bar_color);
                 ImGui::ProgressBar(static_cast<float>(usage / 100.0), ImVec2(30, 12), "");
                 ImGui::PopStyleColor();
                 ImGui::SameLine(0, 0);
-                ImGui::AlignTextToFramePadding();
                 ImGui::Text("]%4.0f%%", usage);
             }
             ImGui::EndTable();
