@@ -27,14 +27,6 @@ std::string App::format_time(std::chrono::system_clock::time_point tp) {
     return buf;
 }
 
-void App::collect_subtree_pids(const ProcessNode* node, std::vector<int>& pids) {
-    if (!node) return;
-    pids.push_back(node->info.pid);
-    for (const auto& child : node->children) {
-        collect_subtree_pids(child.get(), pids);
-    }
-}
-
 // Helper: get parent PID from /proc/<pid>/stat
 static int get_ppid(int pid) {
     std::ifstream file("/proc/" + std::to_string(pid) + "/stat");

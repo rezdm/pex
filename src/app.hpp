@@ -1,10 +1,10 @@
 #pragma once
 
-#include "process_info.hpp"
+#include "data_store.hpp"
 #include "procfs_reader.hpp"
-#include "system_info.hpp"
 #include <vector>
 #include <map>
+#include <set>
 #include <string>
 #include <memory>
 #include <chrono>
@@ -14,18 +14,6 @@ struct GLFWwindow;
 
 namespace pex {
 
-struct ProcessNode {
-    ProcessInfo info;
-    std::vector<std::unique_ptr<ProcessNode>> children;
-    bool is_expanded = true;
-
-    // Tree aggregate values
-    int64_t tree_working_set = 0;
-    double tree_memory_percent = 0.0;
-    double tree_cpu_percent = 0.0;
-    double tree_total_cpu_percent = 0.0;
-};
-
 class App {
 public:
     App();
@@ -33,10 +21,6 @@ public:
     void request_focus();
 
 private:
-    void refresh_processes();
-    //void build_process_tree();
-
-    static void calculate_tree_totals(ProcessNode& node);
     void render();
     void render_menu_bar();
     void render_toolbar();
@@ -64,47 +48,34 @@ private:
     static std::string format_bytes(int64_t bytes);
     static std::string format_time(std::chrono::system_clock::time_point tp);
 
-    static void collect_subtree_pids(const ProcessNode* node, std::vector<int>& pids);
-    static void kill_process_tree(const ProcessNode* node);
+    void kill_process_tree(const ProcessNode* node);
 
-    ProcfsReader reader_;
-    std::vector<std::unique_ptr<ProcessNode>> process_tree_;
-    std::map<int, ProcessNode*> process_map_;
-    std::map<int, std::pair<uint64_t, uint64_t>> previous_cpu_times_;
-    CpuTimes previous_system_cpu_times_;
+    // Data store (runs in background thread)
+    DataStore data_store_;
+    std::shared_ptr<DataSnapshot> current_data_;
 
-    ProcessNode* selected_process_ = nullptr;
-    int selected_pid_ = 1;
+    // UI state - preserved across data updates
+    int selected_pid_ = -1;
+    std::set<int> collapsed_pids_;  // Track which nodes are collapsed
 
     bool is_tree_view_ = true;
-    int refresh_interval_ms_ = 1000;
 
-    // Details for selected process
+    // Details for selected process (fetched on-demand, not from DataStore)
+    ProcfsReader details_reader_;
     std::vector<FileHandleInfo> file_handles_;
     std::vector<NetworkConnectionInfo> network_connections_;
     std::vector<ThreadInfo> threads_;
     std::vector<MemoryMapInfo> memory_maps_;
     std::vector<EnvironmentVariable> environment_vars_;
     int selected_thread_idx_ = -1;
+    int details_pid_ = -1;  // PID for which details were fetched
 
     // Search
     std::string search_text_;
     std::chrono::steady_clock::time_point last_key_time_;
 
-    // Stats
-    int process_count_ = 0;
-    double cpu_usage_ = 0.0;
-    int64_t memory_used_ = 0;
-    int64_t memory_total_ = 0;
-
     // System panel
     bool show_system_panel_ = true;
-    std::vector<CpuTimes> previous_per_cpu_times_;
-    std::vector<double> per_cpu_usage_;
-    int thread_count_ = 0;
-    int running_count_ = 0;
-
-    std::chrono::steady_clock::time_point last_refresh_;
 
     // Window pointer for focus handling
     GLFWwindow* window_ = nullptr;

@@ -6,6 +6,8 @@
 namespace pex {
 
 void App::render_process_tree() {
+    if (!current_data_) return;
+
     // Column headers
     if (ImGui::BeginTable("ProcessTree", 15,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_Reorderable |
@@ -30,7 +32,7 @@ void App::render_process_tree() {
         ImGui::TableSetupColumn("Command Line", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
 
-        for (auto& root : process_tree_) {
+        for (auto& root : current_data_->process_tree) {
             render_process_tree_node(*root, 0);
         }
 
@@ -42,7 +44,7 @@ void App::render_process_tree_node(ProcessNode& node, int depth) {
     ImGui::PushID(node.info.pid);
     ImGui::TableNextRow();
 
-    bool is_selected = (&node == selected_process_);
+    bool is_selected = (node.info.pid == selected_pid_);
 
     // Set row background for selected item
     if (is_selected) {
@@ -69,7 +71,6 @@ void App::render_process_tree_node(ProcessNode& node, int depth) {
 
     // Handle click on tree node
     if (ImGui::IsItemClicked()) {
-        selected_process_ = &node;
         selected_pid_ = node.info.pid;
         refresh_selected_details();
     }
@@ -130,7 +131,6 @@ void App::render_process_tree_node(ProcessNode& node, int depth) {
         float win_w = ImGui::GetWindowWidth();
         if (mouse_pos.x >= win_x && mouse_pos.x <= win_x + win_w &&
             mouse_pos.y >= row_y_min && mouse_pos.y <= row_y_max) {
-            selected_process_ = &node;
             selected_pid_ = node.info.pid;
             refresh_selected_details();
         }
@@ -138,19 +138,23 @@ void App::render_process_tree_node(ProcessNode& node, int depth) {
 
     // Render children if expanded
     if (is_open && !node.children.empty()) {
-        node.is_expanded = true;
+        // Update UI state: this node is expanded
+        collapsed_pids_.erase(node.info.pid);
         for (auto& child : node.children) {
             render_process_tree_node(*child, depth + 1);
         }
         ImGui::TreePop();
     } else if (!node.children.empty()) {
-        node.is_expanded = false;
+        // Update UI state: this node is collapsed
+        collapsed_pids_.insert(node.info.pid);
     }
 
     ImGui::PopID();
 }
 
 void App::render_process_list() {
+    if (!current_data_) return;
+
     if (ImGui::BeginTable("ProcessList", 15,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_Reorderable |
             ImGuiTableFlags_Hideable | ImGuiTableFlags_Sortable |
@@ -184,7 +188,7 @@ void App::render_process_list() {
                 flatten(child.get());
             }
         };
-        for (auto& root : process_tree_) {
+        for (auto& root : current_data_->process_tree) {
             flatten(root.get());
         }
 
@@ -192,7 +196,7 @@ void App::render_process_list() {
             ImGui::PushID(node->info.pid);
             ImGui::TableNextRow();
 
-            bool is_selected = (node == selected_process_);
+            bool is_selected = (node->info.pid == selected_pid_);
 
             // Set row background for selected item
             if (is_selected) {
@@ -258,7 +262,6 @@ void App::render_process_list() {
                 ImVec2 mouse_pos = ImGui::GetMousePos();
                 if (mouse_pos.x >= row_min.x && mouse_pos.x <= row_max.x &&
                     mouse_pos.y >= row_min.y && mouse_pos.y <= row_max.y) {
-                    selected_process_ = node;
                     selected_pid_ = node->info.pid;
                     refresh_selected_details();
                 }

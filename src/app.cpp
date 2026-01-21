@@ -12,11 +12,14 @@
 namespace pex {
 
 App::App() {
-    previous_system_cpu_times_ = SystemInfo::get_cpu_times();
-    previous_per_cpu_times_ = SystemInfo::get_per_cpu_times();
-    per_cpu_usage_.resize(previous_per_cpu_times_.size(), 0.0);
-    last_refresh_ = std::chrono::steady_clock::now();
     last_key_time_ = std::chrono::steady_clock::now();
+
+    // Set up callback to wake up UI when new data is available
+    data_store_.set_on_data_updated([this]() {
+        if (window_) {
+            glfwPostEmptyEvent();
+        }
+    });
 }
 
 void App::run() {
@@ -78,13 +81,16 @@ void App::run() {
     ImGui_ImplGlfw_InitForOpenGL(window_, true);
     ImGui_ImplOpenGL3_Init("#version 330");
 
-    // Initial data load
-    refresh_processes();
+    // Start data collection thread
+    data_store_.start();
+
+    // Get initial data
+    current_data_ = data_store_.get_snapshot();
 
     // Main loop
     while (!glfwWindowShouldClose(window_)) {
-        // Wait for events - blocks until event or timeout (saves CPU when idle)
-        glfwWaitEventsTimeout(refresh_interval_ms_ / 1000.0);
+        // Wait for events - blocks until event or timeout
+        glfwWaitEventsTimeout(0.1); // 100ms timeout for responsive UI
 
         // Handle focus request from another instance
         if (focus_requested_.exchange(false)) {
@@ -92,14 +98,25 @@ void App::run() {
             glfwRequestWindowAttention(window_);
         }
 
-        auto now = std::chrono::steady_clock::now();
+        // Get latest data snapshot (lock-free read of shared_ptr)
+        auto new_data = data_store_.get_snapshot();
+        bool data_changed = !current_data_ ||
+            (new_data && new_data->timestamp != current_data_->timestamp);
+        current_data_ = new_data;
 
-        // Check if data refresh is needed
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_refresh_).count();
-        if (elapsed >= refresh_interval_ms_) {
-            refresh_processes();
-            last_refresh_ = now;
+        // Apply UI state (collapsed nodes) to the data
+        if (current_data_) {
+            for (auto& [pid, node] : current_data_->process_map) {
+                node->is_expanded = !collapsed_pids_.contains(pid);
+            }
         }
+
+        // Refresh details when data updates
+        if (data_changed) {
+            refresh_selected_details();
+        }
+
+        auto now = std::chrono::steady_clock::now();
 
         // Reset search after 1 second of no typing
         if (!search_text_.empty()) {
@@ -126,10 +143,10 @@ void App::run() {
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         glfwSwapBuffers(window_);
-
-        // Sleep briefly to reduce CPU usage
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
+
+    // Stop data collection
+    data_store_.stop();
 
     // Cleanup
     ImGui_ImplOpenGL3_Shutdown();
@@ -146,6 +163,8 @@ void App::request_focus() {
 }
 
 void App::render() {
+    if (!current_data_) return;
+
     // Create main window that fills the viewport
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->Pos);
@@ -184,9 +203,9 @@ void App::render() {
 
     // Status bar
     ImGui::Text("Processes: %d | CPU: %.1f%% | Memory: %s / %s",
-                process_count_, cpu_usage_,
-                format_bytes(memory_used_).c_str(),
-                format_bytes(memory_total_).c_str());
+                current_data_->process_count, current_data_->cpu_usage,
+                format_bytes(current_data_->memory_used).c_str(),
+                format_bytes(current_data_->memory_total).c_str());
 
     if (!search_text_.empty()) {
         ImGui::SameLine();
@@ -210,20 +229,27 @@ void App::render_menu_bar() {
                 is_tree_view_ = !is_tree_view_;
             }
             ImGui::Separator();
-            if (ImGui::MenuItem("Refresh", "F5")) {
-                refresh_processes();
+            if (ImGui::MenuItem("Refresh Now", "F5")) {
+                data_store_.refresh_now();
             }
             ImGui::EndMenu();
         }
 
         if (ImGui::BeginMenu("Process")) {
-            if (ImGui::MenuItem("Kill Process", "Delete", false, selected_process_ != nullptr)) {
-                if (selected_process_) {
-                    kill(selected_process_->info.pid, SIGTERM);
+            ProcessNode* selected = nullptr;
+            if (current_data_ && selected_pid_ > 0) {
+                if (auto it = current_data_->process_map.find(selected_pid_); it != current_data_->process_map.end()) {
+                    selected = it->second;
                 }
             }
-            if (ImGui::MenuItem("Kill Tree", nullptr, false, selected_process_ != nullptr)) {
-                kill_process_tree(selected_process_);
+
+            if (ImGui::MenuItem("Kill Process", "Delete", false, selected != nullptr)) {
+                if (selected) {
+                    kill(selected->info.pid, SIGTERM);
+                }
+            }
+            if (ImGui::MenuItem("Kill Tree", nullptr, false, selected != nullptr)) {
+                kill_process_tree(selected);
             }
             ImGui::EndMenu();
         }
@@ -232,7 +258,54 @@ void App::render_menu_bar() {
     }
 }
 
+void App::render_toolbar() {
+    if (ImGui::Button("Refresh")) {
+        data_store_.refresh_now();
+    }
+    ImGui::SameLine();
+
+    if (ImGui::Button(is_tree_view_ ? "List View" : "Tree View")) {
+        is_tree_view_ = !is_tree_view_;
+    }
+    ImGui::SameLine();
+
+    ProcessNode* selected = nullptr;
+    if (current_data_ && selected_pid_ > 0) {
+        if (auto it = current_data_->process_map.find(selected_pid_); it != current_data_->process_map.end()) {
+            selected = it->second;
+        }
+    }
+
+    if (ImGui::Button("Kill") && selected) {
+        kill(selected->info.pid, SIGTERM);
+    }
+    ImGui::SameLine();
+
+    if (ImGui::Button("Kill Tree") && selected) {
+        kill_process_tree(selected);
+    }
+    ImGui::SameLine();
+
+    ImGui::Text("Refresh:");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(100);
+    const char* intervals[] = {"500ms", "1s", "2s", "5s"};
+    int current_interval = 1;
+    int refresh_ms = data_store_.get_refresh_interval();
+    if (refresh_ms <= 500) current_interval = 0;
+    else if (refresh_ms <= 1000) current_interval = 1;
+    else if (refresh_ms <= 2000) current_interval = 2;
+    else current_interval = 3;
+
+    if (ImGui::Combo("##interval", &current_interval, intervals, IM_ARRAYSIZE(intervals))) {
+        const int values[] = {500, 1000, 2000, 5000};
+        data_store_.set_refresh_interval(values[current_interval]);
+    }
+}
+
 void App::render_system_panel() {
+    if (!current_data_) return;
+
     // Compact bytes format like htop: "6.77G" instead of "6.77 GB"
     auto format_compact = [](int64_t bytes) -> std::string {
         if (bytes < 1024) return std::format("{}B", bytes);
@@ -251,31 +324,29 @@ void App::render_system_panel() {
         return;
     }
 
-    // Get current system info
-    auto mem_info = SystemInfo::get_memory_info();
-    auto swap_info = SystemInfo::get_swap_info();
-    auto load = SystemInfo::get_load_average();
-    auto uptime = SystemInfo::get_uptime();
+    // Get data from snapshot
+    const auto& mem_info_used = current_data_->memory_used;
+    const auto& mem_info_total = current_data_->memory_total;
+    const auto& swap_info = current_data_->swap_info;
+    const auto& load = current_data_->load_average;
+    const auto& uptime = current_data_->uptime_info;
+    const auto& per_cpu_usage = current_data_->per_cpu_usage;
 
-    int cpu_count = static_cast<int>(per_cpu_usage_.size());
+    int cpu_count = static_cast<int>(per_cpu_usage.size());
 
     // Two-column layout: CPUs on left, stats on right
     float available_width = ImGui::GetContentRegionAvail().x;
-    float stats_width = 350.0f; // Fixed width for stats panel
+    float stats_width = 350.0f;
     float cpu_width = available_width - stats_width - 10.0f;
 
     if (cpu_width < 200.0f) {
-        // Window too narrow - stack vertically instead
         cpu_width = available_width;
         stats_width = available_width;
     }
 
-    // Calculate CPU grid dimensions based on available width
-    float cpu_item_width = 120.0f; // Width per CPU entry
+    float cpu_item_width = 120.0f;
     int cpu_cols = std::max(1, static_cast<int>(cpu_width / cpu_item_width));
-    int cpu_rows = (cpu_count + cpu_cols - 1) / cpu_cols;
 
-    // Begin two-column table
     bool side_by_side = (available_width - stats_width - 10.0f) >= 200.0f;
 
     if (side_by_side) {
@@ -292,7 +363,7 @@ void App::render_system_panel() {
                     if (i % cpu_cols == 0) ImGui::TableNextRow();
                     ImGui::TableNextColumn();
 
-                    double usage = per_cpu_usage_[i];
+                    double usage = per_cpu_usage[i];
                     ImVec4 bar_color;
                     if (usage < 25.0) bar_color = ImVec4(0.0f, 0.8f, 0.0f, 1.0f);
                     else if (usage < 50.0) bar_color = ImVec4(0.5f, 0.8f, 0.0f, 1.0f);
@@ -314,17 +385,17 @@ void App::render_system_panel() {
             ImGui::TableNextColumn();
 
             // Memory
-            float mem_ratio = mem_info.total > 0 ? static_cast<float>(mem_info.used) / mem_info.total : 0.0f;
+            float mem_ratio = mem_info_total > 0 ? static_cast<float>(mem_info_used) / static_cast<float>(mem_info_total) : 0.0f;
             ImGui::Text("Mem[");
             ImGui::SameLine(0, 0);
             ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.0f, 0.6f, 0.0f, 1.0f));
             ImGui::ProgressBar(mem_ratio, ImVec2(120, 12), "");
             ImGui::PopStyleColor();
             ImGui::SameLine(0, 0);
-            ImGui::Text("] %s/%s", format_compact(mem_info.used).c_str(), format_compact(mem_info.total).c_str());
+            ImGui::Text("] %s/%s", format_compact(mem_info_used).c_str(), format_compact(mem_info_total).c_str());
 
             // Swap
-            float swap_ratio = swap_info.total > 0 ? static_cast<float>(swap_info.used) / swap_info.total : 0.0f;
+            float swap_ratio = swap_info.total > 0 ? static_cast<float>(swap_info.used) / static_cast<float>(swap_info.total) : 0.0f;
             ImGui::Text("Swp[");
             ImGui::SameLine(0, 0);
             ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.6f, 0.0f, 0.0f, 1.0f));
@@ -334,7 +405,8 @@ void App::render_system_panel() {
             ImGui::Text("] %s/%s", format_compact(swap_info.used).c_str(), format_compact(swap_info.total).c_str());
 
             // Tasks
-            ImGui::Text("Tasks: %d, %d thr; %d running", process_count_, thread_count_, running_count_);
+            ImGui::Text("Tasks: %d, %d thr; %d running",
+                current_data_->process_count, current_data_->thread_count, current_data_->running_count);
 
             // Load
             ImGui::Text("Load average: %.2f %.2f %.2f", load.one_min, load.five_min, load.fifteen_min);
@@ -356,18 +428,17 @@ void App::render_system_panel() {
             ImGui::EndTable();
         }
     } else {
-        // Narrow window - stack vertically: stats first (compact), then CPUs
-        // Stats row
-        float mem_ratio = mem_info.total > 0 ? static_cast<float>(mem_info.used) / mem_info.total : 0.0f;
+        // Narrow window - stack vertically
+        float mem_ratio = mem_info_total > 0 ? static_cast<float>(mem_info_used) / static_cast<float>(mem_info_total) : 0.0f;
         ImGui::Text("Mem[");
         ImGui::SameLine(0, 0);
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.0f, 0.6f, 0.0f, 1.0f));
         ImGui::ProgressBar(mem_ratio, ImVec2(80, 12), "");
         ImGui::PopStyleColor();
         ImGui::SameLine(0, 0);
-        ImGui::Text("]%s/%s", format_compact(mem_info.used).c_str(), format_compact(mem_info.total).c_str());
+        ImGui::Text("]%s/%s", format_compact(mem_info_used).c_str(), format_compact(mem_info_total).c_str());
         ImGui::SameLine();
-        ImGui::Text("Tasks:%d Load:%.1f", process_count_, load.one_min);
+        ImGui::Text("Tasks:%d Load:%.1f", current_data_->process_count, load.one_min);
 
         // CPUs in grid
         if (ImGui::BeginTable("CPUGrid", cpu_cols, ImGuiTableFlags_None)) {
@@ -375,7 +446,7 @@ void App::render_system_panel() {
                 if (i % cpu_cols == 0) ImGui::TableNextRow();
                 ImGui::TableNextColumn();
 
-                double usage = per_cpu_usage_[i];
+                double usage = per_cpu_usage[i];
                 ImVec4 bar_color;
                 if (usage < 25.0) bar_color = ImVec4(0.0f, 0.8f, 0.0f, 1.0f);
                 else if (usage < 50.0) bar_color = ImVec4(0.5f, 0.8f, 0.0f, 1.0f);
@@ -395,38 +466,6 @@ void App::render_system_panel() {
     }
 
     ImGui::Separator();
-}
-
-void App::render_toolbar() {
-    if (ImGui::Button("Refresh")) {
-        refresh_processes();
-    }
-    ImGui::SameLine();
-
-    if (ImGui::Button(is_tree_view_ ? "List View" : "Tree View")) {
-        is_tree_view_ = !is_tree_view_;
-    }
-    ImGui::SameLine();
-
-    if (ImGui::Button("Kill") && selected_process_) {
-        kill(selected_process_->info.pid, SIGTERM);
-    }
-    ImGui::SameLine();
-
-    if (ImGui::Button("Kill Tree") && selected_process_) {
-        kill_process_tree(selected_process_);
-    }
-    ImGui::SameLine();
-
-    ImGui::Text("Refresh:");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(100);
-    const char* intervals[] = {"500ms", "1s", "2s", "5s"};
-    static int current_interval = 1;
-    if (ImGui::Combo("##interval", &current_interval, intervals, IM_ARRAYSIZE(intervals))) {
-        const int values[] = {500, 1000, 2000, 5000};
-        refresh_interval_ms_ = values[current_interval];
-    }
 }
 
 } // namespace pex

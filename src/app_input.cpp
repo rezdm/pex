@@ -6,6 +6,8 @@
 namespace pex {
 
 void App::handle_search_input() {
+    if (!current_data_) return;
+
     ImGuiIO& io = ImGui::GetIO();
 
     // Only handle when this window is focused
@@ -31,8 +33,15 @@ void App::handle_search_input() {
     // If we have search text, and it changed, find match
     if (!search_text_.empty()) {
         // Check if current selection still matches
-        if (selected_process_) {
-            std::string name_lower = selected_process_->info.name;
+        ProcessNode* selected = nullptr;
+        if (selected_pid_ > 0) {
+            if (auto it = current_data_->process_map.find(selected_pid_); it != current_data_->process_map.end()) {
+                selected = it->second;
+            }
+        }
+
+        if (selected) {
+            std::string name_lower = selected->info.name;
             std::ranges::transform(name_lower, name_lower.begin(), ::tolower);
             if (name_lower.starts_with(search_text_)) {
                 return; // Current selection still matches
@@ -42,13 +51,12 @@ void App::handle_search_input() {
         // Search for match
         ProcessNode* match = nullptr;
         if (is_tree_view_) {
-            match = find_matching_process(search_text_, selected_process_);
+            match = find_matching_process(search_text_, selected);
         } else {
-            match = search_subtree(process_tree_, search_text_);
+            match = search_subtree(current_data_->process_tree, search_text_);
         }
 
         if (match) {
-            selected_process_ = match;
             selected_pid_ = match->info.pid;
             refresh_selected_details();
         }
@@ -56,6 +64,8 @@ void App::handle_search_input() {
 }
 
 ProcessNode* App::find_matching_process(const std::string& search, ProcessNode* start_node) {
+    if (!current_data_) return nullptr;
+
     // First search in current selection's children
     if (start_node) {
         auto match = search_subtree(start_node->children, search);
@@ -63,7 +73,7 @@ ProcessNode* App::find_matching_process(const std::string& search, ProcessNode* 
     }
 
     // Then search from top
-    return search_subtree(process_tree_, search);
+    return search_subtree(current_data_->process_tree, search);
 }
 
 ProcessNode* App::search_subtree(std::vector<std::unique_ptr<ProcessNode>>& nodes, const std::string& search) {
@@ -91,9 +101,11 @@ void App::collect_visible_items(ProcessNode* node, std::vector<ProcessNode*>& it
 
 std::vector<ProcessNode*> App::get_visible_items() const {
     std::vector<ProcessNode*> items;
+    if (!current_data_) return items;
+
     if (is_tree_view_) {
         // For tree view, only collect expanded items
-        for (auto& root : process_tree_) {
+        for (auto& root : current_data_->process_tree) {
             collect_visible_items(root.get(), items);
         }
     } else {
@@ -105,7 +117,7 @@ std::vector<ProcessNode*> App::get_visible_items() const {
                 flatten(child.get());
             }
         };
-        for (auto& root : process_tree_) {
+        for (auto& root : current_data_->process_tree) {
             flatten(root.get());
         }
     }
@@ -115,7 +127,7 @@ std::vector<ProcessNode*> App::get_visible_items() const {
 void App::handle_keyboard_navigation() {
     // F5 for refresh - works globally
     if (ImGui::IsKeyPressed(ImGuiKey_F5)) {
-        refresh_processes();
+        data_store_.refresh_now();
         return;
     }
 
@@ -124,10 +136,10 @@ void App::handle_keyboard_navigation() {
     auto visible_items = get_visible_items();
     if (visible_items.empty()) return;
 
-    // Find current selection index
+    // Find current selection index by PID
     int current_idx = -1;
     for (int i = 0; i < static_cast<int>(visible_items.size()); i++) {
-        if (visible_items[i] == selected_process_) {
+        if (visible_items[i]->info.pid == selected_pid_) {
             current_idx = i;
             break;
         }
@@ -151,8 +163,7 @@ void App::handle_keyboard_navigation() {
     }
 
     if (new_idx != current_idx && new_idx >= 0 && new_idx < static_cast<int>(visible_items.size())) {
-        selected_process_ = visible_items[new_idx];
-        selected_pid_ = selected_process_->info.pid;
+        selected_pid_ = visible_items[new_idx]->info.pid;
         refresh_selected_details();
     }
 }

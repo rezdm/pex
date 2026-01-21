@@ -72,6 +72,7 @@ add_executable(pex
     src/main.cpp
     src/procfs_reader.cpp
     src/system_info.cpp
+    src/data_store.cpp
     src/app.cpp
     src/app_views.cpp
     src/app_details.cpp
