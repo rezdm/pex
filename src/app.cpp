@@ -241,6 +241,13 @@ void App::render_menu_bar() {
 }
 
 void App::render_toolbar() {
+    // System panel toggle
+    const char* toggle_label = show_system_panel_ ? "[-] System" : "[+] System";
+    if (ImGui::Button(toggle_label)) {
+        show_system_panel_ = !show_system_panel_;
+    }
+    ImGui::SameLine();
+
     // Search box
     ImGui::Text("Search:");
     ImGui::SameLine();
@@ -320,6 +327,10 @@ void App::render_toolbar() {
 void App::render_system_panel() {
     if (!current_data_) return;
 
+    if (!show_system_panel_) {
+        return;
+    }
+
     // Compact bytes format like htop: "6.77G" instead of "6.77 GB"
     auto format_compact = [](int64_t bytes) -> std::string {
         if (bytes < 1024) return std::format("{}B", bytes);
@@ -327,16 +338,6 @@ void App::render_system_panel() {
         if (bytes < 1024LL * 1024 * 1024) return std::format("{:.2f}G", bytes / (1024.0 * 1024 * 1024));
         return std::format("{:.2f}G", bytes / (1024.0 * 1024 * 1024));
     };
-
-    // Toggle button for collapsing
-    const char* toggle_label = show_system_panel_ ? "[-] System" : "[+] System";
-    if (ImGui::Button(toggle_label)) {
-        show_system_panel_ = !show_system_panel_;
-    }
-
-    if (!show_system_panel_) {
-        return;
-    }
 
     // Get data from snapshot
     const auto& mem_info_used = current_data_->memory_used;
