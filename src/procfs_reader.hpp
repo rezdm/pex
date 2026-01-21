@@ -22,6 +22,8 @@ public:
 
     static std::vector<EnvironmentVariable> get_environment_variables(int pid);
 
+    static std::vector<LibraryInfo> get_libraries(int pid);
+
 private:
     static std::string read_file(const std::string& path);
 

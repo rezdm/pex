@@ -486,7 +486,7 @@ void App::render_system_panel() const {
             ImGui::EndTable();
         }
     }
-
+    
     ImGui::Separator();
 }
 

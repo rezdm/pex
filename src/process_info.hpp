@@ -33,6 +33,7 @@ struct ThreadInfo {
     int priority = 0;
     int processor = -1;
     std::string stack;
+    std::string current_library;  // Library where thread is currently executing
 };
 
 struct FileHandleInfo {
@@ -59,6 +60,15 @@ struct MemoryMapInfo {
 struct EnvironmentVariable {
     std::string name;
     std::string value;
+};
+
+struct LibraryInfo {
+    std::string path;
+    std::string name;           // Just the filename
+    std::string base_address;   // First mapped address
+    int64_t total_size = 0;     // Sum of all mapped regions
+    int64_t resident_size = 0;  // RSS if available
+    bool is_executable = false; // Main executable vs shared library
 };
 
 } // namespace pex

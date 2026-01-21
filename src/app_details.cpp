@@ -29,6 +29,10 @@ void App::render_details_panel() {
             render_environment_tab();
             ImGui::EndTabItem();
         }
+        if (ImGui::BeginTabItem("Libraries")) {
+            render_libraries_tab();
+            ImGui::EndTabItem();
+        }
         ImGui::EndTabBar();
     }
 }
@@ -90,8 +94,8 @@ void App::render_threads_tab() {
     // Split view: threads list on left, stack on right
     const float width = ImGui::GetContentRegionAvail().x;
 
-    ImGui::BeginChild("ThreadsList", ImVec2(width * 0.4f, 0), true);
-    if (ImGui::BeginTable("Threads", 5,
+    ImGui::BeginChild("ThreadsList", ImVec2(width * 0.5f, 0), true);
+    if (ImGui::BeginTable("Threads", 6,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
             ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter)) {
 
@@ -101,6 +105,7 @@ void App::render_threads_tab() {
         ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 50);
         ImGui::TableSetupColumn("Pri", ImGuiTableColumnFlags_WidthFixed, 40);
         ImGui::TableSetupColumn("CPU", ImGuiTableColumnFlags_WidthFixed, 40);
+        ImGui::TableSetupColumn("Current Library", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
 
         for (int i = 0; i < static_cast<int>(threads_.size()); i++) {
@@ -125,6 +130,8 @@ void App::render_threads_tab() {
             ImGui::Text("%d", thread.priority);
             ImGui::TableNextColumn();
             ImGui::Text("%d", thread.processor);
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", thread.current_library.c_str());
             ImGui::PopID();
         }
 
@@ -195,6 +202,44 @@ void App::render_environment_tab() const {
             ImGui::Text("%s", var.name.c_str());
             ImGui::TableNextColumn();
             ImGui::Text("%s", var.value.c_str());
+        }
+
+        ImGui::EndTable();
+    }
+}
+
+void App::render_libraries_tab() const {
+    if (ImGui::BeginTable("Libraries", 4,
+            ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
+            ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter |
+            ImGuiTableFlags_Sortable)) {
+
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthFixed, 250);
+        ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 100);
+        ImGui::TableSetupColumn("Base Address", ImGuiTableColumnFlags_WidthFixed, 150);
+        ImGui::TableSetupColumn("Path", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+
+        for (const auto& lib : libraries_) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+
+            // Highlight executable differently
+            if (lib.is_executable) {
+                ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "%s", lib.name.c_str());
+            } else {
+                ImGui::Text("%s", lib.name.c_str());
+            }
+
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", format_bytes(lib.total_size).c_str());
+
+            ImGui::TableNextColumn();
+            ImGui::Text("0x%s", lib.base_address.c_str());
+
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", lib.path.c_str());
         }
 
         ImGui::EndTable();

@@ -155,6 +155,54 @@ std::optional<ProcessInfo> ProcfsReader::get_process_info(int pid) {
 std::vector<ThreadInfo> ProcfsReader::get_threads(int pid) {
     std::vector<ThreadInfo> threads;
     std::string task_path = "/proc/" + std::to_string(pid) + "/task";
+    std::string proc_path = "/proc/" + std::to_string(pid);
+
+    // Build address range to library mapping from /proc/<pid>/maps
+    struct AddressRange {
+        uint64_t start;
+        uint64_t end;
+        std::string library;
+    };
+    std::vector<AddressRange> address_map;
+
+    {
+        std::ifstream maps_file(proc_path + "/maps");
+        std::string line;
+        while (std::getline(maps_file, line)) {
+            std::istringstream iss(line);
+            std::string address, perms, offset, dev, inode_str, pathname;
+            iss >> address >> perms >> offset >> dev >> inode_str;
+            std::getline(iss >> std::ws, pathname);
+
+            // Only include executable mappings with a pathname
+            if (perms.size() >= 3 && perms[2] == 'x' && !pathname.empty() && pathname[0] == '/') {
+                size_t dash = address.find('-');
+                if (dash != std::string::npos) {
+                    uint64_t start_addr = 0, end_addr = 0;
+                    std::from_chars(address.data(), address.data() + dash, start_addr, 16);
+                    std::from_chars(address.data() + dash + 1, address.data() + address.size(), end_addr, 16);
+
+                    // Extract just the library name
+                    std::string lib_name = pathname;
+                    if (size_t pos = pathname.rfind('/'); pos != std::string::npos) {
+                        lib_name = pathname.substr(pos + 1);
+                    }
+
+                    address_map.push_back({start_addr, end_addr, lib_name});
+                }
+            }
+        }
+    }
+
+    // Helper to find library for an address
+    auto find_library = [&](uint64_t addr) -> std::string {
+        for (const auto& range : address_map) {
+            if (addr >= range.start && addr < range.end) {
+                return range.library;
+            }
+        }
+        return {};
+    };
 
     try {
         for (const auto& entry : fs::directory_iterator(task_path)) {
@@ -200,6 +248,30 @@ std::vector<ThreadInfo> ProcfsReader::get_threads(int pid) {
             // Read thread stack
             std::string stack = read_file(entry.path().string() + "/stack");
             thread.stack = stack;
+
+            // Read instruction pointer from syscall file to determine current library
+            // Format: syscall_num arg1 arg2 arg3 arg4 arg5 arg6 sp pc
+            if (std::string syscall = read_file(entry.path().string() + "/syscall"); !syscall.empty()) {
+                std::istringstream iss(syscall);
+                std::string syscall_num;
+                uint64_t args[6], sp, pc;
+                iss >> syscall_num;
+                if (syscall_num != "running") {
+                    for (auto& arg : args) {
+                        std::string hex;
+                        iss >> hex;
+                        if (hex.starts_with("0x")) {
+                            std::from_chars(hex.data() + 2, hex.data() + hex.size(), arg, 16);
+                        }
+                    }
+                    std::string sp_hex, pc_hex;
+                    iss >> sp_hex >> pc_hex;
+                    if (pc_hex.starts_with("0x")) {
+                        std::from_chars(pc_hex.data() + 2, pc_hex.data() + pc_hex.size(), pc, 16);
+                        thread.current_library = find_library(pc);
+                    }
+                }
+            }
 
             threads.push_back(std::move(thread));
         }
@@ -454,6 +526,77 @@ std::vector<EnvironmentVariable> ProcfsReader::get_environment_variables(const i
     });
 
     return vars;
+}
+
+std::vector<LibraryInfo> ProcfsReader::get_libraries(const int pid) {
+    std::vector<LibraryInfo> libraries;
+    const std::string maps_path = "/proc/" + std::to_string(pid) + "/maps";
+    const std::string exe_path = read_symlink("/proc/" + std::to_string(pid) + "/exe");
+
+    std::ifstream file(maps_path);
+    if (!file) return libraries;
+
+    // Use a map to aggregate multiple mappings of the same library
+    std::map<std::string, LibraryInfo> lib_map;
+
+    std::string line;
+    while (std::getline(file, line)) {
+        std::istringstream iss(line);
+        std::string address, perms, offset, dev, inode_str;
+        std::string pathname;
+
+        iss >> address >> perms >> offset >> dev >> inode_str;
+        std::getline(iss >> std::ws, pathname);
+
+        // Skip anonymous mappings and special entries
+        if (pathname.empty() || pathname[0] != '/') continue;
+        if (pathname.starts_with("/dev/") || pathname.starts_with("/memfd:")) continue;
+        if (pathname.find("(deleted)") != std::string::npos) continue;
+
+        // Check if it's a library (.so) or executable
+        bool is_library = pathname.find(".so") != std::string::npos;
+        bool is_main_exe = (pathname == exe_path);
+
+        if (!is_library && !is_main_exe) continue;
+
+        // Parse address range to calculate size
+        size_t dash = address.find('-');
+        uint64_t start_addr = 0, end_addr = 0;
+        if (dash != std::string::npos) {
+            std::from_chars(address.data(), address.data() + dash, start_addr, 16);
+            std::from_chars(address.data() + dash + 1, address.data() + address.size(), end_addr, 16);
+        }
+        uint64_t size = end_addr - start_addr;
+
+        // Add or update library entry
+        auto& lib = lib_map[pathname];
+        if (lib.path.empty()) {
+            lib.path = pathname;
+            // Extract filename
+            if (size_t pos = pathname.rfind('/'); pos != std::string::npos) {
+                lib.name = pathname.substr(pos + 1);
+            } else {
+                lib.name = pathname;
+            }
+            lib.base_address = std::format("{:x}", start_addr);
+            lib.is_executable = is_main_exe;
+        }
+        lib.total_size += static_cast<int64_t>(size);
+    }
+
+    // Convert map to vector
+    libraries.reserve(lib_map.size());
+    for (auto& [path, lib] : lib_map) {
+        libraries.push_back(std::move(lib));
+    }
+
+    // Sort: executable first, then by name
+    std::ranges::sort(libraries, [](const auto& a, const auto& b) {
+        if (a.is_executable != b.is_executable) return a.is_executable > b.is_executable;
+        return a.name < b.name;
+    });
+
+    return libraries;
 }
 
 } // namespace pex

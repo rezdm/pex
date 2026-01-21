@@ -33,6 +33,7 @@ private:
     void render_threads_tab();
     void render_memory_tab() const;
     void render_environment_tab() const;
+    void render_libraries_tab() const;
     void render_process_popup();
     void refresh_selected_details();
     void update_popup_history();
@@ -70,6 +71,7 @@ private:
     std::vector<ThreadInfo> threads_;
     std::vector<MemoryMapInfo> memory_maps_;
     std::vector<EnvironmentVariable> environment_vars_;
+    std::vector<LibraryInfo> libraries_;
     int selected_thread_idx_ = -1;
     int details_pid_ = -1;  // PID for which details were fetched
 
