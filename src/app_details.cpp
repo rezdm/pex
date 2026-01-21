@@ -101,14 +101,17 @@ void App::render_threads_tab() {
 
         for (int i = 0; i < static_cast<int>(threads_.size()); i++) {
             const auto& thread = threads_[i];
+            ImGui::PushID(i);
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
 
             bool is_selected = (i == selected_thread_idx_);
-            if (ImGui::Selectable(std::to_string(thread.tid).c_str(), is_selected,
+            if (ImGui::Selectable("##row", is_selected,
                     ImGuiSelectableFlags_SpanAllColumns)) {
                 selected_thread_idx_ = i;
             }
+            ImGui::SameLine();
+            ImGui::Text("%d", thread.tid);
 
             ImGui::TableNextColumn();
             ImGui::Text("%s", thread.name.c_str());
@@ -118,6 +121,7 @@ void App::render_threads_tab() {
             ImGui::Text("%d", thread.priority);
             ImGui::TableNextColumn();
             ImGui::Text("%d", thread.processor);
+            ImGui::PopID();
         }
 
         ImGui::EndTable();
