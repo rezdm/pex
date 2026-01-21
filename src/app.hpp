@@ -2,6 +2,7 @@
 
 #include "data_store.hpp"
 #include "procfs_reader.hpp"
+#include "name_resolver.hpp"
 #include <vector>
 #include <set>
 #include <string>
@@ -29,7 +30,7 @@ private:
     void render_process_list();
     void render_details_panel();
     void render_file_handles_tab() const;
-    void render_network_tab() const;
+    void render_network_tab();
     void render_threads_tab();
     void render_memory_tab() const;
     void render_environment_tab() const;
@@ -100,6 +101,9 @@ private:
     // Window pointer for focus handling
     GLFWwindow* window_ = nullptr;
     std::atomic<bool> focus_requested_{false};
+
+    // Name resolver for DNS and service lookups
+    NameResolver name_resolver_;
 };
 
 } // namespace pex

@@ -4,6 +4,7 @@
 #include <sstream>
 #include <format>
 #include <algorithm>
+#include <charconv>
 
 namespace pex {
 
@@ -62,26 +63,102 @@ void App::render_file_handles_tab() const {
     }
 }
 
-void App::render_network_tab() const {
-    if (ImGui::BeginTable("Network", 4,
+void App::render_network_tab() {
+    // Helper to parse IP:port from endpoint string
+    auto parse_endpoint = [](const std::string& endpoint) -> std::pair<std::string, uint16_t> {
+        // Format is "ip:port" or "[ipv6]:port"
+        size_t colon_pos = endpoint.rfind(':');
+        if (colon_pos == std::string::npos) return {endpoint, 0};
+
+        std::string ip = endpoint.substr(0, colon_pos);
+        uint16_t port = 0;
+        std::from_chars(endpoint.data() + colon_pos + 1,
+                       endpoint.data() + endpoint.size(), port);
+        return {ip, port};
+    };
+
+    if (ImGui::BeginTable("Network", 8,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
             ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter)) {
 
         ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("Protocol", ImGuiTableColumnFlags_WidthFixed, 80);
-        ImGui::TableSetupColumn("Local Address", ImGuiTableColumnFlags_WidthFixed, 200);
-        ImGui::TableSetupColumn("Remote Address", ImGuiTableColumnFlags_WidthFixed, 200);
+        ImGui::TableSetupColumn("Protocol", ImGuiTableColumnFlags_WidthFixed, 60);
+        ImGui::TableSetupColumn("Local Address", ImGuiTableColumnFlags_WidthFixed, 160);
+        ImGui::TableSetupColumn("Local Host", ImGuiTableColumnFlags_WidthFixed, 140);
+        ImGui::TableSetupColumn("Local Port", ImGuiTableColumnFlags_WidthFixed, 80);
+        ImGui::TableSetupColumn("Remote Address", ImGuiTableColumnFlags_WidthFixed, 160);
+        ImGui::TableSetupColumn("Remote Host", ImGuiTableColumnFlags_WidthFixed, 140);
+        ImGui::TableSetupColumn("Remote Port", ImGuiTableColumnFlags_WidthFixed, 80);
         ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
 
+        // Get base protocol (tcp/udp without the 6)
+        auto base_protocol = [](const std::string& proto) -> std::string {
+            if (proto.starts_with("tcp")) return "tcp";
+            if (proto.starts_with("udp")) return "udp";
+            return proto;
+        };
+
         for (const auto& conn : network_connections_) {
+            auto [local_ip, local_port] = parse_endpoint(conn.local_endpoint);
+            auto [remote_ip, remote_port] = parse_endpoint(conn.remote_endpoint);
+
+            // Get resolved names (triggers async resolution if not cached)
+            std::string local_host = name_resolver_.get_hostname(local_ip);
+            std::string remote_host = name_resolver_.get_hostname(remote_ip);
+
+            // Get service names
+            std::string proto_base = base_protocol(conn.protocol);
+            std::string local_service = name_resolver_.get_service_name(local_port, proto_base);
+            std::string remote_service = name_resolver_.get_service_name(remote_port, proto_base);
+
             ImGui::TableNextRow();
+
+            // Protocol
             ImGui::TableNextColumn();
             ImGui::Text("%s", conn.protocol.c_str());
+
+            // Local Address
             ImGui::TableNextColumn();
             ImGui::Text("%s", conn.local_endpoint.c_str());
+
+            // Local Host (resolved)
+            ImGui::TableNextColumn();
+            if (!local_host.empty()) {
+                ImGui::TextColored(ImVec4(0.5f, 0.8f, 0.5f, 1.0f), "%s", local_host.c_str());
+            } else {
+                ImGui::TextDisabled("-");
+            }
+
+            // Local Port (service name)
+            ImGui::TableNextColumn();
+            if (!local_service.empty()) {
+                ImGui::Text("%s", local_service.c_str());
+            } else {
+                ImGui::Text("%d", local_port);
+            }
+
+            // Remote Address
             ImGui::TableNextColumn();
             ImGui::Text("%s", conn.remote_endpoint.c_str());
+
+            // Remote Host (resolved)
+            ImGui::TableNextColumn();
+            if (!remote_host.empty()) {
+                ImGui::TextColored(ImVec4(0.5f, 0.8f, 0.5f, 1.0f), "%s", remote_host.c_str());
+            } else {
+                ImGui::TextDisabled("-");
+            }
+
+            // Remote Port (service name)
+            ImGui::TableNextColumn();
+            if (!remote_service.empty()) {
+                ImGui::Text("%s", remote_service.c_str());
+            } else {
+                ImGui::Text("%d", remote_port);
+            }
+
+            // State
             ImGui::TableNextColumn();
             ImGui::Text("%s", conn.state.c_str());
         }

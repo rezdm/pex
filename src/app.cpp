@@ -17,6 +17,13 @@ App::App() {
             glfwPostEmptyEvent();
         }
     });
+
+    // Set up callback to wake up UI when name resolution completes
+    name_resolver_.set_on_resolved([this]() {
+        if (window_) {
+            glfwPostEmptyEvent();
+        }
+    });
 }
 
 void App::run() {
@@ -78,7 +85,8 @@ void App::run() {
     ImGui_ImplGlfw_InitForOpenGL(window_, true);
     ImGui_ImplOpenGL3_Init("#version 330");
 
-    // Start data collection thread
+    // Start background threads
+    name_resolver_.start();
     data_store_.start();
 
     // Get initial data
@@ -132,8 +140,9 @@ void App::run() {
         glfwSwapBuffers(window_);
     }
 
-    // Stop data collection
+    // Stop background threads
     data_store_.stop();
+    name_resolver_.stop();
 
     // Cleanup
     ImGui_ImplOpenGL3_Shutdown();
@@ -486,7 +495,7 @@ void App::render_system_panel() const {
             ImGui::EndTable();
         }
     }
-    
+
     ImGui::Separator();
 }
 
