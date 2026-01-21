@@ -19,7 +19,7 @@ Debian, Wayland, libxkb, ...
 ## Building
 
 ```bash
-cd pex.cpp
+git clone https://github.com/rezdm/pex.git && cd pex
 mkdir build && cd build
 cmake ..
 make -j$(nproc)
