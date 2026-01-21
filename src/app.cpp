@@ -363,6 +363,17 @@ void App::render_system_panel() const {
 
     constexpr float cpu_item_width = 120.0f;
     const int cpu_cols = std::max(1, static_cast<int>(cpu_width / cpu_item_width));
+    const float text_height = ImGui::GetTextLineHeight();
+
+    // Helper to draw a progress bar aligned with text
+    auto draw_bar = [&](float ratio, float width, const ImVec4& color) {
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, color);
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.2f, 0.2f, 0.2f, 1.0f));
+        ImGui::ProgressBar(ratio, ImVec2(width, text_height), "");
+        ImGui::PopStyleColor(2);
+        ImGui::PopStyleVar();
+    };
 
     if ((available_width - stats_width - 10.0f) >= 200.0f) {
         if (ImGui::BeginTable("SystemPanelLayout", 2, ImGuiTableFlags_None)) {
@@ -387,9 +398,7 @@ void App::render_system_panel() const {
 
                     ImGui::Text("%2d[", i);
                     ImGui::SameLine(0, 0);
-                    ImGui::PushStyleColor(ImGuiCol_PlotHistogram, bar_color);
-                    ImGui::ProgressBar(static_cast<float>(usage / 100.0), ImVec2(40, 12), "");
-                    ImGui::PopStyleColor();
+                    draw_bar(static_cast<float>(usage / 100.0), 40, bar_color);
                     ImGui::SameLine(0, 0);
                     ImGui::Text("]%5.1f%%", usage);
                 }
@@ -400,24 +409,24 @@ void App::render_system_panel() const {
             ImGui::TableNextColumn();
 
             // Memory
-            const float mem_ratio = mem_info_total > 0 ? static_cast<float>(mem_info_used) / static_cast<float>(mem_info_total) : 0.0f;
-            ImGui::Text("Mem[");
-            ImGui::SameLine(0, 0);
-            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.0f, 0.6f, 0.0f, 1.0f));
-            ImGui::ProgressBar(mem_ratio, ImVec2(120, 12), "");
-            ImGui::PopStyleColor();
-            ImGui::SameLine(0, 0);
-            ImGui::Text("] %s/%s", format_compact(mem_info_used).c_str(), format_compact(mem_info_total).c_str());
+            {
+                const float mem_ratio = mem_info_total > 0 ? static_cast<float>(mem_info_used) / static_cast<float>(mem_info_total) : 0.0f;
+                ImGui::Text("Mem[");
+                ImGui::SameLine(0, 0);
+                draw_bar(mem_ratio, 120, ImVec4(0.0f, 0.6f, 0.0f, 1.0f));
+                ImGui::SameLine(0, 0);
+                ImGui::Text("] %s/%s", format_compact(mem_info_used).c_str(), format_compact(mem_info_total).c_str());
+            }
 
             // Swap
-            const float swap_ratio = swap_info.total > 0 ? static_cast<float>(swap_info.used) / static_cast<float>(swap_info.total) : 0.0f;
-            ImGui::Text("Swp[");
-            ImGui::SameLine(0, 0);
-            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.6f, 0.0f, 0.0f, 1.0f));
-            ImGui::ProgressBar(swap_ratio, ImVec2(120, 12), "");
-            ImGui::PopStyleColor();
-            ImGui::SameLine(0, 0);
-            ImGui::Text("] %s/%s", format_compact(swap_info.used).c_str(), format_compact(swap_info.total).c_str());
+            {
+                const float swap_ratio = swap_info.total > 0 ? static_cast<float>(swap_info.used) / static_cast<float>(swap_info.total) : 0.0f;
+                ImGui::Text("Swp[");
+                ImGui::SameLine(0, 0);
+                draw_bar(swap_ratio, 120, ImVec4(0.6f, 0.0f, 0.0f, 1.0f));
+                ImGui::SameLine(0, 0);
+                ImGui::Text("] %s/%s", format_compact(swap_info.used).c_str(), format_compact(swap_info.total).c_str());
+            }
 
             // Tasks
             ImGui::Text("Tasks: %d, %d thr; %d running",
@@ -444,16 +453,16 @@ void App::render_system_panel() const {
         }
     } else {
         // Narrow window - stack vertically
-        const float mem_ratio = mem_info_total > 0 ? static_cast<float>(mem_info_used) / static_cast<float>(mem_info_total) : 0.0f;
-        ImGui::Text("Mem[");
-        ImGui::SameLine(0, 0);
-        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.0f, 0.6f, 0.0f, 1.0f));
-        ImGui::ProgressBar(mem_ratio, ImVec2(80, 12), "");
-        ImGui::PopStyleColor();
-        ImGui::SameLine(0, 0);
-        ImGui::Text("]%s/%s", format_compact(mem_info_used).c_str(), format_compact(mem_info_total).c_str());
-        ImGui::SameLine();
-        ImGui::Text("Tasks:%d Load:%.1f", current_data_->process_count, load.one_min);
+        {
+            const float mem_ratio = mem_info_total > 0 ? static_cast<float>(mem_info_used) / static_cast<float>(mem_info_total) : 0.0f;
+            ImGui::Text("Mem[");
+            ImGui::SameLine(0, 0);
+            draw_bar(mem_ratio, 80, ImVec4(0.0f, 0.6f, 0.0f, 1.0f));
+            ImGui::SameLine(0, 0);
+            ImGui::Text("]%s/%s", format_compact(mem_info_used).c_str(), format_compact(mem_info_total).c_str());
+            ImGui::SameLine();
+            ImGui::Text("Tasks:%d Load:%.1f", current_data_->process_count, load.one_min);
+        }
 
         // CPUs in grid
         if (ImGui::BeginTable("CPUGrid", cpu_cols, ImGuiTableFlags_None)) {
@@ -470,9 +479,7 @@ void App::render_system_panel() const {
 
                 ImGui::Text("%2d[", i);
                 ImGui::SameLine(0, 0);
-                ImGui::PushStyleColor(ImGuiCol_PlotHistogram, bar_color);
-                ImGui::ProgressBar(static_cast<float>(usage / 100.0), ImVec2(30, 12), "");
-                ImGui::PopStyleColor();
+                draw_bar(static_cast<float>(usage / 100.0), 30, bar_color);
                 ImGui::SameLine(0, 0);
                 ImGui::Text("]%4.0f%%", usage);
             }
