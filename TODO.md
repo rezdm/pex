@@ -14,4 +14,5 @@
 * Add support for containers
 * Make it possible to persist history: to capture certain data over time -- this was actually the initial idea
 * Add support for GPU usage stats (not sure what though)
+* In lower pane tabs -- show a) linked b) loaded libraries
 
