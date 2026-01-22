@@ -1,4 +1,5 @@
 #include "app.hpp"
+#include "system_info.hpp"
 #include "imgui.h"
 #include <fstream>
 #include <sstream>
@@ -81,10 +82,30 @@ void App::update_popup_history() {
         const uint64_t user_delta = total_utime - popup_prev_utime_;
         const uint64_t kernel_delta = total_stime - popup_prev_stime_;
 
-        // Convert to percentage (assuming ~100 ticks per second)
+        // Use actual system tick rate and CPU count for accurate percentage
+        const auto& sys = SystemInfo::instance();
+        const long ticks_per_sec = sys.get_clock_ticks_per_second();
+        const unsigned int cpu_count = sys.get_processor_count();
+
+        // CPU time is in ticks. Convert delta ticks to percentage of one CPU,
+        // then scale by CPU count to get percentage of total system capacity.
+        // Formula: (delta_ticks / ticks_per_sec) / elapsed_sec * 100 = % of one CPU
         const float elapsed_sec = elapsed / 1000.0f;
-        const float user_pct = (user_delta / (elapsed_sec * 100.0f)) * 100.0f;
-        const float kernel_pct = (kernel_delta / (elapsed_sec * 100.0f)) * 100.0f;
+        const float ticks_in_period = ticks_per_sec * elapsed_sec;
+
+        float user_pct = 0.0f, kernel_pct = 0.0f;
+        if (ticks_in_period > 0) {
+            // Percentage of one CPU
+            user_pct = (static_cast<float>(user_delta) / ticks_in_period) * 100.0f;
+            kernel_pct = (static_cast<float>(kernel_delta) / ticks_in_period) * 100.0f;
+
+            // Scale to show as percentage of total system (like htop default)
+            // Multiply by cpu_count to show as % of one CPU (can exceed 100% on multi-core)
+            // Or keep as-is to show % of total system capacity (max 100% * cpu_count)
+            // We show as % of one CPU for consistency with main process list
+            user_pct *= cpu_count;
+            kernel_pct *= cpu_count;
+        }
 
         popup_cpu_user_history_.push_back(user_pct);
         popup_cpu_kernel_history_.push_back(kernel_pct);
@@ -103,18 +124,20 @@ void App::update_popup_history() {
         popup_memory_history_.erase(popup_memory_history_.begin());
     }
 
-    // Per-CPU usage from system data
+    // Per-CPU usage from system-wide data (not process-specific)
+    // Note: Getting per-process per-CPU usage would require parsing /proc/<pid>/task/*/stat
+    // for each thread and tracking which CPU it ran on - complex and high overhead
     const size_t cpu_count = current_data_->per_cpu_usage.size();
     if (popup_per_cpu_user_history_.size() != cpu_count) {
         popup_per_cpu_user_history_.resize(cpu_count);
         popup_per_cpu_kernel_history_.resize(cpu_count);
     }
 
-    // For per-CPU, we use system-wide per-CPU data (process-specific per-CPU is complex)
     for (size_t i = 0; i < cpu_count; i++) {
         const auto usage = static_cast<float>(current_data_->per_cpu_usage[i]);
-        popup_per_cpu_user_history_[i].push_back(usage * 0.7f);  // Approximate user
-        popup_per_cpu_kernel_history_[i].push_back(usage * 0.3f);  // Approximate kernel
+        // Store total system usage (user history stores total, kernel stays at 0)
+        popup_per_cpu_user_history_[i].push_back(usage);
+        popup_per_cpu_kernel_history_[i].push_back(0.0f);  // Not available per-CPU in snapshot
 
         if (popup_per_cpu_user_history_[i].size() > kHistorySize) {
             popup_per_cpu_user_history_[i].erase(popup_per_cpu_user_history_[i].begin());
@@ -214,8 +237,9 @@ void App::render_process_popup() {
             }
         }
 
-        // Per-CPU Usage (System-wide as context)
-        if (ImGui::CollapsingHeader("Per-CPU (System): User (blue), Kernel (red)", ImGuiTreeNodeFlags_DefaultOpen)) {
+        // Per-CPU Usage (System-wide context, not process-specific)
+        if (ImGui::CollapsingHeader("System CPU Usage (context, not process-specific)", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::TextDisabled("Shows system-wide per-CPU load for context");
             const int cpu_count = static_cast<int>(popup_per_cpu_user_history_.size());
 
             if (const int cols = std::min(4, cpu_count); cpu_count > 0 && ImGui::BeginTable("CPUCharts", cols)) {
@@ -223,35 +247,27 @@ void App::render_process_popup() {
                     if (i % cols == 0) ImGui::TableNextRow();
                     ImGui::TableNextColumn();
 
-                    const float cpu_user = popup_per_cpu_user_history_[i].empty() ? 0.0f : popup_per_cpu_user_history_[i].back();
-                    const float cpu_kernel = popup_per_cpu_kernel_history_[i].empty() ? 0.0f : popup_per_cpu_kernel_history_[i].back();
-                    ImGui::Text("CPU %d: %.1f%%/%.1f%%", i, cpu_user, cpu_kernel);
+                    const float cpu_usage = popup_per_cpu_user_history_[i].empty() ? 0.0f : popup_per_cpu_user_history_[i].back();
+                    ImGui::Text("CPU %d: %.1f%%", i, cpu_usage);
 
                     if (!popup_per_cpu_user_history_[i].empty()) {
                         constexpr float chart_height = 50;
                         const ImVec2 chart_sz(ImGui::GetContentRegionAvail().x - 5, chart_height);
-                        ImVec2 start_pos = ImGui::GetCursorPos();
 
-                        // User (blue)
-                        ImGui::PushStyleColor(ImGuiCol_PlotLines, ImVec4(0.2f, 0.6f, 1.0f, 1.0f));
+                        // Total usage (green to match system panel style)
+                        ImVec4 bar_color;
+                        if (cpu_usage < 25.0f) bar_color = ImVec4(0.0f, 0.8f, 0.0f, 1.0f);
+                        else if (cpu_usage < 50.0f) bar_color = ImVec4(0.5f, 0.8f, 0.0f, 1.0f);
+                        else if (cpu_usage < 75.0f) bar_color = ImVec4(0.8f, 0.8f, 0.0f, 1.0f);
+                        else bar_color = ImVec4(0.8f, 0.2f, 0.0f, 1.0f);
+
+                        ImGui::PushStyleColor(ImGuiCol_PlotLines, bar_color);
                         ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.1f, 0.1f, 0.1f, 1.0f));
-                        ImGui::PlotLines(("##cpu_u" + std::to_string(i)).c_str(),
+                        ImGui::PlotLines(("##cpu_" + std::to_string(i)).c_str(),
                             popup_per_cpu_user_history_[i].data(),
                             static_cast<int>(popup_per_cpu_user_history_[i].size()),
                             0, nullptr, 0.0f, 100.0f, chart_sz);
                         ImGui::PopStyleColor(2);
-
-                        // Overlay Kernel (red)
-                        ImGui::SetCursorPos(start_pos);
-                        ImGui::PushStyleColor(ImGuiCol_PlotLines, ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
-                        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-                        ImGui::PlotLines(("##cpu_k" + std::to_string(i)).c_str(),
-                            popup_per_cpu_kernel_history_[i].data(),
-                            static_cast<int>(popup_per_cpu_kernel_history_[i].size()),
-                            0, nullptr, 0.0f, 100.0f, chart_sz);
-                        ImGui::PopStyleColor(2);
-
-                        ImGui::SetCursorPos(ImVec2(start_pos.x, start_pos.y + chart_height + 2));
                     }
                 }
                 ImGui::EndTable();
