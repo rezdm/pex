@@ -236,8 +236,21 @@ void App::render_process_popup() {
 
         // Per-CPU Usage (System-wide context, not process-specific)
         if (ImGui::CollapsingHeader("System CPU Usage (context, not process-specific)", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::TextDisabled("Shows system-wide per-CPU load: User (blue) + Kernel (red)");
+            ImGui::TextDisabled("Shows system-wide per-CPU load: User (blue) + Kernel (red, system+irq+softirq)");
             const int cpu_count = static_cast<int>(popup_per_cpu_user_history_.size());
+
+            // Determine dynamic scale based on max observed total usage across all CPUs
+            float max_sample = 0.0f;
+            for (size_t i = 0; i < popup_per_cpu_user_history_.size(); i++) {
+                const auto& user_hist = popup_per_cpu_user_history_[i];
+                const auto& kernel_hist = popup_per_cpu_kernel_history_[i];
+                const size_t count = std::min(user_hist.size(), kernel_hist.size());
+                for (size_t j = 0; j < count; j++) {
+                    const float total = user_hist[j] + kernel_hist[j];
+                    if (total > max_sample) max_sample = total;
+                }
+            }
+            const float plot_max = std::max(max_sample + 10.0f, 100.0f); // headroom + ensure at least 100%
 
             if (const int cols = std::min(4, cpu_count); cpu_count > 0 && ImGui::BeginTable("CPUCharts", cols)) {
                 for (int i = 0; i < cpu_count; i++) {
@@ -260,23 +273,17 @@ void App::render_process_popup() {
                         ImGui::PlotLines(("##cpu_user_" + std::to_string(i)).c_str(),
                             popup_per_cpu_user_history_[i].data(),
                             static_cast<int>(popup_per_cpu_user_history_[i].size()),
-                            0, nullptr, 0.0f, 100.0f, chart_sz);
+                            0, nullptr, 0.0f, plot_max, chart_sz);
                         ImGui::PopStyleColor(2);
 
-                        // Overlay Kernel CPU (red) - stacked on top of user
-                        // Create stacked values (user + kernel)
-                        std::vector<float> stacked;
-                        stacked.reserve(popup_per_cpu_user_history_[i].size());
-                        for (size_t j = 0; j < popup_per_cpu_user_history_[i].size(); j++) {
-                            stacked.push_back(popup_per_cpu_user_history_[i][j] + popup_per_cpu_kernel_history_[i][j]);
-                        }
+                        // Overlay Kernel CPU (red) - kernel only
                         ImGui::SetCursorPos(start_pos);
                         ImGui::PushStyleColor(ImGuiCol_PlotLines, ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
                         ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-                        ImGui::PlotLines(("##cpu_total_" + std::to_string(i)).c_str(),
-                            stacked.data(),
-                            static_cast<int>(stacked.size()),
-                            0, nullptr, 0.0f, 100.0f, chart_sz);
+                        ImGui::PlotLines(("##cpu_kernel_" + std::to_string(i)).c_str(),
+                            popup_per_cpu_kernel_history_[i].data(),
+                            static_cast<int>(popup_per_cpu_kernel_history_[i].size()),
+                            0, nullptr, 0.0f, plot_max, chart_sz);
                         ImGui::PopStyleColor(2);
 
                         // Move cursor past the chart

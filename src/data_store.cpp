@@ -237,10 +237,13 @@ void DataStore::collect_data() {
     if (cpu_count == previous_per_cpu_times_.size()) {
         for (size_t i = 0; i < cpu_count; i++) {
             if (uint64_t delta_total = current_per_cpu_times_[i].total() - previous_per_cpu_times_[i].total(); delta_total > 0) {
-                const uint64_t delta_active = current_per_cpu_times_[i].active() - previous_per_cpu_times_[i].active();
                 const uint64_t delta_user = (current_per_cpu_times_[i].user + current_per_cpu_times_[i].nice) -
                                             (previous_per_cpu_times_[i].user + previous_per_cpu_times_[i].nice);
-                const uint64_t delta_kernel = (delta_active > delta_user) ? (delta_active - delta_user) : 0;
+                const uint64_t delta_system = current_per_cpu_times_[i].system - previous_per_cpu_times_[i].system;
+                const uint64_t delta_irq = current_per_cpu_times_[i].irq - previous_per_cpu_times_[i].irq;
+                const uint64_t delta_softirq = current_per_cpu_times_[i].softirq - previous_per_cpu_times_[i].softirq;
+                const uint64_t delta_active = current_per_cpu_times_[i].active() - previous_per_cpu_times_[i].active();
+                const uint64_t delta_kernel = delta_system + delta_irq + delta_softirq;
 
                 per_cpu_usage_buffer_[i] = static_cast<double>(delta_active) / delta_total * 100.0;
                 per_cpu_user_buffer_[i] = static_cast<double>(delta_user) / delta_total * 100.0;
