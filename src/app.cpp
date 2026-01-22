@@ -13,16 +13,12 @@ namespace pex {
 App::App() {
     // Set up callback to wake up UI when new data is available
     data_store_.set_on_data_updated([this]() {
-        if (window_) {
-            glfwPostEmptyEvent();
-        }
+        post_empty_event_debounced();
     });
 
     // Set up callback to wake up UI when name resolution completes
     name_resolver_.set_on_resolved([this]() {
-        if (window_) {
-            glfwPostEmptyEvent();
-        }
+        post_empty_event_debounced();
     });
 }
 
@@ -155,7 +151,18 @@ void App::run() {
 
 void App::request_focus() {
     focus_requested_ = true;
-    glfwPostEmptyEvent(); // Wake up the event loop
+    post_empty_event_debounced(); // Wake up the event loop
+}
+
+void App::post_empty_event_debounced() {
+    if (!window_) return;
+
+    std::lock_guard lock(event_debounce_mutex_);
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last_event_post_time_ >= kEventDebounceInterval) {
+        last_event_post_time_ = now;
+        glfwPostEmptyEvent();
+    }
 }
 
 void App::render() {

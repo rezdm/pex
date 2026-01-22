@@ -117,6 +117,12 @@ private:
     bool kill_is_tree_ = false;
     std::string kill_error_message_;
     bool kill_show_force_option_ = false;  // Show force kill after SIGTERM fails
+
+    // Event debouncing to prevent glfwPostEmptyEvent floods
+    void post_empty_event_debounced();
+    std::mutex event_debounce_mutex_;
+    std::chrono::steady_clock::time_point last_event_post_time_;
+    static constexpr auto kEventDebounceInterval = std::chrono::milliseconds(16);  // ~60fps max
 };
 
 } // namespace pex

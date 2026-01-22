@@ -42,20 +42,26 @@ static void collect_descendants_from_proc(const int root_pid, std::vector<int>& 
 
     try {
         for (const auto& entry : fs::directory_iterator("/proc")) {
-            if (!entry.is_directory()) continue;
+            try {
+                if (!entry.is_directory()) continue;
 
-            const auto& name = entry.path().filename().string();
-            int pid = 0;
-            auto [ptr, ec] = std::from_chars(name.data(), name.data() + name.size(), pid);
-            if (ec != std::errc{} || ptr != name.data() + name.size()) continue;
+                const auto& name = entry.path().filename().string();
+                int pid = 0;
+                auto [ptr, ec] = std::from_chars(name.data(), name.data() + name.size(), pid);
+                if (ec != std::errc{} || ptr != name.data() + name.size()) continue;
 
-            all_pids.insert(pid);
-            int ppid = get_ppid(pid);
-            if (ppid > 0) {
-                children_map[ppid].push_back(pid);
+                all_pids.insert(pid);
+                int ppid = get_ppid(pid);
+                if (ppid > 0) {
+                    children_map[ppid].push_back(pid);
+                }
+            } catch (...) {
+                // Process disappeared, skip it
+                continue;
             }
         }
     } catch (...) {
+        // Directory iteration failed
         return;
     }
 

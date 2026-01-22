@@ -72,16 +72,25 @@ std::string ProcfsReader::get_username(const int uid) {
 std::vector<ProcessInfo> ProcfsReader::get_all_processes() {
     std::vector<ProcessInfo> processes;
 
-    for (const auto& entry : fs::directory_iterator("/proc")) {
-        if (!entry.is_directory()) continue;
+    try {
+        for (const auto& entry : fs::directory_iterator("/proc")) {
+            try {
+                if (!entry.is_directory()) continue;
 
-        const auto& name = entry.path().filename().string();
-        int pid = 0;
-        if (auto [ptr, ec] = std::from_chars(name.data(), name.data() + name.size(), pid); ec != std::errc{} || ptr != name.data() + name.size()) continue;
+                const auto& name = entry.path().filename().string();
+                int pid = 0;
+                if (auto [ptr, ec] = std::from_chars(name.data(), name.data() + name.size(), pid); ec != std::errc{} || ptr != name.data() + name.size()) continue;
 
-        if (auto info = get_process_info(pid)) {
-            processes.push_back(std::move(*info));
+                if (auto info = get_process_info(pid)) {
+                    processes.push_back(std::move(*info));
+                }
+            } catch (...) {
+                // Process disappeared mid-read, skip it
+                continue;
+            }
         }
+    } catch (const std::exception& e) {
+        add_error(std::format("Failed to iterate /proc: {}", e.what()));
     }
 
     return processes;
@@ -254,102 +263,105 @@ std::vector<ThreadInfo> ProcfsReader::get_threads(int pid) {
 
     try {
         for (const auto& entry : fs::directory_iterator(task_path)) {
-            if (!entry.is_directory()) continue;
+            try {
+                if (!entry.is_directory()) continue;
 
-            const auto& name = entry.path().filename().string();
-            int tid = 0;
-            if (auto [ptr, ec] = std::from_chars(name.data(), name.data() + name.size(), tid); ec != std::errc{}) continue;
+                const auto& name = entry.path().filename().string();
+                int tid = 0;
+                if (auto [ptr, ec] = std::from_chars(name.data(), name.data() + name.size(), tid); ec != std::errc{}) continue;
 
-            ThreadInfo thread;
-            thread.tid = tid;
+                ThreadInfo thread;
+                thread.tid = tid;
 
-            // Read thread stat
-            if (std::string stat = read_file(entry.path().string() + "/stat"); !stat.empty()) {
-                size_t comm_start = stat.find('(');
-                size_t comm_end = stat.rfind(')');
+                // Read thread stat
+                if (std::string stat = read_file(entry.path().string() + "/stat"); !stat.empty()) {
+                    size_t comm_start = stat.find('(');
+                    size_t comm_end = stat.rfind(')');
 
-                if (comm_start != std::string::npos && comm_end != std::string::npos && comm_end > comm_start) {
-                    thread.name = stat.substr(comm_start + 1, comm_end - comm_start - 1);
+                    if (comm_start != std::string::npos && comm_end != std::string::npos && comm_end > comm_start) {
+                        thread.name = stat.substr(comm_start + 1, comm_end - comm_start - 1);
 
-                    // Check for content after comm
-                    if (comm_end + 2 < stat.size()) {
-                        std::istringstream iss(stat.substr(comm_end + 2));
-                        std::string state;
-                        int ppid = 0, pgrp = 0, session = 0, tty_nr = 0, tpgid = 0;
-                        unsigned int flags = 0;
-                        uint64_t minflt = 0, cminflt = 0, majflt = 0, cmajflt = 0, utime = 0, stime = 0;
-                        int64_t cutime = 0, cstime = 0, priority = 0, nice = 0, num_threads = 0, itrealvalue = 0, starttime = 0;
-                        uint64_t vsize = 0, rss = 0;
-                        uint64_t dummy[15] = {};
-                        int processor = 0;
+                        // Check for content after comm
+                        if (comm_end + 2 < stat.size()) {
+                            std::istringstream iss(stat.substr(comm_end + 2));
+                            std::string state;
+                            int ppid = 0, pgrp = 0, session = 0, tty_nr = 0, tpgid = 0;
+                            unsigned int flags = 0;
+                            uint64_t minflt = 0, cminflt = 0, majflt = 0, cmajflt = 0, utime = 0, stime = 0;
+                            int64_t cutime = 0, cstime = 0, priority = 0, nice = 0, num_threads = 0, itrealvalue = 0, starttime = 0;
+                            uint64_t vsize = 0, rss = 0;
+                            uint64_t dummy[15] = {};
+                            int processor = 0;
 
-                        iss >> state >> ppid >> pgrp >> session >> tty_nr >> tpgid >> flags
-                            >> minflt >> cminflt >> majflt >> cmajflt >> utime >> stime
-                            >> cutime >> cstime >> priority >> nice >> num_threads >> itrealvalue >> starttime
-                            >> vsize >> rss;
+                            iss >> state >> ppid >> pgrp >> session >> tty_nr >> tpgid >> flags
+                                >> minflt >> cminflt >> majflt >> cmajflt >> utime >> stime
+                                >> cutime >> cstime >> priority >> nice >> num_threads >> itrealvalue >> starttime
+                                >> vsize >> rss;
 
-                        // Skip to processor field (field 39, 0-indexed 38)
-                        for (auto& d : dummy) iss >> d;
-                        iss >> processor;
+                            // Skip to processor field (field 39, 0-indexed 38)
+                            for (auto& d : dummy) iss >> d;
+                            iss >> processor;
 
-                        thread.state = state.empty() ? '?' : state[0];
-                        thread.priority = static_cast<int>(priority);
-                        thread.processor = iss.fail() ? -1 : processor;
+                            thread.state = state.empty() ? '?' : state[0];
+                            thread.priority = static_cast<int>(priority);
+                            thread.processor = iss.fail() ? -1 : processor;
+                        } else {
+                            thread.state = '?';
+                            thread.priority = 0;
+                            thread.processor = -1;
+                        }
                     } else {
+                        // Malformed stat - use defaults
+                        thread.name = "???";
                         thread.state = '?';
                         thread.priority = 0;
                         thread.processor = -1;
                     }
-                } else {
-                    // Malformed stat - use defaults
-                    thread.name = "???";
-                    thread.state = '?';
-                    thread.priority = 0;
-                    thread.processor = -1;
                 }
-            }
 
-            // Read thread stack
-            std::string stack = read_file(entry.path().string() + "/stack");
-            thread.stack = stack;
+                // Read thread stack
+                std::string stack = read_file(entry.path().string() + "/stack");
+                thread.stack = stack;
 
-            // Read instruction pointer from syscall file to determine current library
-            // Format: syscall_num arg1 arg2 arg3 arg4 arg5 arg6 sp pc
-            // Or: "running" if in user space
-            if (std::string syscall = read_file(entry.path().string() + "/syscall"); !syscall.empty()) {
-                std::istringstream iss(syscall);
-                std::string syscall_num;
-                iss >> syscall_num;
+                // Read instruction pointer from syscall file to determine current library
+                // Format: syscall_num arg1 arg2 arg3 arg4 arg5 arg6 sp pc
+                // Or: "running" if in user space
+                if (std::string syscall = read_file(entry.path().string() + "/syscall"); !syscall.empty()) {
+                    std::istringstream iss(syscall);
+                    std::string syscall_num;
+                    iss >> syscall_num;
 
-                if (syscall_num != "running" && !syscall_num.empty()) {
-                    // Need to read 6 args, then sp, then pc
-                    std::string hex;
-                    int field_count = 0;
-                    uint64_t pc = 0;
+                    if (syscall_num != "running" && !syscall_num.empty()) {
+                        // Need to read 6 args, then sp, then pc
+                        std::string hex;
+                        int field_count = 0;
+                        uint64_t pc = 0;
 
-                    // Skip 6 args + sp (7 fields)
-                    for (int i = 0; i < 7 && iss >> hex; i++) {
-                        field_count++;
-                    }
+                        // Skip 6 args + sp (7 fields)
+                        for (int i = 0; i < 7 && iss >> hex; i++) {
+                            field_count++;
+                        }
 
-                    // Read pc
-                    if (field_count == 7 && iss >> hex) {
-                        if (hex.starts_with("0x") && hex.size() > 2) {
-                            auto [ptr, ec] = std::from_chars(hex.data() + 2, hex.data() + hex.size(), pc, 16);
-                            if (ec == std::errc{} && pc > 0) {
-                                thread.current_library = find_library(pc);
+                        // Read pc
+                        if (field_count == 7 && iss >> hex) {
+                            if (hex.starts_with("0x") && hex.size() > 2) {
+                                auto [ptr, ec] = std::from_chars(hex.data() + 2, hex.data() + hex.size(), pc, 16);
+                                if (ec == std::errc{} && pc > 0) {
+                                    thread.current_library = find_library(pc);
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            threads.push_back(std::move(thread));
+                threads.push_back(std::move(thread));
+            } catch (...) {
+                // Thread disappeared mid-read, skip it
+                continue;
+            }
         }
-    } catch (const std::exception& e) {
-        add_error(std::format("PID {}: error reading threads: {}", pid, e.what()));
     } catch (...) {
-        // Permission denied or process gone - silent
+        // Directory iteration failed (process gone or permission denied)
     }
 
     return threads;
@@ -361,41 +373,46 @@ std::vector<FileHandleInfo> ProcfsReader::get_file_handles(const int pid) {
 
     try {
         for (const auto& entry : fs::directory_iterator(fd_path)) {
-            FileHandleInfo handle;
+            try {
+                FileHandleInfo handle;
 
-            const auto& name = entry.path().filename().string();
-            if (auto [ptr, ec] = std::from_chars(name.data(), name.data() + name.size(), handle.fd); ec != std::errc{}) continue;
+                const auto& name = entry.path().filename().string();
+                if (auto [ptr, ec] = std::from_chars(name.data(), name.data() + name.size(), handle.fd); ec != std::errc{}) continue;
 
-            handle.path = read_symlink(entry.path().string());
+                handle.path = read_symlink(entry.path().string());
 
-            // Determine type
-            if (handle.path.starts_with("socket:")) {
-                handle.type = "socket";
-            } else if (handle.path.starts_with("pipe:")) {
-                handle.type = "pipe";
-            } else if (handle.path.starts_with("anon_inode:")) {
-                handle.type = "anon_inode";
-            } else if (handle.path.starts_with("/")) {
-                struct stat st{};
-                if (stat(handle.path.c_str(), &st) == 0) {
-                    if (S_ISREG(st.st_mode)) handle.type = "file";
-                    else if (S_ISDIR(st.st_mode)) handle.type = "dir";
-                    else if (S_ISCHR(st.st_mode)) handle.type = "char";
-                    else if (S_ISBLK(st.st_mode)) handle.type = "block";
-                    else if (S_ISFIFO(st.st_mode)) handle.type = "fifo";
-                    else if (S_ISSOCK(st.st_mode)) handle.type = "socket";
-                    else handle.type = "unknown";
+                // Determine type
+                if (handle.path.starts_with("socket:")) {
+                    handle.type = "socket";
+                } else if (handle.path.starts_with("pipe:")) {
+                    handle.type = "pipe";
+                } else if (handle.path.starts_with("anon_inode:")) {
+                    handle.type = "anon_inode";
+                } else if (handle.path.starts_with("/")) {
+                    struct stat st{};
+                    if (stat(handle.path.c_str(), &st) == 0) {
+                        if (S_ISREG(st.st_mode)) handle.type = "file";
+                        else if (S_ISDIR(st.st_mode)) handle.type = "dir";
+                        else if (S_ISCHR(st.st_mode)) handle.type = "char";
+                        else if (S_ISBLK(st.st_mode)) handle.type = "block";
+                        else if (S_ISFIFO(st.st_mode)) handle.type = "fifo";
+                        else if (S_ISSOCK(st.st_mode)) handle.type = "socket";
+                        else handle.type = "unknown";
+                    } else {
+                        handle.type = "file";
+                    }
                 } else {
-                    handle.type = "file";
+                    handle.type = "unknown";
                 }
-            } else {
-                handle.type = "unknown";
-            }
 
-            handles.push_back(std::move(handle));
+                handles.push_back(std::move(handle));
+            } catch (...) {
+                // FD disappeared mid-read, skip it
+                continue;
+            }
         }
     } catch (...) {
-        // Permission denied
+        // Directory iteration failed (process gone or permission denied)
     }
 
     std::ranges::sort(handles, [](const auto& a, const auto& b) {
@@ -488,16 +505,22 @@ std::vector<NetworkConnectionInfo> ProcfsReader::get_network_connections(const i
 
     try {
         for (const auto& entry : fs::directory_iterator(fd_path)) {
-            std::string link = read_symlink(entry.path().string());
-            if (link.starts_with("socket:[")) {
-                int inode = 0;
-                const auto start = link.data() + 8;
-                const auto end = link.data() + link.size() - 1;
-                std::from_chars(start, end, inode);
-                if (inode > 0) socket_inodes.insert(inode);
+            try {
+                std::string link = read_symlink(entry.path().string());
+                if (link.starts_with("socket:[")) {
+                    int inode = 0;
+                    const auto start = link.data() + 8;
+                    const auto end = link.data() + link.size() - 1;
+                    std::from_chars(start, end, inode);
+                    if (inode > 0) socket_inodes.insert(inode);
+                }
+            } catch (...) {
+                // FD disappeared, skip it
+                continue;
             }
         }
     } catch (...) {
+        // Directory iteration failed
         return result;
     }
 
