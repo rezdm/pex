@@ -10,6 +10,7 @@
 #include <format>
 #include <set>
 #include <arpa/inet.h>
+#include <netinet/in.h>
 
 namespace fs = std::filesystem;
 
@@ -452,7 +453,24 @@ std::map<int, NetworkConnectionInfo> ProcfsReader::parse_net_file(const std::str
         std::from_chars(port_hex.data(), port_hex.data() + port_hex.size(), port, 16);
 
         if (is_ipv6) {
-            // IPv6 handling (simplified)
+            // IPv6: 32 hex chars = 128 bits, stored as 4 little-endian 32-bit words
+            if (ip_hex.size() != 32) {
+                return "[::]:" + std::to_string(port);
+            }
+
+            // Parse 4 32-bit words and convert from host (little-endian) to network byte order
+            struct in6_addr addr{};
+            for (int i = 0; i < 4; i++) {
+                uint32_t word = 0;
+                std::from_chars(ip_hex.data() + i * 8, ip_hex.data() + i * 8 + 8, word, 16);
+                // Each word in /proc is in host byte order, need to swap for in6_addr
+                addr.s6_addr32[i] = htonl(word);
+            }
+
+            char buf[INET6_ADDRSTRLEN];
+            if (inet_ntop(AF_INET6, &addr, buf, sizeof(buf))) {
+                return std::format("[{}]:{}", buf, port);
+            }
             return "[::]:" + std::to_string(port);
         } else {
             // IPv4
