@@ -255,4 +255,8 @@ void DataStore::build_process_map(ProcessNode* node, std::map<int, ProcessNode*>
     }
 }
 
+std::vector<ParseError> DataStore::get_recent_errors() {
+    return reader_.get_recent_errors();
+}
+
 } // namespace pex

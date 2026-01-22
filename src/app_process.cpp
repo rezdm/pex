@@ -39,7 +39,7 @@ void App::refresh_selected_details() {
     threads_ = details_reader_.get_threads(selected_pid_);
     memory_maps_ = details_reader_.get_memory_maps(selected_pid_);
     environment_vars_ = details_reader_.get_environment_variables(selected_pid_);
-    libraries_ = ProcfsReader::get_libraries(selected_pid_);
+    libraries_ = details_reader_.get_libraries(selected_pid_);
     // Preserve thread selection if still valid
     if (selected_thread_idx_ >= static_cast<int>(threads_.size())) {
         selected_thread_idx_ = -1;

@@ -11,6 +11,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <functional>
+#include <string>
 
 namespace pex {
 
@@ -75,6 +76,9 @@ public:
 
     // Register callback for when new data is available
     void set_on_data_updated(std::function<void()> callback);
+
+    // Get recent parse errors for status bar display
+    [[nodiscard]] std::vector<ParseError> get_recent_errors();
 
 private:
     void collection_thread_func();

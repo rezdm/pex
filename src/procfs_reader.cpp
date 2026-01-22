@@ -15,6 +15,33 @@ namespace fs = std::filesystem;
 
 namespace pex {
 
+// Error tracking methods
+void ProcfsReader::add_error(const std::string& message) {
+    std::lock_guard lock(errors_mutex_);
+    recent_errors_.push_back({std::chrono::steady_clock::now(), message});
+    if (recent_errors_.size() > kMaxErrors) {
+        recent_errors_.erase(recent_errors_.begin());
+    }
+}
+
+std::vector<ParseError> ProcfsReader::get_recent_errors() {
+    std::lock_guard lock(errors_mutex_);
+    // Return errors from the last 10 seconds
+    auto cutoff = std::chrono::steady_clock::now() - std::chrono::seconds(10);
+    std::vector<ParseError> result;
+    for (const auto& err : recent_errors_) {
+        if (err.timestamp > cutoff) {
+            result.push_back(err);
+        }
+    }
+    return result;
+}
+
+void ProcfsReader::clear_errors() {
+    std::lock_guard lock(errors_mutex_);
+    recent_errors_.clear();
+}
+
 std::string ProcfsReader::read_file(const std::string& path) {
     std::ifstream file(path);
     if (!file) return {};
@@ -74,25 +101,38 @@ std::optional<ProcessInfo> ProcfsReader::get_process_info(int pid) {
     // comm can contain spaces and parentheses, so find the last ')'
     size_t comm_start = stat_content.find('(');
     size_t comm_end = stat_content.rfind(')');
-    if (comm_start == std::string::npos || comm_end == std::string::npos) {
+    if (comm_start == std::string::npos || comm_end == std::string::npos || comm_end <= comm_start) {
+        add_error(std::format("PID {}: malformed stat (missing comm)", pid));
         return std::nullopt;
     }
 
     info.name = stat_content.substr(comm_start + 1, comm_end - comm_start - 1);
 
+    // Check if there's content after comm
+    if (comm_end + 2 >= stat_content.size()) {
+        add_error(std::format("PID {}: truncated stat (no fields after comm)", pid));
+        return std::nullopt;
+    }
+
     // Parse fields after comm
     std::istringstream iss(stat_content.substr(comm_end + 2));
     std::string state;
-    int ppid, pgrp, session, tty_nr, tpgid;
-    unsigned int flags;
-    uint64_t minflt, cminflt, majflt, cmajflt, utime, stime;
-    int64_t cutime, cstime, priority, nice;
-    int64_t num_threads, itrealvalue;
-    uint64_t starttime;
+    int ppid = 0, pgrp = 0, session = 0, tty_nr = 0, tpgid = 0;
+    unsigned int flags = 0;
+    uint64_t minflt = 0, cminflt = 0, majflt = 0, cmajflt = 0, utime = 0, stime = 0;
+    int64_t cutime = 0, cstime = 0, priority = 0, nice = 0;
+    int64_t num_threads = 1, itrealvalue = 0;
+    uint64_t starttime = 0;
 
     iss >> state >> ppid >> pgrp >> session >> tty_nr >> tpgid >> flags
         >> minflt >> cminflt >> majflt >> cmajflt >> utime >> stime
         >> cutime >> cstime >> priority >> nice >> num_threads >> itrealvalue >> starttime;
+
+    // Check if we got at least the essential fields
+    if (iss.fail() && state.empty()) {
+        add_error(std::format("PID {}: failed to parse stat fields", pid));
+        return std::nullopt;
+    }
 
     info.state_char = state.empty() ? '?' : state[0];
     info.parent_pid = ppid;
@@ -106,20 +146,24 @@ std::optional<ProcessInfo> ProcfsReader::get_process_info(int pid) {
     auto& sys = SystemInfo::instance();
     uint64_t boot_time = sys.get_boot_time_ticks();
     long ticks = sys.get_clock_ticks_per_second();
-    uint64_t start_seconds = boot_time + (starttime / ticks);
-    info.start_time = std::chrono::system_clock::from_time_t(static_cast<time_t>(start_seconds));
+    if (ticks > 0) {
+        uint64_t start_seconds = boot_time + (starttime / ticks);
+        info.start_time = std::chrono::system_clock::from_time_t(static_cast<time_t>(start_seconds));
+    }
 
     // Read statm for memory info
     if (std::string statm = read_file(proc_path + "/statm"); !statm.empty()) {
         std::istringstream statm_iss(statm);
-        uint64_t size, resident;
+        uint64_t size = 0, resident = 0;
         statm_iss >> size >> resident;
-        long page_size = sysconf(_SC_PAGESIZE);
-        info.virtual_memory = static_cast<int64_t>(size * page_size);
-        info.resident_memory = static_cast<int64_t>(resident * page_size);
+        if (!statm_iss.fail()) {
+            long page_size = sysconf(_SC_PAGESIZE);
+            info.virtual_memory = static_cast<int64_t>(size * page_size);
+            info.resident_memory = static_cast<int64_t>(resident * page_size);
 
-        if (auto mem_info = SystemInfo::get_memory_info(); mem_info.total > 0) {
-            info.memory_percent = static_cast<double>(info.resident_memory) / mem_info.total * 100.0;
+            if (auto mem_info = SystemInfo::get_memory_info(); mem_info.total > 0) {
+                info.memory_percent = static_cast<double>(info.resident_memory) / mem_info.total * 100.0;
+            }
         }
     }
 
@@ -142,7 +186,7 @@ std::optional<ProcessInfo> ProcfsReader::get_process_info(int pid) {
         if (line.starts_with("Uid:")) {
             std::istringstream uid_iss(line);
             std::string key;
-            int uid;
+            int uid = 0;
             uid_iss >> key >> uid;
             info.user_name = get_username(uid);
             break;
@@ -174,21 +218,25 @@ std::vector<ThreadInfo> ProcfsReader::get_threads(int pid) {
             iss >> address >> perms >> offset >> dev >> inode_str;
             std::getline(iss >> std::ws, pathname);
 
+            // Skip deleted mappings
+            if (pathname.find("(deleted)") != std::string::npos) continue;
+
             // Only include executable mappings with a pathname
             if (perms.size() >= 3 && perms[2] == 'x' && !pathname.empty() && pathname[0] == '/') {
                 size_t dash = address.find('-');
                 if (dash != std::string::npos) {
                     uint64_t start_addr = 0, end_addr = 0;
-                    std::from_chars(address.data(), address.data() + dash, start_addr, 16);
-                    std::from_chars(address.data() + dash + 1, address.data() + address.size(), end_addr, 16);
+                    auto [ptr1, ec1] = std::from_chars(address.data(), address.data() + dash, start_addr, 16);
+                    auto [ptr2, ec2] = std::from_chars(address.data() + dash + 1, address.data() + address.size(), end_addr, 16);
 
-                    // Extract just the library name
-                    std::string lib_name = pathname;
-                    if (size_t pos = pathname.rfind('/'); pos != std::string::npos) {
-                        lib_name = pathname.substr(pos + 1);
+                    if (ec1 == std::errc{} && ec2 == std::errc{} && start_addr < end_addr) {
+                        // Extract just the library name
+                        std::string lib_name = pathname;
+                        if (size_t pos = pathname.rfind('/'); pos != std::string::npos) {
+                            lib_name = pathname.substr(pos + 1);
+                        }
+                        address_map.push_back({start_addr, end_addr, lib_name});
                     }
-
-                    address_map.push_back({start_addr, end_addr, lib_name});
                 }
             }
         }
@@ -218,30 +266,46 @@ std::vector<ThreadInfo> ProcfsReader::get_threads(int pid) {
             // Read thread stat
             if (std::string stat = read_file(entry.path().string() + "/stat"); !stat.empty()) {
                 size_t comm_start = stat.find('(');
-                if (size_t comm_end = stat.rfind(')'); comm_start != std::string::npos && comm_end != std::string::npos) {
+                size_t comm_end = stat.rfind(')');
+
+                if (comm_start != std::string::npos && comm_end != std::string::npos && comm_end > comm_start) {
                     thread.name = stat.substr(comm_start + 1, comm_end - comm_start - 1);
 
-                    std::istringstream iss(stat.substr(comm_end + 2));
-                    std::string state;
-                    int ppid, pgrp, session, tty_nr, tpgid;
-                    unsigned int flags;
-                    uint64_t minflt, cminflt, majflt, cmajflt, utime, stime;
-                    int64_t cutime, cstime, priority, nice, num_threads, itrealvalue, starttime;
-                    uint64_t vsize, rss;
-                    uint64_t dummy[10];
-                    int processor;
+                    // Check for content after comm
+                    if (comm_end + 2 < stat.size()) {
+                        std::istringstream iss(stat.substr(comm_end + 2));
+                        std::string state;
+                        int ppid = 0, pgrp = 0, session = 0, tty_nr = 0, tpgid = 0;
+                        unsigned int flags = 0;
+                        uint64_t minflt = 0, cminflt = 0, majflt = 0, cmajflt = 0, utime = 0, stime = 0;
+                        int64_t cutime = 0, cstime = 0, priority = 0, nice = 0, num_threads = 0, itrealvalue = 0, starttime = 0;
+                        uint64_t vsize = 0, rss = 0;
+                        uint64_t dummy[15] = {};
+                        int processor = 0;
 
-                    iss >> state >> ppid >> pgrp >> session >> tty_nr >> tpgid >> flags
-                        >> minflt >> cminflt >> majflt >> cmajflt >> utime >> stime
-                        >> cutime >> cstime >> priority >> nice >> num_threads >> itrealvalue >> starttime
-                        >> vsize >> rss;
-                    // Skip to processor field (field 39, 0-indexed 38)
-                    for (int i = 0; i < 15; i++) iss >> dummy[i];
-                    iss >> processor;
+                        iss >> state >> ppid >> pgrp >> session >> tty_nr >> tpgid >> flags
+                            >> minflt >> cminflt >> majflt >> cmajflt >> utime >> stime
+                            >> cutime >> cstime >> priority >> nice >> num_threads >> itrealvalue >> starttime
+                            >> vsize >> rss;
 
-                    thread.state = state.empty() ? '?' : state[0];
-                    thread.priority = static_cast<int>(priority);
-                    thread.processor = processor;
+                        // Skip to processor field (field 39, 0-indexed 38)
+                        for (auto& d : dummy) iss >> d;
+                        iss >> processor;
+
+                        thread.state = state.empty() ? '?' : state[0];
+                        thread.priority = static_cast<int>(priority);
+                        thread.processor = iss.fail() ? -1 : processor;
+                    } else {
+                        thread.state = '?';
+                        thread.priority = 0;
+                        thread.processor = -1;
+                    }
+                } else {
+                    // Malformed stat - use defaults
+                    thread.name = "???";
+                    thread.state = '?';
+                    thread.priority = 0;
+                    thread.processor = -1;
                 }
             }
 
@@ -251,32 +315,41 @@ std::vector<ThreadInfo> ProcfsReader::get_threads(int pid) {
 
             // Read instruction pointer from syscall file to determine current library
             // Format: syscall_num arg1 arg2 arg3 arg4 arg5 arg6 sp pc
+            // Or: "running" if in user space
             if (std::string syscall = read_file(entry.path().string() + "/syscall"); !syscall.empty()) {
                 std::istringstream iss(syscall);
                 std::string syscall_num;
-                uint64_t args[6], sp, pc;
                 iss >> syscall_num;
-                if (syscall_num != "running") {
-                    for (auto& arg : args) {
-                        std::string hex;
-                        iss >> hex;
-                        if (hex.starts_with("0x")) {
-                            std::from_chars(hex.data() + 2, hex.data() + hex.size(), arg, 16);
-                        }
+
+                if (syscall_num != "running" && !syscall_num.empty()) {
+                    // Need to read 6 args, then sp, then pc
+                    std::string hex;
+                    int field_count = 0;
+                    uint64_t pc = 0;
+
+                    // Skip 6 args + sp (7 fields)
+                    for (int i = 0; i < 7 && iss >> hex; i++) {
+                        field_count++;
                     }
-                    std::string sp_hex, pc_hex;
-                    iss >> sp_hex >> pc_hex;
-                    if (pc_hex.starts_with("0x")) {
-                        std::from_chars(pc_hex.data() + 2, pc_hex.data() + pc_hex.size(), pc, 16);
-                        thread.current_library = find_library(pc);
+
+                    // Read pc
+                    if (field_count == 7 && iss >> hex) {
+                        if (hex.starts_with("0x") && hex.size() > 2) {
+                            auto [ptr, ec] = std::from_chars(hex.data() + 2, hex.data() + hex.size(), pc, 16);
+                            if (ec == std::errc{} && pc > 0) {
+                                thread.current_library = find_library(pc);
+                            }
+                        }
                     }
                 }
             }
 
             threads.push_back(std::move(thread));
         }
+    } catch (const std::exception& e) {
+        add_error(std::format("PID {}: error reading threads: {}", pid, e.what()));
     } catch (...) {
-        // Permission denied or process gone
+        // Permission denied or process gone - silent
     }
 
     return threads;
@@ -467,12 +540,19 @@ std::vector<MemoryMapInfo> ProcfsReader::get_memory_maps(int pid) {
         iss >> address >> perms >> offset >> dev >> inode;
         std::getline(iss >> std::ws, pathname);
 
+        // Skip deleted mappings
+        if (pathname.find("(deleted)") != std::string::npos) continue;
+
         // Parse address range to calculate size
         size_t dash = address.find('-');
         uint64_t start_addr = 0, end_addr = 0;
         if (dash != std::string::npos) {
-            std::from_chars(address.data(), address.data() + dash, start_addr, 16);
-            std::from_chars(address.data() + dash + 1, address.data() + address.size(), end_addr, 16);
+            auto [ptr1, ec1] = std::from_chars(address.data(), address.data() + dash, start_addr, 16);
+            auto [ptr2, ec2] = std::from_chars(address.data() + dash + 1, address.data() + address.size(), end_addr, 16);
+            if (ec1 != std::errc{} || ec2 != std::errc{}) {
+                add_error(std::format("PID {}: malformed address in maps: {}", pid, address));
+                continue;
+            }
         }
         uint64_t size = end_addr - start_addr;
 
@@ -563,8 +643,11 @@ std::vector<LibraryInfo> ProcfsReader::get_libraries(const int pid) {
         size_t dash = address.find('-');
         uint64_t start_addr = 0, end_addr = 0;
         if (dash != std::string::npos) {
-            std::from_chars(address.data(), address.data() + dash, start_addr, 16);
-            std::from_chars(address.data() + dash + 1, address.data() + address.size(), end_addr, 16);
+            auto [ptr1, ec1] = std::from_chars(address.data(), address.data() + dash, start_addr, 16);
+            auto [ptr2, ec2] = std::from_chars(address.data() + dash + 1, address.data() + address.size(), end_addr, 16);
+            if (ec1 != std::errc{} || ec2 != std::errc{}) {
+                continue;  // Skip malformed entries silently for libraries
+            }
         }
         uint64_t size = end_addr - start_addr;
 

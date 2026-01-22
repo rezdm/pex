@@ -197,6 +197,16 @@ void App::render() {
     ImGui::EndChild();
 
     // Status bar
+    auto errors = data_store_.get_recent_errors();
+    if (!errors.empty()) {
+        // Show most recent error in yellow
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.2f, 1.0f));
+        ImGui::Text("[!] %s", errors.back().message.c_str());
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+        ImGui::TextDisabled("|");
+        ImGui::SameLine();
+    }
     ImGui::Text("Processes: %d | CPU: %.1f%% | Memory: %s / %s",
                 current_data_->process_count, current_data_->cpu_usage,
                 format_bytes(current_data_->memory_used).c_str(),
