@@ -4,11 +4,14 @@
 #include <fstream>
 #include <sstream>
 #include <unistd.h>
+#include <fcntl.h>
 #include <pwd.h>
 #include <sys/stat.h>
 #include <algorithm>
 #include <format>
 #include <set>
+#include <cerrno>
+#include <cstring>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
@@ -378,7 +381,28 @@ std::vector<ThreadInfo> ProcfsReader::get_threads(int pid) {
 
 std::string ProcfsReader::get_thread_stack(int pid, int tid) {
     std::string path = "/proc/" + std::to_string(pid) + "/task/" + std::to_string(tid) + "/stack";
-    return read_file(path);
+
+    // Use low-level I/O for procfs files - they need direct read() calls
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) {
+        if (errno == EACCES || errno == EPERM) {
+            return "(requires root to read kernel stack)";
+        }
+        return std::format("(cannot read stack: {})", strerror(errno));
+    }
+
+    std::string result;
+    char buf[4096];
+    ssize_t n;
+    while ((n = read(fd, buf, sizeof(buf))) > 0) {
+        result.append(buf, n);
+    }
+    close(fd);
+
+    if (result.empty()) {
+        return "(kernel stack requires root privileges)";
+    }
+    return result;
 }
 
 std::vector<FileHandleInfo> ProcfsReader::get_file_handles(const int pid) {

@@ -319,26 +319,38 @@ void App::render_threads_tab() {
 
     // Stack trace panel
     ImGui::BeginChild("StackTrace", ImVec2(0, 0), true);
-    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.1f, 0.1f, 0.1f, 1.0f));
 
     // Fetch stack on-demand for the selected thread
-    if (selected_thread_idx_ >= 0 && selected_thread_idx_ < static_cast<int>(threads_.size())) {
+    if (selected_thread_idx_ >= 0 && selected_thread_idx_ < static_cast<int>(threads_.size()) && details_pid_ > 0) {
         const int tid = threads_[selected_thread_idx_].tid;
+
+        // Header with refresh button
+        ImGui::Text("Stack for TID %d", tid);
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Refresh")) {
+            cached_stack_tid_ = -1;  // Force refresh
+        }
+        ImGui::Separator();
+
+        // Fetch if not cached or cache invalidated
         if (cached_stack_tid_ != tid) {
             cached_stack_ = ProcfsReader::get_thread_stack(details_pid_, tid);
             cached_stack_tid_ = tid;
         }
+
+        // Display stack
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.1f, 0.1f, 0.1f, 1.0f));
+        ImGui::InputTextMultiline("##stack", cached_stack_.data(), cached_stack_.size() + 1,
+            ImGui::GetContentRegionAvail(), ImGuiInputTextFlags_ReadOnly);
+        ImGui::PopStyleColor();
     } else {
+        ImGui::TextDisabled("Select a thread to view its kernel stack trace");
         if (cached_stack_tid_ != -1) {
             cached_stack_.clear();
             cached_stack_tid_ = -1;
         }
     }
 
-    ImGui::InputTextMultiline("##stack", cached_stack_.data(), cached_stack_.size() + 1,
-        ImGui::GetContentRegionAvail(), ImGuiInputTextFlags_ReadOnly);
-
-    ImGui::PopStyleColor();
     ImGui::EndChild();
 }
 
