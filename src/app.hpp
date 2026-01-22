@@ -80,6 +80,8 @@ private:
     std::vector<LibraryInfo> libraries_;
     int selected_thread_idx_ = -1;
     int details_pid_ = -1;  // PID for which details were fetched
+    int cached_stack_tid_ = -1;  // TID for which stack is cached
+    std::string cached_stack_;    // Cached stack trace (fetched on-demand)
 
     // Details tab tracking for on-demand refresh
     enum class DetailsTab { FileHandles, Network, Threads, Memory, Environment, Libraries };

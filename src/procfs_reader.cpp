@@ -330,9 +330,7 @@ std::vector<ThreadInfo> ProcfsReader::get_threads(int pid) {
                     }
                 }
 
-                // Read thread stack
-                std::string stack = read_file(entry.path().string() + "/stack");
-                thread.stack = stack;
+                // Stack is read on-demand when thread is selected (see get_thread_stack)
 
                 // Read instruction pointer from syscall file to determine current library
                 // Format: syscall_num arg1 arg2 arg3 arg4 arg5 arg6 sp pc
@@ -376,6 +374,11 @@ std::vector<ThreadInfo> ProcfsReader::get_threads(int pid) {
     }
 
     return threads;
+}
+
+std::string ProcfsReader::get_thread_stack(int pid, int tid) {
+    std::string path = "/proc/" + std::to_string(pid) + "/task/" + std::to_string(tid) + "/stack";
+    return read_file(path);
 }
 
 std::vector<FileHandleInfo> ProcfsReader::get_file_handles(const int pid) {

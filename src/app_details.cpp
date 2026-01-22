@@ -321,12 +321,21 @@ void App::render_threads_tab() {
     ImGui::BeginChild("StackTrace", ImVec2(0, 0), true);
     ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.1f, 0.1f, 0.1f, 1.0f));
 
-    std::string stack_text;
+    // Fetch stack on-demand for the selected thread
     if (selected_thread_idx_ >= 0 && selected_thread_idx_ < static_cast<int>(threads_.size())) {
-        stack_text = threads_[selected_thread_idx_].stack;
+        const int tid = threads_[selected_thread_idx_].tid;
+        if (cached_stack_tid_ != tid) {
+            cached_stack_ = ProcfsReader::get_thread_stack(details_pid_, tid);
+            cached_stack_tid_ = tid;
+        }
+    } else {
+        if (cached_stack_tid_ != -1) {
+            cached_stack_.clear();
+            cached_stack_tid_ = -1;
+        }
     }
 
-    ImGui::InputTextMultiline("##stack", stack_text.data(), stack_text.size() + 1,
+    ImGui::InputTextMultiline("##stack", cached_stack_.data(), cached_stack_.size() + 1,
         ImGui::GetContentRegionAvail(), ImGuiInputTextFlags_ReadOnly);
 
     ImGui::PopStyleColor();

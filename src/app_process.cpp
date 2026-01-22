@@ -13,6 +13,8 @@ void App::refresh_selected_details() {
             environment_vars_.clear();
             libraries_.clear();
             selected_thread_idx_ = -1;
+            cached_stack_tid_ = -1;
+            cached_stack_.clear();
             details_pid_ = -1;
         }
         return;
@@ -28,6 +30,8 @@ void App::refresh_selected_details() {
         environment_vars_.clear();
         libraries_.clear();
         selected_thread_idx_ = -1;
+        cached_stack_tid_ = -1;
+        cached_stack_.clear();
         details_pid_ = -1;
         return;
     }
@@ -41,6 +45,8 @@ void App::refresh_selected_details() {
         environment_vars_.clear();
         libraries_.clear();
         selected_thread_idx_ = -1;
+        cached_stack_tid_ = -1;
+        cached_stack_.clear();
         details_pid_ = selected_pid_;
     }
 
@@ -57,6 +63,11 @@ void App::refresh_selected_details() {
             // Preserve thread selection if still valid
             if (selected_thread_idx_ >= static_cast<int>(threads_.size())) {
                 selected_thread_idx_ = -1;
+                cached_stack_tid_ = -1;
+                cached_stack_.clear();
+            } else {
+                // Invalidate stack cache to refresh on next render
+                cached_stack_tid_ = -1;
             }
             break;
         case DetailsTab::Memory:
