@@ -32,17 +32,42 @@ void App::refresh_selected_details() {
         return;
     }
 
-    // Always refresh details for the selected process
-    details_pid_ = selected_pid_;
-    file_handles_ = details_reader_.get_file_handles(selected_pid_);
-    network_connections_ = details_reader_.get_network_connections(selected_pid_);
-    threads_ = details_reader_.get_threads(selected_pid_);
-    memory_maps_ = details_reader_.get_memory_maps(selected_pid_);
-    environment_vars_ = details_reader_.get_environment_variables(selected_pid_);
-    libraries_ = details_reader_.get_libraries(selected_pid_);
-    // Preserve thread selection if still valid
-    if (selected_thread_idx_ >= static_cast<int>(threads_.size())) {
+    // If PID changed, clear all cached data for fresh start
+    if (details_pid_ != selected_pid_) {
+        file_handles_.clear();
+        network_connections_.clear();
+        threads_.clear();
+        memory_maps_.clear();
+        environment_vars_.clear();
+        libraries_.clear();
         selected_thread_idx_ = -1;
+        details_pid_ = selected_pid_;
+    }
+
+    // Only refresh data for the currently visible tab
+    switch (active_details_tab_) {
+        case DetailsTab::FileHandles:
+            file_handles_ = details_reader_.get_file_handles(selected_pid_);
+            break;
+        case DetailsTab::Network:
+            network_connections_ = details_reader_.get_network_connections(selected_pid_);
+            break;
+        case DetailsTab::Threads:
+            threads_ = details_reader_.get_threads(selected_pid_);
+            // Preserve thread selection if still valid
+            if (selected_thread_idx_ >= static_cast<int>(threads_.size())) {
+                selected_thread_idx_ = -1;
+            }
+            break;
+        case DetailsTab::Memory:
+            memory_maps_ = details_reader_.get_memory_maps(selected_pid_);
+            break;
+        case DetailsTab::Environment:
+            environment_vars_ = details_reader_.get_environment_variables(selected_pid_);
+            break;
+        case DetailsTab::Libraries:
+            libraries_ = details_reader_.get_libraries(selected_pid_);
+            break;
     }
 }
 

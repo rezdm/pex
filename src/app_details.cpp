@@ -8,26 +8,32 @@ namespace pex {
 void App::render_details_panel() {
     if (ImGui::BeginTabBar("DetailsTabs")) {
         if (ImGui::BeginTabItem("File Handles")) {
+            active_details_tab_ = DetailsTab::FileHandles;
             render_file_handles_tab();
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Network")) {
+            active_details_tab_ = DetailsTab::Network;
             render_network_tab();
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Threads")) {
+            active_details_tab_ = DetailsTab::Threads;
             render_threads_tab();
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Memory")) {
+            active_details_tab_ = DetailsTab::Memory;
             render_memory_tab();
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Environment")) {
+            active_details_tab_ = DetailsTab::Environment;
             render_environment_tab();
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Libraries")) {
+            active_details_tab_ = DetailsTab::Libraries;
             render_libraries_tab();
             ImGui::EndTabItem();
         }

@@ -81,6 +81,10 @@ private:
     int selected_thread_idx_ = -1;
     int details_pid_ = -1;  // PID for which details were fetched
 
+    // Details tab tracking for on-demand refresh
+    enum class DetailsTab { FileHandles, Network, Threads, Memory, Environment, Libraries };
+    DetailsTab active_details_tab_ = DetailsTab::FileHandles;
+
     // Search
     char search_buffer_[256] = {};
     bool scroll_to_selected_ = false;

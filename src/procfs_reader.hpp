@@ -20,6 +20,7 @@ class ProcfsReader {
 public:
     std::vector<ProcessInfo> get_all_processes();
     std::optional<ProcessInfo> get_process_info(int pid);
+    std::optional<ProcessInfo> get_process_info(int pid, int64_t total_memory);
 
     std::vector<ThreadInfo> get_threads(int pid);
 

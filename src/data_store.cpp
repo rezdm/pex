@@ -115,9 +115,11 @@ void DataStore::collect_data() {
     // Get all processes
     auto processes = reader_.get_all_processes();
 
-    // Calculate CPU percentages
+    // Calculate CPU percentages and collect current PIDs
+    std::set<int> current_pids;
     unsigned int proc_count = SystemInfo::instance().get_processor_count();
     for (auto& proc : processes) {
+        current_pids.insert(proc.pid);
         if (auto it = previous_cpu_times_.find(proc.pid); it != previous_cpu_times_.end() && total_cpu_delta > 0) {
             uint64_t user_delta = proc.user_time - it->second.first;
             uint64_t kernel_delta = proc.kernel_time - it->second.second;
@@ -127,6 +129,11 @@ void DataStore::collect_data() {
         }
         previous_cpu_times_[proc.pid] = {proc.user_time, proc.kernel_time};
     }
+
+    // Prune stale entries for processes that no longer exist
+    std::erase_if(previous_cpu_times_, [&current_pids](const auto& entry) {
+        return !current_pids.contains(entry.first);
+    });
 
     // Build process tree
     std::map<int, std::unique_ptr<ProcessNode>> nodes;

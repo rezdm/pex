@@ -72,6 +72,10 @@ std::string ProcfsReader::get_username(const int uid) {
 std::vector<ProcessInfo> ProcfsReader::get_all_processes() {
     std::vector<ProcessInfo> processes;
 
+    // Fetch memory info once for the entire snapshot
+    const auto mem_info = SystemInfo::get_memory_info();
+    const int64_t total_memory = mem_info.total;
+
     try {
         for (const auto& entry : fs::directory_iterator("/proc")) {
             try {
@@ -81,7 +85,7 @@ std::vector<ProcessInfo> ProcfsReader::get_all_processes() {
                 int pid = 0;
                 if (auto [ptr, ec] = std::from_chars(name.data(), name.data() + name.size(), pid); ec != std::errc{} || ptr != name.data() + name.size()) continue;
 
-                if (auto info = get_process_info(pid)) {
+                if (auto info = get_process_info(pid, total_memory)) {
                     processes.push_back(std::move(*info));
                 }
             } catch (...) {
@@ -97,6 +101,12 @@ std::vector<ProcessInfo> ProcfsReader::get_all_processes() {
 }
 
 std::optional<ProcessInfo> ProcfsReader::get_process_info(int pid) {
+    // Convenience overload that fetches memory info (use get_all_processes for bulk)
+    const auto mem_info = SystemInfo::get_memory_info();
+    return get_process_info(pid, mem_info.total);
+}
+
+std::optional<ProcessInfo> ProcfsReader::get_process_info(int pid, int64_t total_memory) {
     std::string proc_path = "/proc/" + std::to_string(pid);
 
     // Read stat file
@@ -170,8 +180,8 @@ std::optional<ProcessInfo> ProcfsReader::get_process_info(int pid) {
             info.virtual_memory = static_cast<int64_t>(size * page_size);
             info.resident_memory = static_cast<int64_t>(resident * page_size);
 
-            if (auto mem_info = SystemInfo::get_memory_info(); mem_info.total > 0) {
-                info.memory_percent = static_cast<double>(info.resident_memory) / mem_info.total * 100.0;
+            if (total_memory > 0) {
+                info.memory_percent = static_cast<double>(info.resident_memory) / static_cast<double>(total_memory) * 100.0;
             }
         }
     }
