@@ -79,6 +79,7 @@ private:
     std::vector<EnvironmentVariable> environment_vars_;
     std::vector<LibraryInfo> libraries_;
     int selected_thread_idx_ = -1;
+    int selected_thread_tid_ = -1;
     int details_pid_ = -1;  // PID for which details were fetched
     int cached_stack_tid_ = -1;  // TID for which stack is cached
     std::string cached_stack_;    // Cached stack trace (fetched on-demand)
@@ -95,7 +96,7 @@ private:
     // Process popup (double-click)
     bool show_process_popup_ = false;
     int popup_pid_ = -1;
-    bool popup_show_tree_ = false;  // Toggle: false = process only, true = process + descendants
+    bool popup_show_tree_ = true;  // Toggle: false = process only, true = process + descendants
     static constexpr size_t kHistorySize = 60;  // 60 data points
     std::vector<float> popup_cpu_user_history_;
     std::vector<float> popup_cpu_kernel_history_;

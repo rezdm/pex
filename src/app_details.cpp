@@ -6,38 +6,50 @@
 namespace pex {
 
 void App::render_details_panel() {
+    bool tab_changed = false;
+
     if (ImGui::BeginTabBar("DetailsTabs")) {
         if (ImGui::BeginTabItem("File Handles")) {
+            if (active_details_tab_ != DetailsTab::FileHandles) tab_changed = true;
             active_details_tab_ = DetailsTab::FileHandles;
             render_file_handles_tab();
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Network")) {
+            if (active_details_tab_ != DetailsTab::Network) tab_changed = true;
             active_details_tab_ = DetailsTab::Network;
             render_network_tab();
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Threads")) {
+            if (active_details_tab_ != DetailsTab::Threads) tab_changed = true;
             active_details_tab_ = DetailsTab::Threads;
             render_threads_tab();
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Memory")) {
+            if (active_details_tab_ != DetailsTab::Memory) tab_changed = true;
             active_details_tab_ = DetailsTab::Memory;
             render_memory_tab();
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Environment")) {
+            if (active_details_tab_ != DetailsTab::Environment) tab_changed = true;
             active_details_tab_ = DetailsTab::Environment;
             render_environment_tab();
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Libraries")) {
+            if (active_details_tab_ != DetailsTab::Libraries) tab_changed = true;
             active_details_tab_ = DetailsTab::Libraries;
             render_libraries_tab();
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
+    }
+
+    if (tab_changed) {
+        refresh_selected_details();
     }
 }
 
@@ -145,15 +157,33 @@ void App::render_network_tab() {
         if (!network_connections_.empty()) {
             const int col = network_sort_col_;
             const bool asc = network_sort_asc_;
-            std::ranges::sort(network_connections_, [col, asc, &get_port](const NetworkConnectionInfo& a, const NetworkConnectionInfo& b) {
+            std::ranges::sort(network_connections_, [col, asc, &get_port, &parse_endpoint, this](const NetworkConnectionInfo& a, const NetworkConnectionInfo& b) {
                 int result = 0;
                 switch (col) {
                     case 0: result = a.protocol.compare(b.protocol); break;
                     case 1: result = a.local_endpoint.compare(b.local_endpoint); break;
-                    case 2: result = a.local_endpoint.compare(b.local_endpoint); break;  // Sort by address for host column
+                    case 2: {
+                        auto [a_ip, _a_port] = parse_endpoint(a.local_endpoint);
+                        auto [b_ip, _b_port] = parse_endpoint(b.local_endpoint);
+                        std::string host_a = name_resolver_.get_hostname(a_ip);
+                        std::string host_b = name_resolver_.get_hostname(b_ip);
+                        if (host_a.empty()) host_a = a.local_endpoint;
+                        if (host_b.empty()) host_b = b.local_endpoint;
+                        result = host_a.compare(host_b);
+                        break;
+                    }
                     case 3: result = static_cast<int>(get_port(a.local_endpoint)) - static_cast<int>(get_port(b.local_endpoint)); break;
                     case 4: result = a.remote_endpoint.compare(b.remote_endpoint); break;
-                    case 5: result = a.remote_endpoint.compare(b.remote_endpoint); break;  // Sort by address for host column
+                    case 5: {
+                        auto [a_ip, _a_port] = parse_endpoint(a.remote_endpoint);
+                        auto [b_ip, _b_port] = parse_endpoint(b.remote_endpoint);
+                        std::string host_a = name_resolver_.get_hostname(a_ip);
+                        std::string host_b = name_resolver_.get_hostname(b_ip);
+                        if (host_a.empty()) host_a = a.remote_endpoint;
+                        if (host_b.empty()) host_b = b.remote_endpoint;
+                        result = host_a.compare(host_b);
+                        break;
+                    }
                     case 6: result = static_cast<int>(get_port(a.remote_endpoint)) - static_cast<int>(get_port(b.remote_endpoint)); break;
                     case 7: result = a.state.compare(b.state); break;
                     default: result = 0;
@@ -284,6 +314,16 @@ void App::render_threads_tab() {
             });
         }
 
+        if (selected_thread_tid_ != -1) {
+            selected_thread_idx_ = -1;
+            for (int i = 0; i < static_cast<int>(threads_.size()); i++) {
+                if (threads_[i].tid == selected_thread_tid_) {
+                    selected_thread_idx_ = i;
+                    break;
+                }
+            }
+        }
+
         for (int i = 0; i < static_cast<int>(threads_.size()); i++) {
             const auto& thread = threads_[i];
             ImGui::PushID(i);
@@ -294,6 +334,9 @@ void App::render_threads_tab() {
             if (ImGui::Selectable("##row", is_selected,
                     ImGuiSelectableFlags_SpanAllColumns)) {
                 selected_thread_idx_ = i;
+                selected_thread_tid_ = thread.tid;
+                cached_stack_tid_ = -1;
+                cached_stack_.clear();
             }
             ImGui::SameLine();
             ImGui::Text("%d", thread.tid);
@@ -323,6 +366,7 @@ void App::render_threads_tab() {
     // Fetch stack on-demand for the selected thread
     if (selected_thread_idx_ >= 0 && selected_thread_idx_ < static_cast<int>(threads_.size()) && details_pid_ > 0) {
         const int tid = threads_[selected_thread_idx_].tid;
+        selected_thread_tid_ = tid;
 
         // Header with refresh button
         ImGui::Text("Stack for TID %d", tid);
@@ -349,6 +393,7 @@ void App::render_threads_tab() {
             cached_stack_.clear();
             cached_stack_tid_ = -1;
         }
+        selected_thread_tid_ = -1;
     }
 
     ImGui::EndChild();

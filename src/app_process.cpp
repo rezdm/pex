@@ -13,6 +13,7 @@ void App::refresh_selected_details() {
             environment_vars_.clear();
             libraries_.clear();
             selected_thread_idx_ = -1;
+            selected_thread_tid_ = -1;
             cached_stack_tid_ = -1;
             cached_stack_.clear();
             details_pid_ = -1;
@@ -30,6 +31,7 @@ void App::refresh_selected_details() {
         environment_vars_.clear();
         libraries_.clear();
         selected_thread_idx_ = -1;
+        selected_thread_tid_ = -1;
         cached_stack_tid_ = -1;
         cached_stack_.clear();
         details_pid_ = -1;
@@ -45,6 +47,7 @@ void App::refresh_selected_details() {
         environment_vars_.clear();
         libraries_.clear();
         selected_thread_idx_ = -1;
+        selected_thread_tid_ = -1;
         cached_stack_tid_ = -1;
         cached_stack_.clear();
         details_pid_ = selected_pid_;
@@ -60,9 +63,18 @@ void App::refresh_selected_details() {
             break;
         case DetailsTab::Threads:
             threads_ = details_reader_.get_threads(selected_pid_);
-            // Preserve thread selection if still valid
-            if (selected_thread_idx_ >= static_cast<int>(threads_.size())) {
-                selected_thread_idx_ = -1;
+            // Preserve thread selection by TID across refreshes
+            selected_thread_idx_ = -1;
+            if (selected_thread_tid_ != -1) {
+                for (int i = 0; i < static_cast<int>(threads_.size()); i++) {
+                    if (threads_[i].tid == selected_thread_tid_) {
+                        selected_thread_idx_ = i;
+                        break;
+                    }
+                }
+            }
+            if (selected_thread_idx_ == -1) {
+                selected_thread_tid_ = -1;
                 cached_stack_tid_ = -1;
                 cached_stack_.clear();
             } else {

@@ -129,6 +129,7 @@ void App::render_process_tree_node(ProcessNode& node, const int depth) {
     if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
         popup_pid_ = node.info.pid;
         show_process_popup_ = true;
+        popup_show_tree_ = true;
         popup_cpu_user_history_.clear();
         popup_cpu_kernel_history_.clear();
         popup_memory_history_.clear();
@@ -375,6 +376,7 @@ void App::render_process_list() {
                     if (ImGui::IsMouseDoubleClicked(0)) {
                         popup_pid_ = node->info.pid;
                         show_process_popup_ = true;
+                        popup_show_tree_ = true;
                         popup_cpu_user_history_.clear();
                         popup_cpu_kernel_history_.clear();
                         popup_memory_history_.clear();

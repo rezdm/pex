@@ -112,20 +112,31 @@ void DataStore::collect_data() {
     auto current_cpu_times = SystemInfo::get_cpu_times();
     uint64_t total_cpu_delta = current_cpu_times.total() - previous_system_cpu_times_.total();
 
+    // Read memory info once and reuse for processes and system stats
+    const auto mem_info = SystemInfo::get_memory_info();
+
     // Get all processes
-    auto processes = reader_.get_all_processes();
+    auto processes = reader_.get_all_processes(mem_info.total);
 
     // Calculate CPU percentages and collect current PIDs
     std::set<int> current_pids;
     unsigned int proc_count = SystemInfo::instance().get_processor_count();
     for (auto& proc : processes) {
         current_pids.insert(proc.pid);
-        if (auto it = previous_cpu_times_.find(proc.pid); it != previous_cpu_times_.end() && total_cpu_delta > 0) {
-            uint64_t user_delta = proc.user_time - it->second.first;
-            uint64_t kernel_delta = proc.kernel_time - it->second.second;
-            uint64_t process_delta = user_delta + kernel_delta;
-            proc.cpu_percent = static_cast<double>(process_delta) / total_cpu_delta * 100.0 * proc_count;
-            proc.total_cpu_percent = static_cast<double>(process_delta) / total_cpu_delta * 100.0;
+        if (auto it = previous_cpu_times_.find(proc.pid); it != previous_cpu_times_.end()) {
+            const auto [prev_user, prev_kernel] = it->second;
+            const bool counters_valid = proc.user_time >= prev_user && proc.kernel_time >= prev_kernel;
+            if (counters_valid && total_cpu_delta > 0) {
+                const uint64_t user_delta = proc.user_time - prev_user;
+                const uint64_t kernel_delta = proc.kernel_time - prev_kernel;
+                const uint64_t process_delta = user_delta + kernel_delta;
+                proc.cpu_percent = static_cast<double>(process_delta) / total_cpu_delta * 100.0 * proc_count;
+                proc.total_cpu_percent = static_cast<double>(process_delta) / total_cpu_delta * 100.0;
+            } else {
+                // PID reused or counters wrapped – reset baseline
+                proc.cpu_percent = 0.0;
+                proc.total_cpu_percent = 0.0;
+            }
         }
         previous_cpu_times_[proc.pid] = {proc.user_time, proc.kernel_time};
     }
@@ -203,8 +214,6 @@ void DataStore::collect_data() {
         }
     }
 
-    // System stats
-    auto mem_info = SystemInfo::get_memory_info();
     new_snapshot->memory_used = mem_info.used;
     new_snapshot->memory_total = mem_info.total;
     new_snapshot->process_count = static_cast<int>(processes.size());
@@ -228,14 +237,14 @@ void DataStore::collect_data() {
     if (cpu_count == previous_per_cpu_times_.size()) {
         for (size_t i = 0; i < cpu_count; i++) {
             if (uint64_t delta_total = current_per_cpu_times_[i].total() - previous_per_cpu_times_[i].total(); delta_total > 0) {
-                uint64_t delta_active = current_per_cpu_times_[i].active() - previous_per_cpu_times_[i].active();
-                uint64_t delta_user = (current_per_cpu_times_[i].user + current_per_cpu_times_[i].nice) -
-                                      (previous_per_cpu_times_[i].user + previous_per_cpu_times_[i].nice);
-                uint64_t delta_system = current_per_cpu_times_[i].system - previous_per_cpu_times_[i].system;
+                const uint64_t delta_active = current_per_cpu_times_[i].active() - previous_per_cpu_times_[i].active();
+                const uint64_t delta_user = (current_per_cpu_times_[i].user + current_per_cpu_times_[i].nice) -
+                                            (previous_per_cpu_times_[i].user + previous_per_cpu_times_[i].nice);
+                const uint64_t delta_kernel = (delta_active > delta_user) ? (delta_active - delta_user) : 0;
 
                 per_cpu_usage_buffer_[i] = static_cast<double>(delta_active) / delta_total * 100.0;
                 per_cpu_user_buffer_[i] = static_cast<double>(delta_user) / delta_total * 100.0;
-                per_cpu_system_buffer_[i] = static_cast<double>(delta_system) / delta_total * 100.0;
+                per_cpu_system_buffer_[i] = static_cast<double>(delta_kernel) / delta_total * 100.0;
             } else {
                 per_cpu_usage_buffer_[i] = 0.0;
                 per_cpu_user_buffer_[i] = 0.0;

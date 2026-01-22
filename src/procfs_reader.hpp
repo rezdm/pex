@@ -18,7 +18,7 @@ struct ParseError {
 
 class ProcfsReader {
 public:
-    std::vector<ProcessInfo> get_all_processes();
+    std::vector<ProcessInfo> get_all_processes(int64_t total_memory = -1);
     std::optional<ProcessInfo> get_process_info(int pid);
     std::optional<ProcessInfo> get_process_info(int pid, int64_t total_memory);
 

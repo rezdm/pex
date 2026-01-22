@@ -87,18 +87,17 @@ void App::update_popup_history() {
         const long ticks_per_sec = sys.get_clock_ticks_per_second();
         const unsigned int cpu_count = sys.get_processor_count();
 
-        // CPU time is in ticks. Convert delta ticks to percentage of one CPU,
-        // then scale by CPU count to get percentage of total system capacity.
-        // Formula: (delta_ticks / ticks_per_sec) / elapsed_sec * 100 = % of one CPU
+        // CPU time is in ticks. Convert delta ticks to percentage of total system capacity.
+        // Formula: ((delta_ticks / ticks_per_sec) / elapsed_sec) / cpu_count * 100
         const float elapsed_sec = elapsed / 1000.0f;
         const float ticks_in_period = ticks_per_sec * elapsed_sec;
 
         float user_pct = 0.0f, kernel_pct = 0.0f;
         if (ticks_in_period > 0) {
-            // Percentage of one CPU (100% = 1 core fully utilized)
-            // This can exceed 100% for multi-threaded processes using multiple cores
-            user_pct = (static_cast<float>(user_delta) / ticks_in_period) * 100.0f;
-            kernel_pct = (static_cast<float>(kernel_delta) / ticks_in_period) * 100.0f;
+            const float pct_of_one_cpu_user = (static_cast<float>(user_delta) / ticks_in_period) * 100.0f;
+            const float pct_of_one_cpu_kernel = (static_cast<float>(kernel_delta) / ticks_in_period) * 100.0f;
+            user_pct = pct_of_one_cpu_user / static_cast<float>(cpu_count);
+            kernel_pct = pct_of_one_cpu_kernel / static_cast<float>(cpu_count);
         }
 
         popup_cpu_user_history_.push_back(user_pct);

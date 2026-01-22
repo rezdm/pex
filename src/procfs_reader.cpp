@@ -73,12 +73,15 @@ std::string ProcfsReader::get_username(const int uid) {
     return name;
 }
 
-std::vector<ProcessInfo> ProcfsReader::get_all_processes() {
+std::vector<ProcessInfo> ProcfsReader::get_all_processes(const int64_t total_memory_input) {
     std::vector<ProcessInfo> processes;
 
-    // Fetch memory info once for the entire snapshot
-    const auto mem_info = SystemInfo::get_memory_info();
-    const int64_t total_memory = mem_info.total;
+    // Fetch memory info once for the entire snapshot if not provided
+    int64_t total_memory = total_memory_input;
+    if (total_memory <= 0) {
+        const auto mem_info = SystemInfo::get_memory_info();
+        total_memory = mem_info.total;
+    }
 
     try {
         for (const auto& entry : fs::directory_iterator("/proc")) {
