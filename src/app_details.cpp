@@ -51,20 +51,25 @@ void App::render_file_handles_tab() {
         if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
             if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
                 const auto& spec = sort_specs->Specs[0];
-                const int col = spec.ColumnIndex;
-                const bool asc = (spec.SortDirection == ImGuiSortDirection_Ascending);
-                std::ranges::sort(file_handles_, [col, asc](const FileHandleInfo& a, const FileHandleInfo& b) {
-                    int result = 0;
-                    switch (col) {
-                        case 0: result = a.fd - b.fd; break;
-                        case 1: result = a.type.compare(b.type); break;
-                        case 2: result = a.path.compare(b.path); break;
-                        default: result = 0;
-                    }
-                    return asc ? (result < 0) : (result > 0);
-                });
+                file_handles_sort_col_ = spec.ColumnIndex;
+                file_handles_sort_asc_ = (spec.SortDirection == ImGuiSortDirection_Ascending);
                 sort_specs->SpecsDirty = false;
             }
+        }
+        // Always apply sort
+        if (!file_handles_.empty()) {
+            const int col = file_handles_sort_col_;
+            const bool asc = file_handles_sort_asc_;
+            std::ranges::sort(file_handles_, [col, asc](const FileHandleInfo& a, const FileHandleInfo& b) {
+                int result = 0;
+                switch (col) {
+                    case 0: result = a.fd - b.fd; break;
+                    case 1: result = a.type.compare(b.type); break;
+                    case 2: result = a.path.compare(b.path); break;
+                    default: result = 0;
+                }
+                return asc ? (result < 0) : (result > 0);
+            });
         }
 
         for (const auto& handle : file_handles_) {
@@ -125,25 +130,30 @@ void App::render_network_tab() {
         if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
             if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
                 const auto& spec = sort_specs->Specs[0];
-                const int col = spec.ColumnIndex;
-                const bool asc = (spec.SortDirection == ImGuiSortDirection_Ascending);
-                std::ranges::sort(network_connections_, [col, asc, &get_port](const NetworkConnectionInfo& a, const NetworkConnectionInfo& b) {
-                    int result = 0;
-                    switch (col) {
-                        case 0: result = a.protocol.compare(b.protocol); break;
-                        case 1: result = a.local_endpoint.compare(b.local_endpoint); break;
-                        case 2: result = a.local_endpoint.compare(b.local_endpoint); break;  // Sort by address for host column
-                        case 3: result = static_cast<int>(get_port(a.local_endpoint)) - static_cast<int>(get_port(b.local_endpoint)); break;
-                        case 4: result = a.remote_endpoint.compare(b.remote_endpoint); break;
-                        case 5: result = a.remote_endpoint.compare(b.remote_endpoint); break;  // Sort by address for host column
-                        case 6: result = static_cast<int>(get_port(a.remote_endpoint)) - static_cast<int>(get_port(b.remote_endpoint)); break;
-                        case 7: result = a.state.compare(b.state); break;
-                        default: result = 0;
-                    }
-                    return asc ? (result < 0) : (result > 0);
-                });
+                network_sort_col_ = spec.ColumnIndex;
+                network_sort_asc_ = (spec.SortDirection == ImGuiSortDirection_Ascending);
                 sort_specs->SpecsDirty = false;
             }
+        }
+        // Always apply sort
+        if (!network_connections_.empty()) {
+            const int col = network_sort_col_;
+            const bool asc = network_sort_asc_;
+            std::ranges::sort(network_connections_, [col, asc, &get_port](const NetworkConnectionInfo& a, const NetworkConnectionInfo& b) {
+                int result = 0;
+                switch (col) {
+                    case 0: result = a.protocol.compare(b.protocol); break;
+                    case 1: result = a.local_endpoint.compare(b.local_endpoint); break;
+                    case 2: result = a.local_endpoint.compare(b.local_endpoint); break;  // Sort by address for host column
+                    case 3: result = static_cast<int>(get_port(a.local_endpoint)) - static_cast<int>(get_port(b.local_endpoint)); break;
+                    case 4: result = a.remote_endpoint.compare(b.remote_endpoint); break;
+                    case 5: result = a.remote_endpoint.compare(b.remote_endpoint); break;  // Sort by address for host column
+                    case 6: result = static_cast<int>(get_port(a.remote_endpoint)) - static_cast<int>(get_port(b.remote_endpoint)); break;
+                    case 7: result = a.state.compare(b.state); break;
+                    default: result = 0;
+                }
+                return asc ? (result < 0) : (result > 0);
+            });
         }
 
         // Get base protocol (tcp/udp without the 6)
@@ -244,23 +254,28 @@ void App::render_threads_tab() {
         if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
             if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
                 const auto& spec = sort_specs->Specs[0];
-                const int col = spec.ColumnIndex;
-                const bool asc = (spec.SortDirection == ImGuiSortDirection_Ascending);
-                std::ranges::sort(threads_, [col, asc](const ThreadInfo& a, const ThreadInfo& b) {
-                    int result = 0;
-                    switch (col) {
-                        case 0: result = a.tid - b.tid; break;
-                        case 1: result = a.name.compare(b.name); break;
-                        case 2: result = a.state - b.state; break;
-                        case 3: result = a.priority - b.priority; break;
-                        case 4: result = a.processor - b.processor; break;
-                        case 5: result = a.current_library.compare(b.current_library); break;
-                        default: result = 0;
-                    }
-                    return asc ? (result < 0) : (result > 0);
-                });
+                threads_sort_col_ = spec.ColumnIndex;
+                threads_sort_asc_ = (spec.SortDirection == ImGuiSortDirection_Ascending);
                 sort_specs->SpecsDirty = false;
             }
+        }
+        // Always apply sort
+        if (!threads_.empty()) {
+            const int col = threads_sort_col_;
+            const bool asc = threads_sort_asc_;
+            std::ranges::sort(threads_, [col, asc](const ThreadInfo& a, const ThreadInfo& b) {
+                int result = 0;
+                switch (col) {
+                    case 0: result = a.tid - b.tid; break;
+                    case 1: result = a.name.compare(b.name); break;
+                    case 2: result = a.state - b.state; break;
+                    case 3: result = a.priority - b.priority; break;
+                    case 4: result = a.processor - b.processor; break;
+                    case 5: result = a.current_library.compare(b.current_library); break;
+                    default: result = 0;
+                }
+                return asc ? (result < 0) : (result > 0);
+            });
         }
 
         for (int i = 0; i < static_cast<int>(threads_.size()); i++) {
@@ -329,21 +344,26 @@ void App::render_memory_tab() {
         if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
             if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
                 const auto& spec = sort_specs->Specs[0];
-                const int col = spec.ColumnIndex;
-                const bool asc = (spec.SortDirection == ImGuiSortDirection_Ascending);
-                std::ranges::sort(memory_maps_, [col, asc](const MemoryMapInfo& a, const MemoryMapInfo& b) {
-                    int result = 0;
-                    switch (col) {
-                        case 0: result = a.address.compare(b.address); break;
-                        case 1: result = a.size.compare(b.size); break;
-                        case 2: result = a.permissions.compare(b.permissions); break;
-                        case 3: result = a.pathname.compare(b.pathname); break;
-                        default: result = 0;
-                    }
-                    return asc ? (result < 0) : (result > 0);
-                });
+                memory_sort_col_ = spec.ColumnIndex;
+                memory_sort_asc_ = (spec.SortDirection == ImGuiSortDirection_Ascending);
                 sort_specs->SpecsDirty = false;
             }
+        }
+        // Always apply sort
+        if (!memory_maps_.empty()) {
+            const int col = memory_sort_col_;
+            const bool asc = memory_sort_asc_;
+            std::ranges::sort(memory_maps_, [col, asc](const MemoryMapInfo& a, const MemoryMapInfo& b) {
+                int result = 0;
+                switch (col) {
+                    case 0: result = a.address.compare(b.address); break;
+                    case 1: result = a.size.compare(b.size); break;
+                    case 2: result = a.permissions.compare(b.permissions); break;
+                    case 3: result = a.pathname.compare(b.pathname); break;
+                    default: result = 0;
+                }
+                return asc ? (result < 0) : (result > 0);
+            });
         }
 
         for (const auto& map : memory_maps_) {
@@ -377,19 +397,24 @@ void App::render_environment_tab() {
         if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
             if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
                 const auto& spec = sort_specs->Specs[0];
-                const int col = spec.ColumnIndex;
-                const bool asc = (spec.SortDirection == ImGuiSortDirection_Ascending);
-                std::ranges::sort(environment_vars_, [col, asc](const EnvironmentVariable& a, const EnvironmentVariable& b) {
-                    int result = 0;
-                    switch (col) {
-                        case 0: result = a.name.compare(b.name); break;
-                        case 1: result = a.value.compare(b.value); break;
-                        default: result = 0;
-                    }
-                    return asc ? (result < 0) : (result > 0);
-                });
+                environment_sort_col_ = spec.ColumnIndex;
+                environment_sort_asc_ = (spec.SortDirection == ImGuiSortDirection_Ascending);
                 sort_specs->SpecsDirty = false;
             }
+        }
+        // Always apply sort
+        if (!environment_vars_.empty()) {
+            const int col = environment_sort_col_;
+            const bool asc = environment_sort_asc_;
+            std::ranges::sort(environment_vars_, [col, asc](const EnvironmentVariable& a, const EnvironmentVariable& b) {
+                int result = 0;
+                switch (col) {
+                    case 0: result = a.name.compare(b.name); break;
+                    case 1: result = a.value.compare(b.value); break;
+                    default: result = 0;
+                }
+                return asc ? (result < 0) : (result > 0);
+            });
         }
 
         for (const auto& var : environment_vars_) {
@@ -421,21 +446,26 @@ void App::render_libraries_tab() {
         if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
             if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
                 const auto& spec = sort_specs->Specs[0];
-                const int col = spec.ColumnIndex;
-                const bool asc = (spec.SortDirection == ImGuiSortDirection_Ascending);
-                std::ranges::sort(libraries_, [col, asc](const LibraryInfo& a, const LibraryInfo& b) {
-                    int result = 0;
-                    switch (col) {
-                        case 0: result = a.name.compare(b.name); break;
-                        case 1: result = (a.total_size < b.total_size) ? -1 : (a.total_size > b.total_size) ? 1 : 0; break;
-                        case 2: result = a.base_address.compare(b.base_address); break;
-                        case 3: result = a.path.compare(b.path); break;
-                        default: result = 0;
-                    }
-                    return asc ? (result < 0) : (result > 0);
-                });
+                libraries_sort_col_ = spec.ColumnIndex;
+                libraries_sort_asc_ = (spec.SortDirection == ImGuiSortDirection_Ascending);
                 sort_specs->SpecsDirty = false;
             }
+        }
+        // Always apply sort
+        if (!libraries_.empty()) {
+            const int col = libraries_sort_col_;
+            const bool asc = libraries_sort_asc_;
+            std::ranges::sort(libraries_, [col, asc](const LibraryInfo& a, const LibraryInfo& b) {
+                int result = 0;
+                switch (col) {
+                    case 0: result = a.name.compare(b.name); break;
+                    case 1: result = (a.total_size < b.total_size) ? -1 : (a.total_size > b.total_size) ? 1 : 0; break;
+                    case 2: result = a.base_address.compare(b.base_address); break;
+                    case 3: result = a.path.compare(b.path); break;
+                    default: result = 0;
+                }
+                return asc ? (result < 0) : (result > 0);
+            });
         }
 
         for (const auto& lib : libraries_) {

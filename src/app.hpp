@@ -123,6 +123,20 @@ private:
     int tree_sort_column_ = 1;  // Default: PID column
     bool tree_sort_ascending_ = true;
 
+    // Details panel sorting state
+    int file_handles_sort_col_ = 0;
+    bool file_handles_sort_asc_ = true;
+    int network_sort_col_ = 0;
+    bool network_sort_asc_ = true;
+    int threads_sort_col_ = 0;
+    bool threads_sort_asc_ = true;
+    int memory_sort_col_ = 0;
+    bool memory_sort_asc_ = true;
+    int environment_sort_col_ = 0;
+    bool environment_sort_asc_ = true;
+    int libraries_sort_col_ = 0;
+    bool libraries_sort_asc_ = true;
+
     // Event debouncing to prevent glfwPostEmptyEvent floods
     void post_empty_event_debounced();
     std::mutex event_debounce_mutex_;
