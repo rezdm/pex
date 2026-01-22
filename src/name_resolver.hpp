@@ -8,6 +8,7 @@
 #include <condition_variable>
 #include <atomic>
 #include <functional>
+#include <chrono>
 
 namespace pex {
 
@@ -53,6 +54,11 @@ private:
 
     // Callback when resolution completes
     std::function<void()> on_resolved_;
+
+    // Throttle notifications to reduce UI wakeups
+    std::chrono::steady_clock::time_point last_notify_time_;
+    std::atomic<bool> pending_notify_{false};
+    static constexpr auto kNotifyInterval = std::chrono::milliseconds(250);
 
     static constexpr const char* kResolving = "\x01";  // Sentinel for "in progress"
     static constexpr const char* kNotFound = "\x02";   // Sentinel for "resolution failed"

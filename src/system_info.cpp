@@ -48,8 +48,14 @@ CpuTimes SystemInfo::get_cpu_times() {
 
 std::vector<CpuTimes> SystemInfo::get_per_cpu_times() {
     std::vector<CpuTimes> result;
+    get_per_cpu_times(result);
+    return result;
+}
+
+void SystemInfo::get_per_cpu_times(std::vector<CpuTimes>& out) {
     std::ifstream stat("/proc/stat");
     std::string line;
+    size_t index = 0;
 
     while (std::getline(stat, line)) {
         // Look for lines starting with "cpu" followed by a digit (cpu0, cpu1, etc.)
@@ -59,11 +65,20 @@ std::vector<CpuTimes> SystemInfo::get_per_cpu_times() {
             std::string cpu;
             iss >> cpu >> times.user >> times.nice >> times.system >> times.idle
                 >> times.iowait >> times.irq >> times.softirq >> times.steal;
-            result.push_back(times);
+
+            if (index < out.size()) {
+                out[index] = times;
+            } else {
+                out.push_back(times);
+            }
+            index++;
         }
     }
 
-    return result;
+    // Shrink if CPU count decreased (unlikely but handle it)
+    if (index < out.size()) {
+        out.resize(index);
+    }
 }
 
 MemoryInfo SystemInfo::get_memory_info() {

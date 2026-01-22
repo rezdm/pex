@@ -55,6 +55,7 @@ public:
 
     static CpuTimes get_cpu_times();
     static std::vector<CpuTimes> get_per_cpu_times();
+    static void get_per_cpu_times(std::vector<CpuTimes>& out);  // Reuses existing vector
     static MemoryInfo get_memory_info();
     static SwapInfo get_swap_info();
     static LoadAverage get_load_average();

@@ -97,9 +97,11 @@ private:
     mutable std::mutex data_mutex_;
     std::shared_ptr<DataSnapshot> current_snapshot_;
 
-    // For CPU delta calculations
+    // For CPU delta calculations (pre-allocated, reused each tick)
     CpuTimes previous_system_cpu_times_;
     std::vector<CpuTimes> previous_per_cpu_times_;
+    std::vector<CpuTimes> current_per_cpu_times_;  // Reused buffer
+    std::vector<double> per_cpu_usage_buffer_;     // Reused buffer
     std::map<int, std::pair<uint64_t, uint64_t>> previous_cpu_times_;
 
     // Callback

@@ -104,7 +104,9 @@ void NameResolver::resolver_thread() {
 
         {
             std::unique_lock lock(queue_mutex_);
-            queue_cv_.wait(lock, [this] {
+
+            // Wait for work or timeout (to flush pending notifications)
+            queue_cv_.wait_for(lock, kNotifyInterval, [this] {
                 return !resolve_queue_.empty() || !running_;
             });
 
@@ -116,7 +118,13 @@ void NameResolver::resolver_thread() {
             }
         }
 
-        if (ip.empty()) continue;
+        // Check if we need to flush pending notification (even if no work)
+        if (ip.empty()) {
+            if (pending_notify_.exchange(false) && on_resolved_) {
+                on_resolved_();
+            }
+            continue;
+        }
 
         // Perform DNS reverse lookup
         std::string hostname;
@@ -148,9 +156,17 @@ void NameResolver::resolver_thread() {
             dns_cache_[ip] = hostname.empty() ? kNotFound : hostname;
         }
 
-        // Notify that resolution completed
+        // Throttle notifications to reduce UI wakeups
+        auto now = std::chrono::steady_clock::now();
         if (on_resolved_) {
-            on_resolved_();
+            if (now - last_notify_time_ >= kNotifyInterval) {
+                last_notify_time_ = now;
+                pending_notify_ = false;
+                on_resolved_();
+            } else {
+                // Mark pending, will be flushed on next timeout
+                pending_notify_ = true;
+            }
         }
     }
 }
