@@ -218,26 +218,40 @@ void DataStore::collect_data() {
     SystemInfo::get_per_cpu_times(current_per_cpu_times_);
     const size_t cpu_count = current_per_cpu_times_.size();
 
-    // Ensure buffer is sized correctly
+    // Ensure buffers are sized correctly
     if (per_cpu_usage_buffer_.size() != cpu_count) {
         per_cpu_usage_buffer_.resize(cpu_count, 0.0);
+        per_cpu_user_buffer_.resize(cpu_count, 0.0);
+        per_cpu_system_buffer_.resize(cpu_count, 0.0);
     }
 
     if (cpu_count == previous_per_cpu_times_.size()) {
         for (size_t i = 0; i < cpu_count; i++) {
             if (uint64_t delta_total = current_per_cpu_times_[i].total() - previous_per_cpu_times_[i].total(); delta_total > 0) {
                 uint64_t delta_active = current_per_cpu_times_[i].active() - previous_per_cpu_times_[i].active();
+                uint64_t delta_user = (current_per_cpu_times_[i].user + current_per_cpu_times_[i].nice) -
+                                      (previous_per_cpu_times_[i].user + previous_per_cpu_times_[i].nice);
+                uint64_t delta_system = current_per_cpu_times_[i].system - previous_per_cpu_times_[i].system;
+
                 per_cpu_usage_buffer_[i] = static_cast<double>(delta_active) / delta_total * 100.0;
+                per_cpu_user_buffer_[i] = static_cast<double>(delta_user) / delta_total * 100.0;
+                per_cpu_system_buffer_[i] = static_cast<double>(delta_system) / delta_total * 100.0;
             } else {
                 per_cpu_usage_buffer_[i] = 0.0;
+                per_cpu_user_buffer_[i] = 0.0;
+                per_cpu_system_buffer_[i] = 0.0;
             }
         }
     } else {
         std::fill(per_cpu_usage_buffer_.begin(), per_cpu_usage_buffer_.end(), 0.0);
+        std::fill(per_cpu_user_buffer_.begin(), per_cpu_user_buffer_.end(), 0.0);
+        std::fill(per_cpu_system_buffer_.begin(), per_cpu_system_buffer_.end(), 0.0);
     }
 
     // Copy to snapshot (snapshot needs its own copy for thread safety)
     new_snapshot->per_cpu_usage = per_cpu_usage_buffer_;
+    new_snapshot->per_cpu_user = per_cpu_user_buffer_;
+    new_snapshot->per_cpu_system = per_cpu_system_buffer_;
 
     // Swap current to previous (reuses memory)
     std::swap(previous_per_cpu_times_, current_per_cpu_times_);

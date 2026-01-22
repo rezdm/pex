@@ -43,8 +43,10 @@ struct DataSnapshot {
     int64_t memory_used = 0;
     int64_t memory_total = 0;
 
-    // Per-CPU usage
+    // Per-CPU usage (total, user, system percentages)
     std::vector<double> per_cpu_usage;
+    std::vector<double> per_cpu_user;
+    std::vector<double> per_cpu_system;
 
     // Additional system info
     SwapInfo swap_info;
@@ -108,6 +110,8 @@ private:
     std::vector<CpuTimes> previous_per_cpu_times_;
     std::vector<CpuTimes> current_per_cpu_times_;  // Reused buffer
     std::vector<double> per_cpu_usage_buffer_;     // Reused buffer
+    std::vector<double> per_cpu_user_buffer_;      // Reused buffer
+    std::vector<double> per_cpu_system_buffer_;    // Reused buffer
     std::map<int, std::pair<uint64_t, uint64_t>> previous_cpu_times_;
 
     // Callback
