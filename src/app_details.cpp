@@ -455,6 +455,12 @@ void App::render_process_popup() {
 
     ImGui::SetNextWindowSize(ImVec2(800, 500), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(title.c_str(), &show_process_popup_, ImGuiWindowFlags_NoCollapse)) {
+        // Handle ESC key to close popup
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            show_process_popup_ = false;
+            ImGui::End();
+            return;
+        }
 
         // Toggle for process only vs process tree
         if (ImGui::Checkbox("Include descendants (process tree)", &popup_show_tree_)) {

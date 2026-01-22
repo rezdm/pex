@@ -206,6 +206,9 @@ void App::render() {
 
     // Process popup (shown when double-clicking a process)
     render_process_popup();
+
+    // Kill confirmation dialog
+    render_kill_confirmation_dialog();
 }
 
 void App::render_menu_bar() {
@@ -236,13 +239,15 @@ void App::render_menu_bar() {
                 }
             }
 
-            if (ImGui::MenuItem("Kill Process", "Delete", false, selected != nullptr)) {
+            if (ImGui::MenuItem("Kill Process...", "Delete", false, selected != nullptr)) {
                 if (selected) {
-                    kill(selected->info.pid, SIGTERM);
+                    request_kill_process(selected->info.pid, selected->info.name, false);
                 }
             }
-            if (ImGui::MenuItem("Kill Tree", nullptr, false, selected != nullptr)) {
-                kill_process_tree(selected);
+            if (ImGui::MenuItem("Kill Tree...", nullptr, false, selected != nullptr)) {
+                if (selected) {
+                    request_kill_process(selected->info.pid, selected->info.name, true);
+                }
             }
             ImGui::EndMenu();
         }
@@ -310,12 +315,12 @@ void App::render_toolbar() {
     }
 
     if (ImGui::Button("Kill") && selected) {
-        kill(selected->info.pid, SIGTERM);
+        request_kill_process(selected->info.pid, selected->info.name, false);
     }
     ImGui::SameLine();
 
     if (ImGui::Button("Kill Tree") && selected) {
-        kill_process_tree(selected);
+        request_kill_process(selected->info.pid, selected->info.name, true);
     }
     ImGui::SameLine();
 

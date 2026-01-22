@@ -53,7 +53,12 @@ private:
     static std::string format_bytes(int64_t bytes);
     static std::string format_time(std::chrono::system_clock::time_point tp);
 
-    static void kill_process_tree(const ProcessNode* node);
+    // Kill confirmation dialog
+    void render_kill_confirmation_dialog();
+    void request_kill_process(int pid, const std::string& name, bool is_tree);
+    void execute_kill(bool force);
+    static void kill_process_tree_impl(int root_pid, bool force);
+    static std::string get_kill_error_message(int err);
 
     // Data store (runs in background thread)
     DataStore data_store_;
@@ -104,6 +109,14 @@ private:
 
     // Name resolver for DNS and service lookups
     NameResolver name_resolver_;
+
+    // Kill confirmation dialog
+    bool show_kill_dialog_ = false;
+    int kill_target_pid_ = -1;
+    std::string kill_target_name_;
+    bool kill_is_tree_ = false;
+    std::string kill_error_message_;
+    bool kill_show_force_option_ = false;  // Show force kill after SIGTERM fails
 };
 
 } // namespace pex
