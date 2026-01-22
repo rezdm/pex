@@ -77,6 +77,8 @@ add_executable(pex
     src/app.cpp
     src/app_views.cpp
     src/app_details.cpp
+    src/app_popup.cpp
+    src/app_kill.cpp
     src/app_process.cpp
     src/app_input.cpp
     src/app_utils.cpp
