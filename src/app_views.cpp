@@ -47,54 +47,19 @@ static void show_column_tooltips() {
     }
 }
 
-// Helper to sort tree children recursively
-static void sort_tree_children(std::vector<std::unique_ptr<ProcessNode>>& nodes, int column, bool ascending) {
-    auto compare = [column, ascending](const std::unique_ptr<ProcessNode>& a, const std::unique_ptr<ProcessNode>& b) {
-        int result = 0;
-        switch (column) {
-            case 0: result = a->info.name.compare(b->info.name); break;
-            case 1: result = a->info.pid - b->info.pid; break;
-            case 2: result = (a->info.cpu_percent < b->info.cpu_percent) ? -1 : (a->info.cpu_percent > b->info.cpu_percent) ? 1 : 0; break;
-            case 3: result = (a->info.total_cpu_percent < b->info.total_cpu_percent) ? -1 : (a->info.total_cpu_percent > b->info.total_cpu_percent) ? 1 : 0; break;
-            case 4: result = (a->info.resident_memory < b->info.resident_memory) ? -1 : (a->info.resident_memory > b->info.resident_memory) ? 1 : 0; break;
-            case 5: result = (a->info.memory_percent < b->info.memory_percent) ? -1 : (a->info.memory_percent > b->info.memory_percent) ? 1 : 0; break;
-            case 6: result = (a->tree_cpu_percent < b->tree_cpu_percent) ? -1 : (a->tree_cpu_percent > b->tree_cpu_percent) ? 1 : 0; break;
-            case 7: result = (a->tree_total_cpu_percent < b->tree_total_cpu_percent) ? -1 : (a->tree_total_cpu_percent > b->tree_total_cpu_percent) ? 1 : 0; break;
-            case 8: result = (a->tree_working_set < b->tree_working_set) ? -1 : (a->tree_working_set > b->tree_working_set) ? 1 : 0; break;
-            case 9: result = (a->tree_memory_percent < b->tree_memory_percent) ? -1 : (a->tree_memory_percent > b->tree_memory_percent) ? 1 : 0; break;
-            case 10: result = a->info.thread_count - b->info.thread_count; break;
-            case 11: result = a->info.user_name.compare(b->info.user_name); break;
-            case 12: result = a->info.state_char - b->info.state_char; break;
-            case 13: result = a->info.executable_path.compare(b->info.executable_path); break;
-            case 14: result = a->info.command_line.compare(b->info.command_line); break;
-            default: result = 0; break;
-        }
-        return ascending ? (result < 0) : (result > 0);
-    };
-
-    std::ranges::sort(nodes, compare);
-
-    // Recursively sort children
-    for (auto& node : nodes) {
-        if (!node->children.empty()) {
-            sort_tree_children(node->children, column, ascending);
-        }
-    }
-}
-
 void App::render_process_tree() {
     if (!current_data_) return;
 
-    // Column headers
+    // Column headers (no sorting in tree view - hierarchy is preserved)
     if (ImGui::BeginTable("ProcessTree", 15,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_Reorderable |
-            ImGuiTableFlags_Hideable | ImGuiTableFlags_Sortable |
+            ImGuiTableFlags_Hideable |
             ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY |
             ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter)) {
 
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("Process", ImGuiTableColumnFlags_NoHide | ImGuiTableColumnFlags_WidthFixed, 200);
-        ImGui::TableSetupColumn("PID", ImGuiTableColumnFlags_DefaultSort | ImGuiTableColumnFlags_WidthFixed, 70);
+        ImGui::TableSetupColumn("PID", ImGuiTableColumnFlags_WidthFixed, 70);
         ImGui::TableSetupColumn("CPU %", ImGuiTableColumnFlags_WidthFixed, 60);
         ImGui::TableSetupColumn("Total %", ImGuiTableColumnFlags_WidthFixed, 60);
         ImGui::TableSetupColumn("Memory", ImGuiTableColumnFlags_WidthFixed, 90);
@@ -112,19 +77,6 @@ void App::render_process_tree() {
 
         // Show tooltips for column headers
         show_column_tooltips();
-
-        // Handle sorting
-        if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
-            if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
-                const auto& spec = sort_specs->Specs[0];
-                tree_sort_column_ = spec.ColumnIndex;
-                tree_sort_ascending_ = (spec.SortDirection == ImGuiSortDirection_Ascending);
-                sort_specs->SpecsDirty = false;
-            }
-        }
-
-        // Sort tree before rendering
-        sort_tree_children(current_data_->process_tree, tree_sort_column_, tree_sort_ascending_);
 
         for (auto& root : current_data_->process_tree) {
             render_process_tree_node(*root, 0);
@@ -309,33 +261,37 @@ void App::render_process_list() {
         if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
             if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
                 const auto& spec = sort_specs->Specs[0];
-                const int column = spec.ColumnIndex;
-                const bool ascending = (spec.SortDirection == ImGuiSortDirection_Ascending);
-
-                std::ranges::sort(flat_list, [column, ascending](const ProcessNode* a, const ProcessNode* b) {
-                    int result = 0;
-                    switch (column) {
-                        case 0: result = a->info.name.compare(b->info.name); break;
-                        case 1: result = a->info.pid - b->info.pid; break;
-                        case 2: result = (a->info.cpu_percent < b->info.cpu_percent) ? -1 : (a->info.cpu_percent > b->info.cpu_percent) ? 1 : 0; break;
-                        case 3: result = (a->info.total_cpu_percent < b->info.total_cpu_percent) ? -1 : (a->info.total_cpu_percent > b->info.total_cpu_percent) ? 1 : 0; break;
-                        case 4: result = (a->info.resident_memory < b->info.resident_memory) ? -1 : (a->info.resident_memory > b->info.resident_memory) ? 1 : 0; break;
-                        case 5: result = (a->info.memory_percent < b->info.memory_percent) ? -1 : (a->info.memory_percent > b->info.memory_percent) ? 1 : 0; break;
-                        case 6: result = (a->tree_cpu_percent < b->tree_cpu_percent) ? -1 : (a->tree_cpu_percent > b->tree_cpu_percent) ? 1 : 0; break;
-                        case 7: result = (a->tree_total_cpu_percent < b->tree_total_cpu_percent) ? -1 : (a->tree_total_cpu_percent > b->tree_total_cpu_percent) ? 1 : 0; break;
-                        case 8: result = (a->tree_working_set < b->tree_working_set) ? -1 : (a->tree_working_set > b->tree_working_set) ? 1 : 0; break;
-                        case 9: result = (a->tree_memory_percent < b->tree_memory_percent) ? -1 : (a->tree_memory_percent > b->tree_memory_percent) ? 1 : 0; break;
-                        case 10: result = a->info.thread_count - b->info.thread_count; break;
-                        case 11: result = a->info.user_name.compare(b->info.user_name); break;
-                        case 12: result = a->info.state_char - b->info.state_char; break;
-                        case 13: result = a->info.executable_path.compare(b->info.executable_path); break;
-                        case 14: result = a->info.command_line.compare(b->info.command_line); break;
-                        default: result = 0; break;
-                    }
-                    return ascending ? (result < 0) : (result > 0);
-                });
+                list_sort_col_ = spec.ColumnIndex;
+                list_sort_asc_ = (spec.SortDirection == ImGuiSortDirection_Ascending);
                 sort_specs->SpecsDirty = false;
             }
+        }
+        // Always apply sort
+        if (!flat_list.empty()) {
+            const int column = list_sort_col_;
+            const bool ascending = list_sort_asc_;
+            std::ranges::sort(flat_list, [column, ascending](const ProcessNode* a, const ProcessNode* b) {
+                int result = 0;
+                switch (column) {
+                    case 0: result = a->info.name.compare(b->info.name); break;
+                    case 1: result = a->info.pid - b->info.pid; break;
+                    case 2: result = (a->info.cpu_percent < b->info.cpu_percent) ? -1 : (a->info.cpu_percent > b->info.cpu_percent) ? 1 : 0; break;
+                    case 3: result = (a->info.total_cpu_percent < b->info.total_cpu_percent) ? -1 : (a->info.total_cpu_percent > b->info.total_cpu_percent) ? 1 : 0; break;
+                    case 4: result = (a->info.resident_memory < b->info.resident_memory) ? -1 : (a->info.resident_memory > b->info.resident_memory) ? 1 : 0; break;
+                    case 5: result = (a->info.memory_percent < b->info.memory_percent) ? -1 : (a->info.memory_percent > b->info.memory_percent) ? 1 : 0; break;
+                    case 6: result = (a->tree_cpu_percent < b->tree_cpu_percent) ? -1 : (a->tree_cpu_percent > b->tree_cpu_percent) ? 1 : 0; break;
+                    case 7: result = (a->tree_total_cpu_percent < b->tree_total_cpu_percent) ? -1 : (a->tree_total_cpu_percent > b->tree_total_cpu_percent) ? 1 : 0; break;
+                    case 8: result = (a->tree_working_set < b->tree_working_set) ? -1 : (a->tree_working_set > b->tree_working_set) ? 1 : 0; break;
+                    case 9: result = (a->tree_memory_percent < b->tree_memory_percent) ? -1 : (a->tree_memory_percent > b->tree_memory_percent) ? 1 : 0; break;
+                    case 10: result = a->info.thread_count - b->info.thread_count; break;
+                    case 11: result = a->info.user_name.compare(b->info.user_name); break;
+                    case 12: result = a->info.state_char - b->info.state_char; break;
+                    case 13: result = a->info.executable_path.compare(b->info.executable_path); break;
+                    case 14: result = a->info.command_line.compare(b->info.command_line); break;
+                    default: result = 0; break;
+                }
+                return ascending ? (result < 0) : (result > 0);
+            });
         }
 
         for (const auto* node : flat_list) {

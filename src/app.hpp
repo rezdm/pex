@@ -119,9 +119,9 @@ private:
     std::string kill_error_message_;
     bool kill_show_force_option_ = false;  // Show force kill after SIGTERM fails
 
-    // Tree view sorting
-    int tree_sort_column_ = 1;  // Default: PID column
-    bool tree_sort_ascending_ = true;
+    // List view sorting state (tree view doesn't support sorting)
+    int list_sort_col_ = 1;  // Default: PID column
+    bool list_sort_asc_ = true;
 
     // Details panel sorting state
     int file_handles_sort_col_ = 0;
