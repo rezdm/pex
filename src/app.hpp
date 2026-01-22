@@ -84,6 +84,7 @@ private:
     // Search
     char search_buffer_[256] = {};
     bool scroll_to_selected_ = false;
+    bool focus_search_box_ = false;
 
     // Process popup (double-click)
     bool show_process_popup_ = false;

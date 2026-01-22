@@ -40,6 +40,12 @@ std::vector<ProcessNode*> App::get_visible_items() const {
 }
 
 void App::handle_keyboard_navigation() {
+    // Ctrl+F to focus search box - works globally
+    if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F)) {
+        focus_search_box_ = true;
+        return;
+    }
+
     // F5 for refresh - works globally
     if (ImGui::IsKeyPressed(ImGuiKey_F5)) {
         data_store_.refresh_now();

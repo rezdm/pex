@@ -343,6 +343,10 @@ void App::render_toolbar() {
     ImGui::Text("Search:");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(150);
+    if (focus_search_box_) {
+        ImGui::SetKeyboardFocusHere();
+        focus_search_box_ = false;
+    }
     if (ImGui::InputText("##search", search_buffer_, sizeof(search_buffer_),
             ImGuiInputTextFlags_EnterReturnsTrue)) {
         search_next();
