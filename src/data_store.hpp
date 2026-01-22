@@ -74,6 +74,11 @@ public:
     // Force an immediate refresh
     void refresh_now();
 
+    // Pause/resume data collection
+    void pause();
+    void resume();
+    [[nodiscard]] bool is_paused() const;
+
     // Register callback for when new data is available
     void set_on_data_updated(std::function<void()> callback);
 
@@ -89,6 +94,7 @@ private:
     // Background thread
     std::thread collection_thread_;
     std::atomic<bool> running_{false};
+    std::atomic<bool> paused_{false};
     std::atomic<int> refresh_interval_ms_{1000};
     std::condition_variable cv_;
     std::mutex cv_mutex_;

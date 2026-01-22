@@ -1,6 +1,7 @@
 #include "app.hpp"
 #include "imgui.h"
 #include <charconv>
+#include <algorithm>
 
 namespace pex {
 
@@ -34,16 +35,37 @@ void App::render_details_panel() {
     }
 }
 
-void App::render_file_handles_tab() const {
+void App::render_file_handles_tab() {
     if (ImGui::BeginTable("FileHandles", 3,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
-            ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter)) {
+            ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter |
+            ImGuiTableFlags_Sortable)) {
 
         ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("FD", ImGuiTableColumnFlags_WidthFixed, 60);
+        ImGui::TableSetupColumn("FD", ImGuiTableColumnFlags_DefaultSort | ImGuiTableColumnFlags_WidthFixed, 60);
         ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 100);
         ImGui::TableSetupColumn("Path", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
+
+        // Handle sorting
+        if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
+            if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
+                const auto& spec = sort_specs->Specs[0];
+                const int col = spec.ColumnIndex;
+                const bool asc = (spec.SortDirection == ImGuiSortDirection_Ascending);
+                std::ranges::sort(file_handles_, [col, asc](const FileHandleInfo& a, const FileHandleInfo& b) {
+                    int result = 0;
+                    switch (col) {
+                        case 0: result = a.fd - b.fd; break;
+                        case 1: result = a.type.compare(b.type); break;
+                        case 2: result = a.path.compare(b.path); break;
+                        default: result = 0;
+                    }
+                    return asc ? (result < 0) : (result > 0);
+                });
+                sort_specs->SpecsDirty = false;
+            }
+        }
 
         for (const auto& handle : file_handles_) {
             ImGui::TableNextRow();
@@ -73,12 +95,23 @@ void App::render_network_tab() {
         return {ip, port};
     };
 
+    // Helper to extract port from endpoint for sorting
+    auto get_port = [](const std::string& endpoint) -> uint16_t {
+        size_t colon_pos = endpoint.rfind(':');
+        if (colon_pos == std::string::npos) return 0;
+        uint16_t port = 0;
+        std::from_chars(endpoint.data() + colon_pos + 1,
+                       endpoint.data() + endpoint.size(), port);
+        return port;
+    };
+
     if (ImGui::BeginTable("Network", 8,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
-            ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter)) {
+            ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter |
+            ImGuiTableFlags_Sortable)) {
 
         ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("Protocol", ImGuiTableColumnFlags_WidthFixed, 60);
+        ImGui::TableSetupColumn("Protocol", ImGuiTableColumnFlags_DefaultSort | ImGuiTableColumnFlags_WidthFixed, 60);
         ImGui::TableSetupColumn("Local Address", ImGuiTableColumnFlags_WidthFixed, 160);
         ImGui::TableSetupColumn("Local Host", ImGuiTableColumnFlags_WidthFixed, 140);
         ImGui::TableSetupColumn("Local Port", ImGuiTableColumnFlags_WidthFixed, 80);
@@ -87,6 +120,31 @@ void App::render_network_tab() {
         ImGui::TableSetupColumn("Remote Port", ImGuiTableColumnFlags_WidthFixed, 80);
         ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
+
+        // Handle sorting
+        if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
+            if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
+                const auto& spec = sort_specs->Specs[0];
+                const int col = spec.ColumnIndex;
+                const bool asc = (spec.SortDirection == ImGuiSortDirection_Ascending);
+                std::ranges::sort(network_connections_, [col, asc, &get_port](const NetworkConnectionInfo& a, const NetworkConnectionInfo& b) {
+                    int result = 0;
+                    switch (col) {
+                        case 0: result = a.protocol.compare(b.protocol); break;
+                        case 1: result = a.local_endpoint.compare(b.local_endpoint); break;
+                        case 2: result = a.local_endpoint.compare(b.local_endpoint); break;  // Sort by address for host column
+                        case 3: result = static_cast<int>(get_port(a.local_endpoint)) - static_cast<int>(get_port(b.local_endpoint)); break;
+                        case 4: result = a.remote_endpoint.compare(b.remote_endpoint); break;
+                        case 5: result = a.remote_endpoint.compare(b.remote_endpoint); break;  // Sort by address for host column
+                        case 6: result = static_cast<int>(get_port(a.remote_endpoint)) - static_cast<int>(get_port(b.remote_endpoint)); break;
+                        case 7: result = a.state.compare(b.state); break;
+                        default: result = 0;
+                    }
+                    return asc ? (result < 0) : (result > 0);
+                });
+                sort_specs->SpecsDirty = false;
+            }
+        }
 
         // Get base protocol (tcp/udp without the 6)
         auto base_protocol = [](const std::string& proto) -> std::string {
@@ -170,16 +228,40 @@ void App::render_threads_tab() {
     ImGui::BeginChild("ThreadsList", ImVec2(width * 0.5f, 0), true);
     if (ImGui::BeginTable("Threads", 6,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
-            ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter)) {
+            ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter |
+            ImGuiTableFlags_Sortable)) {
 
         ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("TID", ImGuiTableColumnFlags_WidthFixed, 70);
+        ImGui::TableSetupColumn("TID", ImGuiTableColumnFlags_DefaultSort | ImGuiTableColumnFlags_WidthFixed, 70);
         ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthFixed, 100);
         ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 50);
         ImGui::TableSetupColumn("Pri", ImGuiTableColumnFlags_WidthFixed, 40);
         ImGui::TableSetupColumn("CPU", ImGuiTableColumnFlags_WidthFixed, 40);
         ImGui::TableSetupColumn("Current Library", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
+
+        // Handle sorting
+        if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
+            if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
+                const auto& spec = sort_specs->Specs[0];
+                const int col = spec.ColumnIndex;
+                const bool asc = (spec.SortDirection == ImGuiSortDirection_Ascending);
+                std::ranges::sort(threads_, [col, asc](const ThreadInfo& a, const ThreadInfo& b) {
+                    int result = 0;
+                    switch (col) {
+                        case 0: result = a.tid - b.tid; break;
+                        case 1: result = a.name.compare(b.name); break;
+                        case 2: result = a.state - b.state; break;
+                        case 3: result = a.priority - b.priority; break;
+                        case 4: result = a.processor - b.processor; break;
+                        case 5: result = a.current_library.compare(b.current_library); break;
+                        default: result = 0;
+                    }
+                    return asc ? (result < 0) : (result > 0);
+                });
+                sort_specs->SpecsDirty = false;
+            }
+        }
 
         for (int i = 0; i < static_cast<int>(threads_.size()); i++) {
             const auto& thread = threads_[i];
@@ -230,17 +312,39 @@ void App::render_threads_tab() {
     ImGui::EndChild();
 }
 
-void App::render_memory_tab() const {
+void App::render_memory_tab() {
     if (ImGui::BeginTable("Memory", 4,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
-            ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter)) {
+            ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter |
+            ImGuiTableFlags_Sortable)) {
 
         ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("Address Range", ImGuiTableColumnFlags_WidthFixed, 280);
+        ImGui::TableSetupColumn("Address Range", ImGuiTableColumnFlags_DefaultSort | ImGuiTableColumnFlags_WidthFixed, 280);
         ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 100);
         ImGui::TableSetupColumn("Perms", ImGuiTableColumnFlags_WidthFixed, 60);
         ImGui::TableSetupColumn("Pathname", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
+
+        // Handle sorting
+        if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
+            if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
+                const auto& spec = sort_specs->Specs[0];
+                const int col = spec.ColumnIndex;
+                const bool asc = (spec.SortDirection == ImGuiSortDirection_Ascending);
+                std::ranges::sort(memory_maps_, [col, asc](const MemoryMapInfo& a, const MemoryMapInfo& b) {
+                    int result = 0;
+                    switch (col) {
+                        case 0: result = a.address.compare(b.address); break;
+                        case 1: result = a.size.compare(b.size); break;
+                        case 2: result = a.permissions.compare(b.permissions); break;
+                        case 3: result = a.pathname.compare(b.pathname); break;
+                        default: result = 0;
+                    }
+                    return asc ? (result < 0) : (result > 0);
+                });
+                sort_specs->SpecsDirty = false;
+            }
+        }
 
         for (const auto& map : memory_maps_) {
             ImGui::TableNextRow();
@@ -258,16 +362,35 @@ void App::render_memory_tab() const {
     }
 }
 
-void App::render_environment_tab() const {
+void App::render_environment_tab() {
     if (ImGui::BeginTable("Environment", 2,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
             ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter |
             ImGuiTableFlags_Sortable)) {
 
         ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthFixed, 250);
+        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_DefaultSort | ImGuiTableColumnFlags_WidthFixed, 250);
         ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
+
+        // Handle sorting
+        if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
+            if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
+                const auto& spec = sort_specs->Specs[0];
+                const int col = spec.ColumnIndex;
+                const bool asc = (spec.SortDirection == ImGuiSortDirection_Ascending);
+                std::ranges::sort(environment_vars_, [col, asc](const EnvironmentVariable& a, const EnvironmentVariable& b) {
+                    int result = 0;
+                    switch (col) {
+                        case 0: result = a.name.compare(b.name); break;
+                        case 1: result = a.value.compare(b.value); break;
+                        default: result = 0;
+                    }
+                    return asc ? (result < 0) : (result > 0);
+                });
+                sort_specs->SpecsDirty = false;
+            }
+        }
 
         for (const auto& var : environment_vars_) {
             ImGui::TableNextRow();
@@ -281,18 +404,39 @@ void App::render_environment_tab() const {
     }
 }
 
-void App::render_libraries_tab() const {
+void App::render_libraries_tab() {
     if (ImGui::BeginTable("Libraries", 4,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
             ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter |
             ImGuiTableFlags_Sortable)) {
 
         ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthFixed, 250);
+        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_DefaultSort | ImGuiTableColumnFlags_WidthFixed, 250);
         ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 100);
         ImGui::TableSetupColumn("Base Address", ImGuiTableColumnFlags_WidthFixed, 150);
         ImGui::TableSetupColumn("Path", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
+
+        // Handle sorting
+        if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
+            if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
+                const auto& spec = sort_specs->Specs[0];
+                const int col = spec.ColumnIndex;
+                const bool asc = (spec.SortDirection == ImGuiSortDirection_Ascending);
+                std::ranges::sort(libraries_, [col, asc](const LibraryInfo& a, const LibraryInfo& b) {
+                    int result = 0;
+                    switch (col) {
+                        case 0: result = a.name.compare(b.name); break;
+                        case 1: result = (a.total_size < b.total_size) ? -1 : (a.total_size > b.total_size) ? 1 : 0; break;
+                        case 2: result = a.base_address.compare(b.base_address); break;
+                        case 3: result = a.path.compare(b.path); break;
+                        default: result = 0;
+                    }
+                    return asc ? (result < 0) : (result > 0);
+                });
+                sort_specs->SpecsDirty = false;
+            }
+        }
 
         for (const auto& lib : libraries_) {
             ImGui::TableNextRow();

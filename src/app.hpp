@@ -29,12 +29,12 @@ private:
     void render_process_tree_node(ProcessNode& node, int depth);
     void render_process_list();
     void render_details_panel();
-    void render_file_handles_tab() const;
+    void render_file_handles_tab();
     void render_network_tab();
     void render_threads_tab();
-    void render_memory_tab() const;
-    void render_environment_tab() const;
-    void render_libraries_tab() const;
+    void render_memory_tab();
+    void render_environment_tab();
+    void render_libraries_tab();
     void render_process_popup();
     void refresh_selected_details();
     void update_popup_history();
@@ -117,6 +117,10 @@ private:
     bool kill_is_tree_ = false;
     std::string kill_error_message_;
     bool kill_show_force_option_ = false;  // Show force kill after SIGTERM fails
+
+    // Tree view sorting
+    int tree_sort_column_ = 1;  // Default: PID column
+    bool tree_sort_ascending_ = true;
 
     // Event debouncing to prevent glfwPostEmptyEvent floods
     void post_empty_event_debounced();

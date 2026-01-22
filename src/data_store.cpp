@@ -70,6 +70,19 @@ void DataStore::refresh_now() {
     cv_.notify_all();
 }
 
+void DataStore::pause() {
+    paused_ = true;
+}
+
+void DataStore::resume() {
+    paused_ = false;
+    cv_.notify_all();  // Wake up to resume collection
+}
+
+bool DataStore::is_paused() const {
+    return paused_;
+}
+
 void DataStore::set_on_data_updated(std::function<void()> callback) {
     std::lock_guard lock(data_mutex_);
     on_data_updated_ = std::move(callback);
@@ -85,7 +98,7 @@ void DataStore::collection_thread_func() {
             return !running_;
         });
 
-        if (running_) {
+        if (running_ && !paused_) {
             collect_data();
         }
     }

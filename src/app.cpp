@@ -219,6 +219,64 @@ void App::render() {
                 format_bytes(current_data_->memory_used).c_str(),
                 format_bytes(current_data_->memory_total).c_str());
 
+    // Right-aligned controls: pause button and refresh interval
+    ImGui::SameLine();
+
+    // Calculate right-aligned position
+    const float combo_width = 70.0f;
+    const float button_width = 30.0f;
+    const float paused_text_width = data_store_.is_paused() ? 60.0f : 0.0f;
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+    const float total_width = paused_text_width + button_width + spacing + combo_width;
+    const float available = ImGui::GetContentRegionAvail().x;
+
+    if (available > total_width + 10.0f) {
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + available - total_width);
+    }
+
+    // Show PAUSED indicator when paused
+    if (data_store_.is_paused()) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.5f, 0.2f, 1.0f));
+        ImGui::Text("PAUSED");
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+    }
+
+    // Pause/Resume button
+    if (data_store_.is_paused()) {
+        if (ImGui::Button(">")) {
+            data_store_.resume();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Resume data collection");
+        }
+    } else {
+        if (ImGui::Button("||")) {
+            data_store_.pause();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Pause data collection");
+        }
+    }
+    ImGui::SameLine();
+
+    // Refresh interval combo
+    ImGui::SetNextItemWidth(combo_width);
+    const char* intervals[] = {"500ms", "1s", "2s", "5s"};
+    int current_interval = 1;
+    if (const int refresh_ms = data_store_.get_refresh_interval(); refresh_ms <= 500) current_interval = 0;
+    else if (refresh_ms <= 1000) current_interval = 1;
+    else if (refresh_ms <= 2000) current_interval = 2;
+    else current_interval = 3;
+
+    if (ImGui::Combo("##interval", &current_interval, intervals, IM_ARRAYSIZE(intervals))) {
+        constexpr int values[] = {500, 1000, 2000, 5000};
+        data_store_.set_refresh_interval(values[current_interval]);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Refresh interval");
+    }
+
     ImGui::End();
 
     // Process popup (shown when double-clicking a process)
@@ -338,22 +396,6 @@ void App::render_toolbar() {
 
     if (ImGui::Button("Kill Tree") && selected) {
         request_kill_process(selected->info.pid, selected->info.name, true);
-    }
-    ImGui::SameLine();
-
-    ImGui::Text("Refresh:");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(100);
-    const char* intervals[] = {"500ms", "1s", "2s", "5s"};
-    int current_interval = 1;
-    if (const int refresh_ms = data_store_.get_refresh_interval(); refresh_ms <= 500) current_interval = 0;
-    else if (refresh_ms <= 1000) current_interval = 1;
-    else if (refresh_ms <= 2000) current_interval = 2;
-    else current_interval = 3;
-
-    if (ImGui::Combo("##interval", &current_interval, intervals, IM_ARRAYSIZE(intervals))) {
-        constexpr int values[] = {500, 1000, 2000, 5000};
-        data_store_.set_refresh_interval(values[current_interval]);
     }
 }
 
