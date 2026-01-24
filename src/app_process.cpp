@@ -59,11 +59,11 @@ void App::refresh_selected_details() {
     // Only refresh data for the currently visible tab
     switch (active_details_tab_) {
         case DetailsTab::FileHandles:
-            file_handles_ = details_reader_.get_file_handles(selected_pid_);
+            file_handles_ = ProcfsReader::get_file_handles(selected_pid_);
             details_dirty_ = true;
             break;
         case DetailsTab::Network:
-            network_connections_ = details_reader_.get_network_connections(selected_pid_);
+            network_connections_ = ProcfsReader::get_network_connections(selected_pid_);
             details_dirty_ = true;
             break;
         case DetailsTab::Threads:

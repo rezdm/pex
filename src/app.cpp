@@ -443,7 +443,7 @@ void App::render_system_panel() const {
     const float text_height = ImGui::GetTextLineHeight();
 
     // Helper to draw a progress bar aligned with text
-    auto draw_bar = [&](float ratio, float width, const ImVec4& color) {
+    auto draw_bar = [&](const float ratio, const float width, const ImVec4& color) {
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram, color);
         ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.2f, 0.2f, 0.2f, 1.0f));

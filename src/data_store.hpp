@@ -11,7 +11,6 @@
 #include <atomic>
 #include <condition_variable>
 #include <functional>
-#include <string>
 
 namespace pex {
 

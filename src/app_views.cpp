@@ -9,11 +9,11 @@ namespace pex {
 // Helper function to get color for process state
 static ImVec4 get_state_color(const char state) {
     switch (state) {
-        case 'R': return ImVec4(0.2f, 0.9f, 0.2f, 1.0f);  // Green - Running
-        case 'D': return ImVec4(1.0f, 0.3f, 0.3f, 1.0f);  // Red - Disk sleep
-        case 'Z': return ImVec4(0.8f, 0.3f, 0.8f, 1.0f);  // Purple - Zombie
-        case 'T': case 't': return ImVec4(1.0f, 0.9f, 0.2f, 1.0f);  // Yellow - Stopped
-        default:  return ImVec4(0.7f, 0.7f, 0.7f, 1.0f);  // Gray - Sleeping/Idle
+        case 'R': return {0.2f, 0.9f, 0.2f, 1.0f};  // Green - Running
+        case 'D': return {1.0f, 0.3f, 0.3f, 1.0f};  // Red - Disk sleep
+        case 'Z': return {0.8f, 0.3f, 0.8f, 1.0f};  // Purple - Zombie
+        case 'T': case 't': return {1.0f, 0.9f, 0.2f, 1.0f};  // Yellow - Stopped
+        default:  return {0.7f, 0.7f, 0.7f, 1.0f};  // Gray - Sleeping/Idle
     }
 }
 

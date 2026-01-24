@@ -12,6 +12,7 @@
 #include <set>
 #include <cerrno>
 #include <cstring>
+#include <ranges>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
@@ -107,7 +108,7 @@ std::vector<ProcessInfo> ProcfsReader::get_all_processes(const int64_t total_mem
     return processes;
 }
 
-std::optional<ProcessInfo> ProcfsReader::get_process_info(int pid) {
+std::optional<ProcessInfo> ProcfsReader::get_process_info(const int pid) {
     // Convenience overload that fetches memory info (use get_all_processes for bulk)
     const auto mem_info = SystemInfo::get_memory_info();
     return get_process_info(pid, mem_info.total);
@@ -269,7 +270,7 @@ std::vector<ThreadInfo> ProcfsReader::get_threads(int pid) {
     }
 
     // Helper to find library for an address
-    auto find_library = [&](uint64_t addr) -> std::string {
+    auto find_library = [&](const uint64_t addr) -> std::string {
         for (const auto& range : address_map) {
             if (addr >= range.start && addr < range.end) {
                 return range.library;
@@ -382,7 +383,7 @@ std::vector<ThreadInfo> ProcfsReader::get_threads(int pid) {
     return threads;
 }
 
-std::string ProcfsReader::get_thread_stack(int pid, int tid) {
+std::string ProcfsReader::get_thread_stack(const int pid, const int tid) {
     std::string path = "/proc/" + std::to_string(pid) + "/task/" + std::to_string(tid) + "/stack";
 
     // Use low-level I/O for procfs files - they need direct read() calls
@@ -750,7 +751,7 @@ std::vector<LibraryInfo> ProcfsReader::get_libraries(const int pid) {
 
     // Convert map to vector
     libraries.reserve(lib_map.size());
-    for (auto& [path, lib] : lib_map) {
+    for (auto &lib: lib_map | std::views::values) {
         libraries.push_back(std::move(lib));
     }
 

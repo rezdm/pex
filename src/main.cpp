@@ -3,7 +3,7 @@
 #include <iostream>
 #include <csignal>
 
-int main(int argc, char* argv[]) {
+int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
     // Ignore SIGCHLD to avoid zombies when killing processes
     signal(SIGCHLD, SIG_IGN);
 

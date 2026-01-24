@@ -110,7 +110,7 @@ std::string App::get_kill_error_message(int err) {
     }
 }
 
-void App::kill_process_tree_impl(int root_pid, bool force) {
+void App::kill_process_tree_impl(const int root_pid, const bool force) {
     // Build fresh parent -> children map from /proc
     std::map<int, std::vector<int>> children_map;
     std::set<int> descendant_set;
@@ -142,7 +142,7 @@ void App::kill_process_tree_impl(int root_pid, bool force) {
     }
 }
 
-void App::request_kill_process(int pid, const std::string& name, bool is_tree) {
+void App::request_kill_process(const int pid, const std::string& name, const bool is_tree) {
     kill_target_pid_ = pid;
     kill_target_name_ = name;
     kill_is_tree_ = is_tree;
@@ -151,7 +151,7 @@ void App::request_kill_process(int pid, const std::string& name, bool is_tree) {
     show_kill_dialog_ = true;
 }
 
-void App::execute_kill(bool force) {
+void App::execute_kill(const bool force) {
     if (kill_target_pid_ <= 0) return;
 
     const int signal = force ? SIGKILL : SIGTERM;

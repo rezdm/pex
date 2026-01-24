@@ -22,7 +22,7 @@ public:
     std::optional<ProcessInfo> get_process_info(int pid);
     std::optional<ProcessInfo> get_process_info(int pid, int64_t total_memory);
 
-    std::vector<ThreadInfo> get_threads(int pid);
+    static std::vector<ThreadInfo> get_threads(int pid);
     static std::string get_thread_stack(int pid, int tid);
 
     static std::vector<FileHandleInfo> get_file_handles(int pid);
@@ -31,9 +31,9 @@ public:
 
     std::vector<MemoryMapInfo> get_memory_maps(int pid);
 
-    std::vector<EnvironmentVariable> get_environment_variables(int pid);
+    static std::vector<EnvironmentVariable> get_environment_variables(int pid);
 
-    std::vector<LibraryInfo> get_libraries(int pid);
+    static std::vector<LibraryInfo> get_libraries(int pid);
 
     // Error reporting
     std::vector<ParseError> get_recent_errors();

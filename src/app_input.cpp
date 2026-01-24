@@ -104,12 +104,12 @@ std::vector<ProcessNode*> App::find_matching_processes() const {
     if (!current_data_ || search_buffer_[0] == '\0') return matches;
 
     std::string search_lower = search_buffer_;
-    std::transform(search_lower.begin(), search_lower.end(), search_lower.begin(), ::tolower);
+    std::ranges::transform(search_lower, search_lower.begin(), ::tolower);
 
     const auto visible = get_visible_items();
     for (auto* node : visible) {
         std::string name_lower = node->info.name;
-        std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
+        std::ranges::transform(name_lower, name_lower.begin(), ::tolower);
         if (name_lower.find(search_lower) != std::string::npos) {
             matches.push_back(node);
         }
@@ -124,10 +124,10 @@ bool App::current_selection_matches() const {
     if (it == current_data_->process_map.end()) return false;
 
     std::string search_lower = search_buffer_;
-    std::transform(search_lower.begin(), search_lower.end(), search_lower.begin(), ::tolower);
+    std::ranges::transform(search_lower, search_lower.begin(), ::tolower);
 
     std::string name_lower = it->second->info.name;
-    std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
+    std::ranges::transform(name_lower, name_lower.begin(), ::tolower);
 
     return name_lower.find(search_lower) != std::string::npos;
 }

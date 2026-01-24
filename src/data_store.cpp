@@ -88,6 +88,10 @@ void DataStore::set_on_data_updated(std::function<void()> callback) {
     on_data_updated_ = std::move(callback);
 }
 
+std::vector<ParseError> DataStore::get_recent_errors() {
+    return reader_.get_recent_errors();
+}
+
 void DataStore::collection_thread_func() {
     // Initial collection
     collect_data();
@@ -310,10 +314,6 @@ void DataStore::build_process_map(ProcessNode* node, std::map<int, ProcessNode*>
     for (auto& child : node->children) {
         build_process_map(child.get(), map);
     }
-}
-
-std::vector<ParseError> DataStore::get_recent_errors() {
-    return reader_.get_recent_errors();
 }
 
 } // namespace pex

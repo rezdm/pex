@@ -60,7 +60,7 @@ void NameResolver::load_services() {
     }
 }
 
-std::string NameResolver::get_service_name(uint16_t port, const std::string& protocol) {
+std::string NameResolver::get_service_name(const uint16_t port, const std::string& protocol) {
     std::string key = std::to_string(port) + "/" + protocol;
     if (auto it = services_cache_.find(key); it != services_cache_.end()) {
         return it->second;
