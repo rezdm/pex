@@ -54,10 +54,10 @@ void App::render_details_panel() {
 }
 
 void App::render_file_handles_tab() {
-    if (ImGui::BeginTable("FileHandles", 3,
-            ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
-            ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter |
-            ImGuiTableFlags_Sortable)) {
+        if (ImGui::BeginTable("FileHandles", 3,
+                ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
+                ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter |
+                ImGuiTableFlags_Sortable)) {
 
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("FD", ImGuiTableColumnFlags_DefaultSort | ImGuiTableColumnFlags_WidthFixed, 60);
@@ -66,16 +66,18 @@ void App::render_file_handles_tab() {
         ImGui::TableHeadersRow();
 
         // Handle sorting
+        bool needs_sort = details_dirty_;
         if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
             if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
                 const auto& spec = sort_specs->Specs[0];
                 file_handles_sort_col_ = spec.ColumnIndex;
                 file_handles_sort_asc_ = (spec.SortDirection == ImGuiSortDirection_Ascending);
                 sort_specs->SpecsDirty = false;
+                needs_sort = true;
             }
         }
-        // Always apply sort
-        if (!file_handles_.empty()) {
+        // Apply sort only when data changed or sort order changed
+        if (needs_sort && !file_handles_.empty()) {
             const int col = file_handles_sort_col_;
             const bool asc = file_handles_sort_asc_;
             std::ranges::sort(file_handles_, [col, asc](const FileHandleInfo& a, const FileHandleInfo& b) {
@@ -88,6 +90,7 @@ void App::render_file_handles_tab() {
                 }
                 return asc ? (result < 0) : (result > 0);
             });
+            details_dirty_ = false;
         }
 
         for (const auto& handle : file_handles_) {
@@ -144,17 +147,18 @@ void App::render_network_tab() {
         ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
 
-        // Handle sorting
+        bool needs_sort = details_dirty_;
         if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
             if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
                 const auto& spec = sort_specs->Specs[0];
                 network_sort_col_ = spec.ColumnIndex;
                 network_sort_asc_ = (spec.SortDirection == ImGuiSortDirection_Ascending);
                 sort_specs->SpecsDirty = false;
+                needs_sort = true;
             }
         }
-        // Always apply sort
-        if (!network_connections_.empty()) {
+        // Apply sort only when data changed or sort order changed
+        if (needs_sort && !network_connections_.empty()) {
             const int col = network_sort_col_;
             const bool asc = network_sort_asc_;
             std::ranges::sort(network_connections_, [col, asc, &get_port, &parse_endpoint, this](const NetworkConnectionInfo& a, const NetworkConnectionInfo& b) {
@@ -190,6 +194,7 @@ void App::render_network_tab() {
                 }
                 return asc ? (result < 0) : (result > 0);
             });
+            details_dirty_ = false;
         }
 
         // Get base protocol (tcp/udp without the 6)
@@ -286,17 +291,18 @@ void App::render_threads_tab() {
         ImGui::TableSetupColumn("Current Library", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
 
-        // Handle sorting
+        bool needs_sort = details_dirty_;
         if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
             if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
                 const auto& spec = sort_specs->Specs[0];
                 threads_sort_col_ = spec.ColumnIndex;
                 threads_sort_asc_ = (spec.SortDirection == ImGuiSortDirection_Ascending);
                 sort_specs->SpecsDirty = false;
+                needs_sort = true;
             }
         }
-        // Always apply sort
-        if (!threads_.empty()) {
+        // Apply sort only when data changed or sort order changed
+        if (needs_sort && !threads_.empty()) {
             const int col = threads_sort_col_;
             const bool asc = threads_sort_asc_;
             std::ranges::sort(threads_, [col, asc](const ThreadInfo& a, const ThreadInfo& b) {
@@ -312,6 +318,7 @@ void App::render_threads_tab() {
                 }
                 return asc ? (result < 0) : (result > 0);
             });
+            details_dirty_ = false;
         }
 
         if (selected_thread_tid_ != -1) {
@@ -412,17 +419,18 @@ void App::render_memory_tab() {
         ImGui::TableSetupColumn("Pathname", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
 
-        // Handle sorting
+        bool needs_sort = details_dirty_;
         if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
             if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
                 const auto& spec = sort_specs->Specs[0];
                 memory_sort_col_ = spec.ColumnIndex;
                 memory_sort_asc_ = (spec.SortDirection == ImGuiSortDirection_Ascending);
                 sort_specs->SpecsDirty = false;
+                needs_sort = true;
             }
         }
-        // Always apply sort
-        if (!memory_maps_.empty()) {
+        // Apply sort only when data changed or sort order changed
+        if (needs_sort && !memory_maps_.empty()) {
             const int col = memory_sort_col_;
             const bool asc = memory_sort_asc_;
             std::ranges::sort(memory_maps_, [col, asc](const MemoryMapInfo& a, const MemoryMapInfo& b) {
@@ -436,6 +444,7 @@ void App::render_memory_tab() {
                 }
                 return asc ? (result < 0) : (result > 0);
             });
+            details_dirty_ = false;
         }
 
         for (const auto& map : memory_maps_) {
@@ -465,17 +474,18 @@ void App::render_environment_tab() {
         ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
 
-        // Handle sorting
+        bool needs_sort = details_dirty_;
         if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
             if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
                 const auto& spec = sort_specs->Specs[0];
                 environment_sort_col_ = spec.ColumnIndex;
                 environment_sort_asc_ = (spec.SortDirection == ImGuiSortDirection_Ascending);
                 sort_specs->SpecsDirty = false;
+                needs_sort = true;
             }
         }
-        // Always apply sort
-        if (!environment_vars_.empty()) {
+        // Apply sort only when data changed or sort order changed
+        if (needs_sort && !environment_vars_.empty()) {
             const int col = environment_sort_col_;
             const bool asc = environment_sort_asc_;
             std::ranges::sort(environment_vars_, [col, asc](const EnvironmentVariable& a, const EnvironmentVariable& b) {
@@ -487,6 +497,7 @@ void App::render_environment_tab() {
                 }
                 return asc ? (result < 0) : (result > 0);
             });
+            details_dirty_ = false;
         }
 
         for (const auto& var : environment_vars_) {
@@ -514,17 +525,18 @@ void App::render_libraries_tab() {
         ImGui::TableSetupColumn("Path", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
 
-        // Handle sorting
+        bool needs_sort = details_dirty_;
         if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
             if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
                 const auto& spec = sort_specs->Specs[0];
                 libraries_sort_col_ = spec.ColumnIndex;
                 libraries_sort_asc_ = (spec.SortDirection == ImGuiSortDirection_Ascending);
                 sort_specs->SpecsDirty = false;
+                needs_sort = true;
             }
         }
-        // Always apply sort
-        if (!libraries_.empty()) {
+        // Apply sort only when data changed or sort order changed
+        if (needs_sort && !libraries_.empty()) {
             const int col = libraries_sort_col_;
             const bool asc = libraries_sort_asc_;
             std::ranges::sort(libraries_, [col, asc](const LibraryInfo& a, const LibraryInfo& b) {
@@ -538,6 +550,7 @@ void App::render_libraries_tab() {
                 }
                 return asc ? (result < 0) : (result > 0);
             });
+            details_dirty_ = false;
         }
 
         for (const auto& lib : libraries_) {

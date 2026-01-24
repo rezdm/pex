@@ -17,6 +17,7 @@ void App::refresh_selected_details() {
             cached_stack_tid_ = -1;
             cached_stack_.clear();
             details_pid_ = -1;
+            details_dirty_ = true;
         }
         return;
     }
@@ -35,6 +36,7 @@ void App::refresh_selected_details() {
         cached_stack_tid_ = -1;
         cached_stack_.clear();
         details_pid_ = -1;
+        details_dirty_ = true;
         return;
     }
 
@@ -51,18 +53,22 @@ void App::refresh_selected_details() {
         cached_stack_tid_ = -1;
         cached_stack_.clear();
         details_pid_ = selected_pid_;
+        details_dirty_ = true;
     }
 
     // Only refresh data for the currently visible tab
     switch (active_details_tab_) {
         case DetailsTab::FileHandles:
             file_handles_ = details_reader_.get_file_handles(selected_pid_);
+            details_dirty_ = true;
             break;
         case DetailsTab::Network:
             network_connections_ = details_reader_.get_network_connections(selected_pid_);
+            details_dirty_ = true;
             break;
         case DetailsTab::Threads:
             threads_ = details_reader_.get_threads(selected_pid_);
+            details_dirty_ = true;
             // Preserve thread selection by TID across refreshes
             selected_thread_idx_ = -1;
             if (selected_thread_tid_ != -1) {
@@ -84,12 +90,15 @@ void App::refresh_selected_details() {
             break;
         case DetailsTab::Memory:
             memory_maps_ = details_reader_.get_memory_maps(selected_pid_);
+            details_dirty_ = true;
             break;
         case DetailsTab::Environment:
             environment_vars_ = details_reader_.get_environment_variables(selected_pid_);
+            details_dirty_ = true;
             break;
         case DetailsTab::Libraries:
             libraries_ = details_reader_.get_libraries(selected_pid_);
+            details_dirty_ = true;
             break;
     }
 }

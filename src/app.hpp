@@ -81,6 +81,7 @@ private:
     int selected_thread_idx_ = -1;
     int selected_thread_tid_ = -1;
     int details_pid_ = -1;  // PID for which details were fetched
+    bool details_dirty_ = false;   // True when tab data was refreshed and needs resort
     int cached_stack_tid_ = -1;  // TID for which stack is cached
     std::string cached_stack_;    // Cached stack trace (fetched on-demand)
 
