@@ -1,7 +1,9 @@
 #pragma once
 
 #include "process_info.hpp"
-#include "procfs_reader.hpp"
+#include "interfaces/i_process_data_provider.hpp"
+#include "interfaces/i_system_data_provider.hpp"
+#include "errors.hpp"
 #include "system_info.hpp"
 #include <vector>
 #include <map>
@@ -58,8 +60,13 @@ struct DataSnapshot {
 
 class DataStore {
 public:
-    DataStore();
+    // Constructor with dependency injection for platform abstraction
+    DataStore(IProcessDataProvider* process_provider, ISystemDataProvider* system_provider);
     ~DataStore();
+
+    // Non-copyable
+    DataStore(const DataStore&) = delete;
+    DataStore& operator=(const DataStore&) = delete;
 
     // Start/stop the background collection thread
     void start();
@@ -84,13 +91,17 @@ public:
     void set_on_data_updated(std::function<void()> callback);
 
     // Get recent parse errors for status bar display
-    [[nodiscard]] std::vector<ParseError> get_recent_errors();
+    [[nodiscard]] std::vector<ParseError> get_recent_errors() const;
 
 private:
     void collection_thread_func();
     void collect_data();
     static void calculate_tree_totals(ProcessNode& node);
     static void build_process_map(ProcessNode* node, std::map<int, ProcessNode*>& map);
+
+    // Injected providers (owned externally)
+    IProcessDataProvider* process_provider_;
+    ISystemDataProvider* system_provider_;
 
     // Background thread
     std::thread collection_thread_;
@@ -115,9 +126,6 @@ private:
 
     // Callback
     std::function<void()> on_data_updated_;
-
-    // Reader instance
-    ProcfsReader reader_;
 };
 
 } // namespace pex

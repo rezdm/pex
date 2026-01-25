@@ -1,6 +1,7 @@
 #pragma once
 
 #include "process_info.hpp"
+#include "errors.hpp"
 #include <vector>
 #include <map>
 #include <optional>
@@ -9,12 +10,6 @@
 #include <mutex>
 
 namespace pex {
-
-// Parse error information for status bar display
-struct ParseError {
-    std::chrono::steady_clock::time_point timestamp;
-    std::string message;
-};
 
 class ProcfsReader {
 public:

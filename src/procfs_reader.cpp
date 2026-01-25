@@ -167,9 +167,8 @@ std::optional<ProcessInfo> ProcfsReader::get_process_info(int pid, int64_t total
     info.kernel_time = stime;
     info.priority = static_cast<int>(priority);
     info.thread_count = static_cast<int>(num_threads);
-    info.start_time_ticks = starttime;
 
-    // Calculate start time
+    // Calculate start time from Linux ticks
     auto& sys = SystemInfo::instance();
     uint64_t boot_time = sys.get_boot_time_ticks();
     long ticks = sys.get_clock_ticks_per_second();
@@ -541,7 +540,7 @@ std::map<int, NetworkConnectionInfo> ProcfsReader::parse_net_file(const std::str
         conn.protocol = protocol;
         conn.local_endpoint = parse_address(local_addr, is_ipv6);
         conn.remote_endpoint = parse_address(remote_addr, is_ipv6);
-        conn.inode = inode;
+        conn.inode = inode;  // Linux-specific socket identifier
 
         if (protocol.starts_with("tcp")) {
             conn.state = (state < 12) ? tcp_states[state] : "UNKNOWN";

@@ -21,9 +21,11 @@ std::unique_ptr<ProcessNode> ProcessNode::clone() const {
     return copy;
 }
 
-DataStore::DataStore() {
-    previous_system_cpu_times_ = SystemInfo::get_cpu_times();
-    previous_per_cpu_times_ = SystemInfo::get_per_cpu_times();
+DataStore::DataStore(IProcessDataProvider* process_provider, ISystemDataProvider* system_provider)
+    : process_provider_(process_provider)
+    , system_provider_(system_provider) {
+    previous_system_cpu_times_ = system_provider_->get_cpu_times();
+    previous_per_cpu_times_ = system_provider_->get_per_cpu_times();
 
     // Create initial empty snapshot
     current_snapshot_ = std::make_shared<DataSnapshot>();
@@ -88,8 +90,8 @@ void DataStore::set_on_data_updated(std::function<void()> callback) {
     on_data_updated_ = std::move(callback);
 }
 
-std::vector<ParseError> DataStore::get_recent_errors() {
-    return reader_.get_recent_errors();
+std::vector<ParseError> DataStore::get_recent_errors() const {
+    return process_provider_->get_recent_errors();
 }
 
 void DataStore::collection_thread_func() {
@@ -113,18 +115,18 @@ void DataStore::collect_data() {
     new_snapshot->timestamp = std::chrono::steady_clock::now();
 
     // Get CPU times for delta calculation
-    auto current_cpu_times = SystemInfo::get_cpu_times();
+    auto current_cpu_times = system_provider_->get_cpu_times();
     uint64_t total_cpu_delta = current_cpu_times.total() - previous_system_cpu_times_.total();
 
     // Read memory info once and reuse for processes and system stats
-    const auto mem_info = SystemInfo::get_memory_info();
+    const auto mem_info = system_provider_->get_memory_info();
 
     // Get all processes
-    auto processes = reader_.get_all_processes(mem_info.total);
+    auto processes = process_provider_->get_all_processes(mem_info.total);
 
     // Calculate CPU percentages and collect current PIDs
     std::set<int> current_pids;
-    unsigned int proc_count = SystemInfo::instance().get_processor_count();
+    unsigned int proc_count = system_provider_->get_processor_count();
     for (auto& proc : processes) {
         current_pids.insert(proc.pid);
         if (auto it = previous_cpu_times_.find(proc.pid); it != previous_cpu_times_.end()) {
@@ -228,7 +230,7 @@ void DataStore::collect_data() {
     }
 
     // Per-CPU usage (reuse pre-allocated buffers)
-    SystemInfo::get_per_cpu_times(current_per_cpu_times_);
+    system_provider_->get_per_cpu_times(current_per_cpu_times_);
     const size_t cpu_count = current_per_cpu_times_.size();
 
     // Ensure buffers are sized correctly
@@ -259,9 +261,9 @@ void DataStore::collect_data() {
             }
         }
     } else {
-        std::fill(per_cpu_usage_buffer_.begin(), per_cpu_usage_buffer_.end(), 0.0);
-        std::fill(per_cpu_user_buffer_.begin(), per_cpu_user_buffer_.end(), 0.0);
-        std::fill(per_cpu_system_buffer_.begin(), per_cpu_system_buffer_.end(), 0.0);
+        std::ranges::fill(per_cpu_usage_buffer_, 0.0);
+        std::ranges::fill(per_cpu_user_buffer_, 0.0);
+        std::ranges::fill(per_cpu_system_buffer_, 0.0);
     }
 
     // Copy to snapshot (snapshot needs its own copy for thread safety)
@@ -273,9 +275,9 @@ void DataStore::collect_data() {
     std::swap(previous_per_cpu_times_, current_per_cpu_times_);
 
     // Additional system info
-    new_snapshot->swap_info = SystemInfo::get_swap_info();
-    new_snapshot->load_average = SystemInfo::get_load_average();
-    new_snapshot->uptime_info = SystemInfo::get_uptime();
+    new_snapshot->swap_info = system_provider_->get_swap_info();
+    new_snapshot->load_average = system_provider_->get_load_average();
+    new_snapshot->uptime_info = system_provider_->get_uptime();
 
     // Update previous values
     previous_system_cpu_times_ = current_cpu_times;
