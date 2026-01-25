@@ -18,11 +18,20 @@ Debian, Wayland, libxkb, ...
 
 ## Building
 
+### Linux (works)
 ```bash
 git clone https://github.com/rezdm/pex.git && cd pex
 mkdir build && cd build
-cmake ..
+cmake .. -DPEX_PLATFORM=linux
 make -j$(nproc)
+```
+
+### Other (needs implementation)
+```bash
+  -DPEX_PLATFORM=linux    # Linux and procfs                                                                                             
+  -DPEX_PLATFORM=freebsd  # FreeBSD                                                                                         
+  -DPEX_PLATFORM=solaris  # Solaris                                                                                           
+  -DPEX_PLATFORM=stub     # Stub (default on other platforms)                                                                                    
 ```
 
 ## Installing

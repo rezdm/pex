@@ -5,15 +5,19 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Platform selection - user can override with -DPEX_PLATFORM=stub
+# Platform selection - user can override with -DPEX_PLATFORM=<platform>
 # Auto-detect default based on OS, but allow explicit override
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(PEX_PLATFORM_DEFAULT "linux")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+    set(PEX_PLATFORM_DEFAULT "freebsd")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "SunOS")
+    set(PEX_PLATFORM_DEFAULT "solaris")
 else()
     set(PEX_PLATFORM_DEFAULT "stub")
 endif()
-set(PEX_PLATFORM "${PEX_PLATFORM_DEFAULT}" CACHE STRING "Platform backend (linux, stub)")
-set_property(CACHE PEX_PLATFORM PROPERTY STRINGS linux stub)
+set(PEX_PLATFORM "${PEX_PLATFORM_DEFAULT}" CACHE STRING "Platform backend (linux, freebsd, solaris, stub)")
+set_property(CACHE PEX_PLATFORM PROPERTY STRINGS linux freebsd solaris stub)
 
 message(STATUS "PEX platform: ${PEX_PLATFORM}")
 
@@ -108,6 +112,22 @@ if(PEX_PLATFORM STREQUAL "linux")
         src/linux/platform_factory_linux.cpp
     )
     set(PEX_PLATFORM_DEFINE "PEX_PLATFORM_LINUX")
+elseif(PEX_PLATFORM STREQUAL "freebsd")
+    set(PEX_PLATFORM_SOURCES
+        src/freebsd/freebsd_process_data_provider.cpp
+        src/freebsd/freebsd_system_data_provider.cpp
+        src/freebsd/freebsd_process_killer.cpp
+        src/freebsd/platform_factory_freebsd.cpp
+    )
+    set(PEX_PLATFORM_DEFINE "PEX_PLATFORM_FREEBSD")
+elseif(PEX_PLATFORM STREQUAL "solaris")
+    set(PEX_PLATFORM_SOURCES
+        src/solaris/solaris_process_data_provider.cpp
+        src/solaris/solaris_system_data_provider.cpp
+        src/solaris/solaris_process_killer.cpp
+        src/solaris/platform_factory_solaris.cpp
+    )
+    set(PEX_PLATFORM_DEFINE "PEX_PLATFORM_SOLARIS")
 elseif(PEX_PLATFORM STREQUAL "stub")
     set(PEX_PLATFORM_SOURCES
         src/stub/stub_providers.cpp
@@ -115,7 +135,7 @@ elseif(PEX_PLATFORM STREQUAL "stub")
     )
     set(PEX_PLATFORM_DEFINE "PEX_PLATFORM_STUB")
 else()
-    message(FATAL_ERROR "Unknown PEX_PLATFORM: ${PEX_PLATFORM}. Use 'linux' or 'stub'.")
+    message(FATAL_ERROR "Unknown PEX_PLATFORM: ${PEX_PLATFORM}. Use 'linux', 'freebsd', 'solaris', or 'stub'.")
 endif()
 
 # Main executable
