@@ -147,3 +147,10 @@ add_executable(pex
 target_compile_definitions(pex PRIVATE ${PEX_PLATFORM_DEFINE})
 target_include_directories(pex PRIVATE src ${stb_SOURCE_DIR} ${CMAKE_BINARY_DIR}/generated)
 target_link_libraries(pex PRIVATE imgui OpenGL::GL)
+
+# Platform-specific libraries
+if(PEX_PLATFORM STREQUAL "freebsd")
+    target_link_libraries(pex PRIVATE procstat kvm)
+elseif(PEX_PLATFORM STREQUAL "solaris")
+    target_link_libraries(pex PRIVATE kstat)
+endif()

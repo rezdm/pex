@@ -1,11 +1,16 @@
 #pragma once
 
 #include "../interfaces/i_process_data_provider.hpp"
+#include <vector>
+#include <mutex>
 
 namespace pex {
 
 class SolarisProcessDataProvider : public IProcessDataProvider {
 public:
+    SolarisProcessDataProvider();
+    ~SolarisProcessDataProvider() override;
+
     std::vector<ProcessInfo> get_all_processes(int64_t total_memory = -1) override;
     std::optional<ProcessInfo> get_process_info(int pid, int64_t total_memory) override;
     std::vector<ThreadInfo> get_threads(int pid) override;
@@ -17,6 +22,15 @@ public:
     std::vector<LibraryInfo> get_libraries(int pid) override;
     std::vector<ParseError> get_recent_errors() override;
     void clear_errors() override;
+
+private:
+    char map_state(char state);
+    std::string get_username(uid_t uid);
+    std::optional<ProcessInfo> read_process_info(int pid, int64_t total_memory);
+
+    std::mutex errors_mutex_;
+    std::vector<ParseError> recent_errors_;
+    void add_error(const std::string& context, const std::string& message);
 };
 
 } // namespace pex
