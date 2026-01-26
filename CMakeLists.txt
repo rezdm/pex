@@ -44,8 +44,17 @@ FetchContent_Declare(
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_WAYLAND ON CACHE BOOL "" FORCE)
-set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
+
+# Wayland is only available on Linux; other platforms use X11 only
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(GLFW_BUILD_WAYLAND ON CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
+else()
+    # FreeBSD/Solaris typically don't have Linux headers for Wayland
+    set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
+endif()
+
 FetchContent_MakeAvailable(glfw)
 
 # Dear ImGui
@@ -78,7 +87,7 @@ target_include_directories(imgui PUBLIC
     ${imgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/backends
 )
-target_link_libraries(imgui PUBLIC glfw)
+target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
 
 # Find OpenGL
 find_package(OpenGL REQUIRED)

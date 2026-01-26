@@ -20,6 +20,7 @@
 #include <sstream>
 #include <format>
 #include <algorithm>
+#include <map>
 
 namespace pex {
 
@@ -28,7 +29,7 @@ FreeBSDProcessDataProvider::~FreeBSDProcessDataProvider() = default;
 
 void FreeBSDProcessDataProvider::add_error(const std::string& context, const std::string& message) {
     std::lock_guard lock(errors_mutex_);
-    recent_errors_.push_back({context, message});
+    recent_errors_.push_back({std::chrono::steady_clock::now(), context + ": " + message});
     if (recent_errors_.size() > 100) {
         recent_errors_.erase(recent_errors_.begin());
     }

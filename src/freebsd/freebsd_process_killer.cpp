@@ -8,27 +8,60 @@
 #include <cstring>
 #include <vector>
 #include <set>
+#include <thread>
+#include <chrono>
 
 namespace pex {
 
 KillResult FreeBSDProcessKiller::kill_process(int pid, bool force) {
+    KillResult result;
+    if (pid <= 0) {
+        result.success = false;
+        result.error_message = "Invalid PID";
+        return result;
+    }
+
     int sig = force ? SIGKILL : SIGTERM;
 
     if (::kill(pid, sig) == 0) {
-        return KillResult::Success;
+        if (!force) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            if (::kill(pid, 0) == 0) {
+                result.success = true;
+                result.process_still_running = true;
+                result.error_message = "SIGTERM sent. Process may still be running. Use Force Kill (SIGKILL) if it doesn't terminate.";
+                return result;
+            }
+        }
+        result.success = true;
+        result.process_still_running = false;
+        return result;
     }
 
     switch (errno) {
         case ESRCH:
-            return KillResult::ProcessNotFound;
+            result.success = false;
+            result.error_message = "Process not found. It may have already terminated.";
+            break;
         case EPERM:
-            return KillResult::PermissionDenied;
+            result.success = false;
+            result.error_message = "Permission denied. You may need root privileges or CAP_KILL capability to signal this process.";
+            break;
         default:
-            return KillResult::Failed;
+            result.success = false;
+            result.error_message = "Failed to send signal.";
+            break;
     }
+    return result;
 }
 
 KillResult FreeBSDProcessKiller::kill_process_tree(int pid, bool force) {
+    KillResult result;
+    if (pid <= 0) {
+        result.success = false;
+        result.error_message = "Invalid PID";
+        return result;
+    }
     // Collect all descendant PIDs
     std::set<int> pids_to_kill;
     std::vector<int> queue;
@@ -40,14 +73,18 @@ KillResult FreeBSDProcessKiller::kill_process_tree(int pid, bool force) {
     size_t len = 0;
 
     if (sysctl(mib, 3, nullptr, &len, nullptr, 0) < 0) {
-        return KillResult::Failed;
+        result.success = false;
+        result.error_message = "Failed to enumerate processes.";
+        return result;
     }
 
     len = len * 5 / 4;  // Extra buffer
     std::vector<char> buf(len);
 
     if (sysctl(mib, 3, buf.data(), &len, nullptr, 0) < 0) {
-        return KillResult::Failed;
+        result.success = false;
+        result.error_message = "Failed to enumerate processes.";
+        return result;
     }
 
     size_t count = len / sizeof(struct kinfo_proc);
@@ -81,12 +118,27 @@ KillResult FreeBSDProcessKiller::kill_process_tree(int pid, bool force) {
     }
 
     if (any_success) {
-        return KillResult::Success;
-    } else if (any_permission_denied) {
-        return KillResult::PermissionDenied;
-    } else {
-        return KillResult::ProcessNotFound;
+        if (!force) {
+            if (::kill(pid, 0) == 0) {
+                result.success = true;
+                result.process_still_running = true;
+                result.error_message = "SIGTERM sent. Process tree may still be running. Use Force Kill (SIGKILL) if it doesn't terminate.";
+                return result;
+            }
+        }
+        result.success = true;
+        result.process_still_running = false;
+        return result;
     }
+
+    if (any_permission_denied) {
+        result.success = false;
+        result.error_message = "Permission denied. You may need root privileges or CAP_KILL capability to signal this process.";
+    } else {
+        result.success = false;
+        result.error_message = "Process not found. It may have already terminated.";
+    }
+    return result;
 }
 
 } // namespace pex

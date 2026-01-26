@@ -1,7 +1,10 @@
 #include "freebsd_system_data_provider.hpp"
 
 #include <sys/types.h>
+#include <sys/param.h>
 #include <sys/sysctl.h>
+#include <sys/user.h>
+#include <sys/proc.h>
 #include <sys/vmmeter.h>
 #include <sys/resource.h>
 #include <sys/time.h>
@@ -9,6 +12,13 @@
 #include <unistd.h>
 #include <cstring>
 #include <ctime>
+
+#if __has_include(<sys/swap.h>)
+#include <sys/swap.h>
+#define PEX_HAVE_SWAPCTL 1
+#else
+#define PEX_HAVE_SWAPCTL 0
+#endif
 
 namespace pex {
 
@@ -70,12 +80,7 @@ MemoryInfo FreeBSDSystemDataProvider::get_memory_info() {
     size_t len = sizeof(info.total);
     sysctlbyname("hw.physmem", &info.total, &len, nullptr, 0);
 
-    // Get VM statistics
-    struct vmmeter vmm;
-    len = sizeof(vmm);
-    if (sysctlbyname("vm.stats.vm.v_page_count", &vmm.v_page_count, &len, nullptr, 0) == 0) {
-        // Continue getting other stats
-    }
+    // vm.stats.* sysctls provide page counts directly
 
     unsigned int page_size = getpagesize();
 
@@ -104,31 +109,26 @@ MemoryInfo FreeBSDSystemDataProvider::get_memory_info() {
 SwapInfo FreeBSDSystemDataProvider::get_swap_info() {
     SwapInfo info;
 
-    // Use swapctl or read from kvm
-    // For simplicity, use sysctl if available
-    int mib[2];
-    mib[0] = CTL_VM;
-    mib[1] = VM_SWAP_INFO;
-
-    // Try to get swap info via vm.swap_info
-    struct xswdev xsw;
-    size_t len;
-    int n = 0;
-
-    while (true) {
-        int mib_swap[3] = { CTL_VM, VM_SWAP_INFO, n };
-        len = sizeof(xsw);
-        if (sysctl(mib_swap, 3, &xsw, &len, nullptr, 0) < 0) {
-            break;
+    // Best-effort: try swapctl if available
+#if PEX_HAVE_SWAPCTL && defined(SWAP_NSWAP)
+    int nswap = swapctl(SWAP_NSWAP, nullptr, 0);
+    if (nswap > 0) {
+        std::vector<struct swapent> ents(static_cast<size_t>(nswap));
+        if (swapctl(SWAP_STATS, ents.data(), nswap) > 0) {
+            for (const auto& ent : ents) {
+                info.total += static_cast<int64_t>(ent.se_nblks) * getpagesize();
+                info.used += static_cast<int64_t>(ent.se_inuse) * getpagesize();
+            }
+            info.free = info.total - info.used;
+            return info;
         }
-        if (len == 0) break;
-
-        info.total += static_cast<int64_t>(xsw.xsw_nblks) * getpagesize();
-        info.used += static_cast<int64_t>(xsw.xsw_used) * getpagesize();
-        n++;
     }
+#endif
 
-    info.free = info.total - info.used;
+    // Fallback: expose swap as zero if we can't query it on this system
+    info.total = 0;
+    info.used = 0;
+    info.free = 0;
     return info;
 }
 
@@ -190,9 +190,12 @@ UptimeInfo FreeBSDSystemDataProvider::get_uptime() {
 }
 
 unsigned int FreeBSDSystemDataProvider::get_processor_count() const {
-    int ncpu = 1;
+    int ncpu = 0;
     size_t len = sizeof(ncpu);
-    sysctlbyname("hw.ncpu", &ncpu, &len, nullptr, 0);
+    if (sysctlbyname("hw.ncpu", &ncpu, &len, nullptr, 0) != 0 || ncpu <= 0) {
+        const long fallback = sysconf(_SC_NPROCESSORS_ONLN);
+        ncpu = (fallback > 0) ? static_cast<int>(fallback) : 1;
+    }
     return static_cast<unsigned int>(ncpu);
 }
 
