@@ -11,29 +11,62 @@
 #include <vector>
 #include <set>
 #include <filesystem>
+#include <thread>
+#include <chrono>
 
 namespace fs = std::filesystem;
 
 namespace pex {
 
 KillResult SolarisProcessKiller::kill_process(int pid, bool force) {
+    KillResult result;
+    if (pid <= 0) {
+        result.success = false;
+        result.error_message = "Invalid PID";
+        return result;
+    }
+
     int sig = force ? SIGKILL : SIGTERM;
 
     if (::kill(pid, sig) == 0) {
-        return KillResult::Success;
+        if (!force) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            if (::kill(pid, 0) == 0) {
+                result.success = true;
+                result.process_still_running = true;
+                result.error_message = "SIGTERM sent. Process may still be running. Use Force Kill (SIGKILL) if it doesn't terminate.";
+                return result;
+            }
+        }
+        result.success = true;
+        result.process_still_running = false;
+        return result;
     }
 
     switch (errno) {
         case ESRCH:
-            return KillResult::ProcessNotFound;
+            result.success = false;
+            result.error_message = "Process not found. It may have already terminated.";
+            break;
         case EPERM:
-            return KillResult::PermissionDenied;
+            result.success = false;
+            result.error_message = "Permission denied. You may need root privileges or privileges to signal this process.";
+            break;
         default:
-            return KillResult::Failed;
+            result.success = false;
+            result.error_message = "Failed to send signal.";
+            break;
     }
+    return result;
 }
 
 KillResult SolarisProcessKiller::kill_process_tree(int pid, bool force) {
+    KillResult result;
+    if (pid <= 0) {
+        result.success = false;
+        result.error_message = "Invalid PID";
+        return result;
+    }
     // Collect all descendant PIDs by reading /proc
     std::set<int> pids_to_kill;
     pids_to_kill.insert(pid);
@@ -98,12 +131,27 @@ KillResult SolarisProcessKiller::kill_process_tree(int pid, bool force) {
     }
 
     if (any_success) {
-        return KillResult::Success;
-    } else if (any_permission_denied) {
-        return KillResult::PermissionDenied;
-    } else {
-        return KillResult::ProcessNotFound;
+        if (!force) {
+            if (::kill(pid, 0) == 0) {
+                result.success = true;
+                result.process_still_running = true;
+                result.error_message = "SIGTERM sent. Process tree may still be running. Use Force Kill (SIGKILL) if it doesn't terminate.";
+                return result;
+            }
+        }
+        result.success = true;
+        result.process_still_running = false;
+        return result;
     }
+
+    if (any_permission_denied) {
+        result.success = false;
+        result.error_message = "Permission denied. You may need root privileges or privileges to signal this process.";
+    } else {
+        result.success = false;
+        result.error_message = "Process not found. It may have already terminated.";
+    }
+    return result;
 }
 
 } // namespace pex

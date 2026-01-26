@@ -35,6 +35,11 @@ embed_resource(
 # Fetch dependencies
 include(FetchContent)
 
+# Solaris needs feature test macros for clock_gettime prototype
+if(CMAKE_SYSTEM_NAME STREQUAL "SunOS")
+    add_compile_definitions(_POSIX_C_SOURCE=199309L __EXTENSIONS__)
+endif()
+
 # GLFW
 FetchContent_Declare(
     glfw
@@ -161,5 +166,6 @@ target_link_libraries(pex PRIVATE imgui OpenGL::GL)
 if(PEX_PLATFORM STREQUAL "freebsd")
     target_link_libraries(pex PRIVATE procstat kvm)
 elseif(PEX_PLATFORM STREQUAL "solaris")
-    target_link_libraries(pex PRIVATE kstat)
+    target_link_libraries(pex PRIVATE kstat rt)
+    target_link_libraries(glfw PUBLIC rt)
 endif()
