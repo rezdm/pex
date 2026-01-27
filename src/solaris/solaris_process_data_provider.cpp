@@ -202,6 +202,13 @@ static PfilesParseResult parse_pfiles(int pid) {
             continue;
         }
 
+        if (!line.empty() && line[0] == '/') {
+            if (result.handles[current_index].path.empty()) {
+                result.handles[current_index].path = line;
+            }
+            continue;
+        }
+
         if (socket_state.active) {
             if (line.rfind("sockname:", 0) == 0) {
                 std::string endpoint;
@@ -217,6 +224,10 @@ static PfilesParseResult parse_pfiles(int pid) {
                     socket_state.remote = std::move(endpoint);
                     socket_state.family = family;
                 }
+            } else if (line.rfind("SOCK_STREAM", 0) == 0) {
+                socket_state.is_stream = true;
+            } else if (line.rfind("SOCK_DGRAM", 0) == 0) {
+                socket_state.is_dgram = true;
             } else if (line.rfind("state:", 0) == 0) {
                 socket_state.state = trim(line.substr(6));
             }
