@@ -26,13 +26,25 @@ cmake .. -DPEX_PLATFORM=linux
 make -j$(nproc)
 ```
 
-### Other (needs implementation)
+### Other (works, but not thoroughly tested through daily usage)
 ```bash
-  -DPEX_PLATFORM=linux    # Linux and procfs                                                                                             
-  -DPEX_PLATFORM=freebsd  # FreeBSD                                                                                         
-  -DPEX_PLATFORM=solaris  # Solaris                                                                                           
-  -DPEX_PLATFORM=stub     # Stub (default on other platforms)                                                                                    
+  -DPEX_PLATFORM=freebsd  # FreeBSD
+  -DPEX_PLATFORM=solaris  # Solaris
+  -DPEX_PLATFORM=stub     # Stub (default on other platforms)
 ```
+
+#### FreeBSD
+I am using `pex` in FreeBSD 15-RELEASE, with XFCE, X11 in VirtualBox 7.2. Seems to work -- shows all that I need
+
+#### Solaris
+I am testing `pex` on Solaris 11.4 CBE, with GNOME, X11 in VirtualBox 7.2. Works, but with an additional step, some workaround for libX11 limitation. libX11 itself resolves fine, but GLFW is reporting "Failed to load Xlib" likely because it can not `dlopen("libX11.so.6")` (hard-coded by GLFW) but my Solaris installation provides libX11.so.4. I did:
+```bash
+# cd pex/build...
+mkdir lib
+ln -s /usr/lib/64/libX11.so.4 ./lib/libX11.so.6
+LD_LIBRARY_PATH=$PWD/lib ./pex
+```
+This is not correct, but at least allowes to test
 
 ## Installing
 ```bash

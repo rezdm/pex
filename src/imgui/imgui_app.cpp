@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <functional>
 #include <cassert>
+#include <cstdio>
 #include "stb_image.h"
 #include "pex_icon.hpp"
 
@@ -44,6 +45,9 @@ ImGuiApp::~ImGuiApp() = default;
 
 void ImGuiApp::run() {
     // Initialize GLFW
+    glfwSetErrorCallback([](int code, const char* desc) {
+        std::fprintf(stderr, "GLFW error %d: %s\n", code, desc ? desc : "(null)");
+    });
     if (!glfwInit()) {
         throw std::runtime_error("Failed to initialize GLFW");
     }
