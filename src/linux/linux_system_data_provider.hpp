@@ -20,6 +20,7 @@ public:
     [[nodiscard]] unsigned int get_processor_count() const override;
     [[nodiscard]] long get_clock_ticks_per_second() const override;
     [[nodiscard]] uint64_t get_boot_time_ticks() const override;
+    [[nodiscard]] std::string get_system_info_string() const override;
 
 private:
     // Cached values from SystemInfo singleton

@@ -35,6 +35,11 @@ embed_resource(
 # Fetch dependencies
 include(FetchContent)
 
+# Solaris needs feature test macros for clock_gettime prototype
+if(CMAKE_SYSTEM_NAME STREQUAL "SunOS")
+    add_compile_definitions(_POSIX_C_SOURCE=199309L __EXTENSIONS__)
+endif()
+
 # GLFW
 FetchContent_Declare(
     glfw
@@ -44,8 +49,17 @@ FetchContent_Declare(
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_WAYLAND ON CACHE BOOL "" FORCE)
-set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
+
+# Wayland is only available on Linux; other platforms use X11 only
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(GLFW_BUILD_WAYLAND ON CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
+else()
+    # FreeBSD/Solaris typically don't have Linux headers for Wayland
+    set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
+endif()
+
 FetchContent_MakeAvailable(glfw)
 
 # Dear ImGui
@@ -78,7 +92,7 @@ target_include_directories(imgui PUBLIC
     ${imgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/backends
 )
-target_link_libraries(imgui PUBLIC glfw)
+target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
 
 # Find OpenGL
 find_package(OpenGL REQUIRED)
@@ -147,3 +161,11 @@ add_executable(pex
 target_compile_definitions(pex PRIVATE ${PEX_PLATFORM_DEFINE})
 target_include_directories(pex PRIVATE src ${stb_SOURCE_DIR} ${CMAKE_BINARY_DIR}/generated)
 target_link_libraries(pex PRIVATE imgui OpenGL::GL)
+
+# Platform-specific libraries
+if(PEX_PLATFORM STREQUAL "freebsd")
+    target_link_libraries(pex PRIVATE procstat kvm)
+elseif(PEX_PLATFORM STREQUAL "solaris")
+    target_link_libraries(pex PRIVATE kstat rt)
+    target_link_libraries(glfw PUBLIC rt)
+endif()

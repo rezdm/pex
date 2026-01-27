@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <functional>
 #include <cassert>
+#include <cstdio>
 #include "stb_image.h"
 #include "pex_icon.hpp"
 
@@ -44,6 +45,9 @@ ImGuiApp::~ImGuiApp() = default;
 
 void ImGuiApp::run() {
     // Initialize GLFW
+    glfwSetErrorCallback([](int code, const char* desc) {
+        std::fprintf(stderr, "GLFW error %d: %s\n", code, desc ? desc : "(null)");
+    });
     if (!glfwInit()) {
         throw std::runtime_error("Failed to initialize GLFW");
     }
@@ -56,8 +60,11 @@ void ImGuiApp::run() {
     // Set Wayland app_id for desktop integration
     glfwWindowHintString(GLFW_WAYLAND_APP_ID, "pex");
 
+    // Build window title with platform info
+    std::string window_title = "PEX: " + system_provider_->get_system_info_string();
+
     // Create window
-    window_ = glfwCreateWindow(1400, 900, "PEX - Process Explorer for Linux", nullptr, nullptr);
+    window_ = glfwCreateWindow(1400, 900, window_title.c_str(), nullptr, nullptr);
     if (!window_) {
         glfwTerminate();
         throw std::runtime_error("Failed to create GLFW window");

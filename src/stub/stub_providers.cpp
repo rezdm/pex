@@ -125,6 +125,10 @@ uint64_t StubSystemDataProvider::get_boot_time_ticks() const {
     return 0;
 }
 
+std::string StubSystemDataProvider::get_system_info_string() const {
+    return "Stub Platform";
+}
+
 // StubProcessKiller - always returns success (no-op)
 
 KillResult StubProcessKiller::kill_process(int /*pid*/, bool /*force*/) {
