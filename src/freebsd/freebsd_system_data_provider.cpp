@@ -9,6 +9,7 @@
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <vm/vm_param.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 #include <cstring>
 #include <ctime>
@@ -210,6 +211,40 @@ uint64_t FreeBSDSystemDataProvider::get_boot_time_ticks() const {
         return static_cast<uint64_t>(boottime.tv_sec) * sysconf(_SC_CLK_TCK);
     }
     return 0;
+}
+
+std::string FreeBSDSystemDataProvider::get_system_info_string() const {
+    struct utsname uts;
+    if (uname(&uts) != 0) {
+        return "FreeBSD";
+    }
+
+    // utsname fields on FreeBSD:
+    // sysname = "FreeBSD"
+    // release = "14.0-RELEASE" or "15.0-CURRENT"
+    // version = "FreeBSD 14.0-RELEASE #0 releng/14.0-n265380-fc260a8cef8: ..."
+    // machine = "amd64"
+
+    // Format: "FreeBSD <release> <arch> <version>"
+    // Example: "FreeBSD 14.0-RELEASE amd64 FreeBSD 14.0-RELEASE #0..."
+    std::string result = std::string(uts.sysname) + " " + uts.release + " " + uts.machine;
+
+    // Add version info (contains build details) - truncate if too long
+    if (uts.version[0] != '\0') {
+        std::string version = uts.version;
+        // Take only first line
+        auto newline = version.find('\n');
+        if (newline != std::string::npos) {
+            version = version.substr(0, newline);
+        }
+        // Truncate to reasonable length for window title
+        if (version.size() > 50) {
+            version = version.substr(0, 47) + "...";
+        }
+        result += " (" + version + ")";
+    }
+
+    return result;
 }
 
 } // namespace pex

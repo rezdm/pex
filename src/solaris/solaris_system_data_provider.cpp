@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <cstring>
+#include <sys/utsname.h>
 #include <cstdio>
 #include <ctime>
 
@@ -235,6 +236,61 @@ uint64_t SolarisSystemDataProvider::get_boot_time_ticks() const {
     }
 
     return boot_time;
+}
+
+std::string SolarisSystemDataProvider::get_system_info_string() const {
+    std::string result = "SunOS";
+
+    struct utsname uts;
+    memset(&uts, 0, sizeof(uts));
+
+    // Note: On Solaris, uname() returns non-negative on success (not necessarily 0)
+    if (uname(&uts) >= 0) {
+        // Build from utsname fields
+        result = std::string(uts.sysname[0] ? uts.sysname : "SunOS");
+
+        if (uts.release[0]) {
+            result += " ";
+            result += uts.release;
+        }
+
+        if (uts.machine[0]) {
+            result += " ";
+            result += uts.machine;
+        }
+
+        if (uts.version[0]) {
+            result += " ";
+            result += uts.version;
+        }
+    }
+
+    // Try to get friendly release name from /etc/release
+    FILE* f = fopen("/etc/release", "r");
+    if (f) {
+        char line[256] = {0};
+        if (fgets(line, sizeof(line), f)) {
+            // Trim trailing whitespace/newlines
+            size_t len = strlen(line);
+            while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r' ||
+                               line[len-1] == ' ' || line[len-1] == '\t')) {
+                line[--len] = '\0';
+            }
+            // Find first non-whitespace
+            const char* start = line;
+            while (*start == ' ' || *start == '\t') {
+                start++;
+            }
+            if (*start) {
+                result += " (";
+                result += start;
+                result += ")";
+            }
+        }
+        fclose(f);
+    }
+
+    return result;
 }
 
 } // namespace pex
