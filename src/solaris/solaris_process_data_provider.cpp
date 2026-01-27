@@ -265,11 +265,29 @@ char SolarisProcessDataProvider::map_state(char state) {
 }
 
 std::string SolarisProcessDataProvider::get_username(uid_t uid) {
+    // Check cache first
+    {
+        std::lock_guard lock(username_cache_mutex_);
+        auto it = username_cache_.find(uid);
+        if (it != username_cache_.end()) {
+            return it->second;
+        }
+    }
+
+    // Lookup and cache
+    std::string name;
     struct passwd* pw = getpwuid(uid);
     if (pw) {
-        return pw->pw_name;
+        name = pw->pw_name;
+    } else {
+        name = std::to_string(uid);
     }
-    return std::to_string(uid);
+
+    {
+        std::lock_guard lock(username_cache_mutex_);
+        username_cache_[uid] = name;
+    }
+    return name;
 }
 
 std::optional<ProcessInfo> SolarisProcessDataProvider::read_process_info(int pid, int64_t total_memory) {
@@ -701,9 +719,18 @@ std::vector<EnvironmentVariable> SolarisProcessDataProvider::get_environment_var
         }
         if (line.empty()) continue;
 
-        // pargs -e may prefix entries; look for NAME=VALUE
+        // pargs -e outputs lines like "envp[0]: PATH=/usr/bin:..."
+        // Strip the "envp[N]: " prefix if present
+        if (line.rfind("envp[", 0) == 0) {
+            auto colon = line.find("]: ");
+            if (colon != std::string::npos) {
+                line = line.substr(colon + 3);
+            }
+        }
+
+        // Look for NAME=VALUE
         const auto eq = line.find('=');
-        if (eq == std::string::npos) continue;
+        if (eq == std::string::npos || eq == 0) continue;
 
         EnvironmentVariable ev;
         ev.name = line.substr(0, eq);
@@ -715,6 +742,20 @@ std::vector<EnvironmentVariable> SolarisProcessDataProvider::get_environment_var
     return env;
 }
 
+// Helper to parse size back from human-readable format (e.g., "4.0 KB" -> 4096)
+static uint64_t parse_size_string(const std::string& size_str) {
+    double value = 0;
+    char unit[8] = {};
+    if (sscanf(size_str.c_str(), "%lf %7s", &value, unit) >= 1) {
+        std::string u = unit;
+        if (u == "GB") return static_cast<uint64_t>(value * 1024.0 * 1024.0 * 1024.0);
+        if (u == "MB") return static_cast<uint64_t>(value * 1024.0 * 1024.0);
+        if (u == "KB") return static_cast<uint64_t>(value * 1024.0);
+        if (u == "B" || u.empty()) return static_cast<uint64_t>(value);
+    }
+    return 0;
+}
+
 std::vector<LibraryInfo> SolarisProcessDataProvider::get_libraries(int pid) {
     std::vector<LibraryInfo> libraries;
     std::map<std::string, LibraryInfo> lib_map;
@@ -724,6 +765,8 @@ std::vector<LibraryInfo> SolarisProcessDataProvider::get_libraries(int pid) {
 
     for (const auto& mm : maps) {
         if (mm.pathname.empty() || mm.pathname[0] == '[') continue;
+
+        uint64_t region_size = parse_size_string(mm.size);
 
         auto it = lib_map.find(mm.pathname);
         if (it == lib_map.end()) {
@@ -738,13 +781,14 @@ std::vector<LibraryInfo> SolarisProcessDataProvider::get_libraries(int pid) {
                 li.base_address = mm.address.substr(0, dash);
             }
 
-            // Parse size from human-readable format back to bytes
-            // (simplified - just store 0 and let UI handle it)
-            li.total_size = 0;
-            li.resident_size = 0;
+            li.total_size = region_size;
+            li.resident_size = region_size;  // Solaris doesn't separate resident from total in prmap
             li.is_executable = (mm.permissions.find('x') != std::string::npos);
             lib_map[mm.pathname] = std::move(li);
         } else {
+            // Accumulate sizes for same library
+            it->second.total_size += region_size;
+            it->second.resident_size += region_size;
             if (mm.permissions.find('x') != std::string::npos) {
                 it->second.is_executable = true;
             }

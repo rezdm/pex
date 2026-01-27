@@ -3,6 +3,7 @@
 #include "../interfaces/i_process_data_provider.hpp"
 #include <vector>
 #include <mutex>
+#include <map>
 
 namespace pex {
 
@@ -26,10 +27,17 @@ public:
 private:
     char map_state(int state);
     std::string get_username(uid_t uid);
+    void add_error(const std::string& context, const std::string& message);
 
     std::mutex errors_mutex_;
     std::vector<ParseError> recent_errors_;
-    void add_error(const std::string& context, const std::string& message);
+
+    // Username cache to avoid repeated getpwuid calls
+    mutable std::mutex username_cache_mutex_;
+    std::map<uid_t, std::string> username_cache_;
+
+    // Cached system configuration
+    long clock_ticks_ = 100;
 };
 
 } // namespace pex

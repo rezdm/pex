@@ -4,9 +4,13 @@
 #include <sys/sysinfo.h>
 #include <sys/loadavg.h>
 #include <sys/swap.h>
+#include <procfs.h>
 #include <kstat.h>
+#include <dirent.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <cstring>
+#include <cstdio>
 #include <ctime>
 
 namespace pex {
@@ -80,14 +84,15 @@ MemoryInfo SolarisSystemDataProvider::get_memory_info() {
     info.total = pages * pagesize;
 
     // Available memory - use kstat for freemem
+    // Note: kstat API uses char* not const char*, but doesn't modify the strings
     kstat_ctl_t* kc = kstat_open();
     if (kc) {
-        kstat_t* ksp = kstat_lookup(kc, "unix", 0, "system_pages");
+        kstat_t* ksp = kstat_lookup(kc, const_cast<char*>("unix"), 0, const_cast<char*>("system_pages"));
         if (ksp && kstat_read(kc, ksp, nullptr) >= 0) {
             kstat_named_t* kn;
 
             // Free memory
-            kn = reinterpret_cast<kstat_named_t*>(kstat_data_lookup(ksp, "freemem"));
+            kn = reinterpret_cast<kstat_named_t*>(kstat_data_lookup(ksp, const_cast<char*>("freemem")));
             if (kn) {
                 info.available = kn->value.ul * pagesize;
             }
@@ -142,10 +147,40 @@ LoadAverage SolarisSystemDataProvider::get_load_average() {
         la.fifteen_min = loadavg[2];
     }
 
-    // Get process counts - would need to iterate /proc
-    // For simplicity, return 0 for now
-    la.total_tasks = 0;
-    la.running_tasks = 0;
+    // Count processes by iterating /proc
+    int total = 0;
+    int running = 0;
+
+    DIR* dir = opendir("/proc");
+    if (dir) {
+        struct dirent* entry;
+        while ((entry = readdir(dir)) != nullptr) {
+            // Skip non-numeric entries
+            if (entry->d_name[0] < '0' || entry->d_name[0] > '9') continue;
+
+            char psinfo_path[64];
+            snprintf(psinfo_path, sizeof(psinfo_path), "/proc/%s/psinfo", entry->d_name);
+
+            int fd = open(psinfo_path, O_RDONLY);
+            if (fd < 0) continue;
+
+            psinfo_t psinfo;
+            ssize_t n = read(fd, &psinfo, sizeof(psinfo));
+            close(fd);
+
+            if (n == sizeof(psinfo)) {
+                total++;
+                // Check if running (O = on processor, R = runnable)
+                if (psinfo.pr_lwp.pr_sname == 'O' || psinfo.pr_lwp.pr_sname == 'R') {
+                    running++;
+                }
+            }
+        }
+        closedir(dir);
+    }
+
+    la.total_tasks = total;
+    la.running_tasks = running;
 
     return la;
 }
@@ -156,10 +191,10 @@ UptimeInfo SolarisSystemDataProvider::get_uptime() {
     // Use kstat to get boot time
     kstat_ctl_t* kc = kstat_open();
     if (kc) {
-        kstat_t* ksp = kstat_lookup(kc, "unix", 0, "system_misc");
+        kstat_t* ksp = kstat_lookup(kc, const_cast<char*>("unix"), 0, const_cast<char*>("system_misc"));
         if (ksp && kstat_read(kc, ksp, nullptr) >= 0) {
             kstat_named_t* kn = reinterpret_cast<kstat_named_t*>(
-                kstat_data_lookup(ksp, "boot_time"));
+                kstat_data_lookup(ksp, const_cast<char*>("boot_time")));
             if (kn) {
                 time_t boot_time = kn->value.ul;
                 time_t now = time(nullptr);
@@ -188,10 +223,10 @@ uint64_t SolarisSystemDataProvider::get_boot_time_ticks() const {
 
     kstat_ctl_t* kc = kstat_open();
     if (kc) {
-        kstat_t* ksp = kstat_lookup(kc, "unix", 0, "system_misc");
+        kstat_t* ksp = kstat_lookup(kc, const_cast<char*>("unix"), 0, const_cast<char*>("system_misc"));
         if (ksp && kstat_read(kc, ksp, nullptr) >= 0) {
             kstat_named_t* kn = reinterpret_cast<kstat_named_t*>(
-                kstat_data_lookup(ksp, "boot_time"));
+                kstat_data_lookup(ksp, const_cast<char*>("boot_time")));
             if (kn) {
                 boot_time = kn->value.ul * sysconf(_SC_CLK_TCK);
             }

@@ -24,7 +24,11 @@
 
 namespace pex {
 
-FreeBSDProcessDataProvider::FreeBSDProcessDataProvider() = default;
+FreeBSDProcessDataProvider::FreeBSDProcessDataProvider() {
+    // Cache clock ticks per second for CPU time calculations
+    clock_ticks_ = sysconf(_SC_CLK_TCK);
+}
+
 FreeBSDProcessDataProvider::~FreeBSDProcessDataProvider() = default;
 
 void FreeBSDProcessDataProvider::add_error(const std::string& context, const std::string& message) {
@@ -50,11 +54,29 @@ char FreeBSDProcessDataProvider::map_state(int state) {
 }
 
 std::string FreeBSDProcessDataProvider::get_username(uid_t uid) {
+    // Check cache first
+    {
+        std::lock_guard lock(username_cache_mutex_);
+        auto it = username_cache_.find(uid);
+        if (it != username_cache_.end()) {
+            return it->second;
+        }
+    }
+
+    // Lookup and cache
+    std::string name;
     struct passwd* pw = getpwuid(uid);
     if (pw) {
-        return pw->pw_name;
+        name = pw->pw_name;
+    } else {
+        name = std::to_string(uid);
     }
-    return std::to_string(uid);
+
+    {
+        std::lock_guard lock(username_cache_mutex_);
+        username_cache_[uid] = name;
+    }
+    return name;
 }
 
 std::vector<ProcessInfo> FreeBSDProcessDataProvider::get_all_processes(int64_t total_memory) {
@@ -107,10 +129,10 @@ std::vector<ProcessInfo> FreeBSDProcessDataProvider::get_all_processes(int64_t t
         }
 
         // CPU times (in clock ticks)
-        info.user_time = kp[i].ki_rusage.ru_utime.tv_sec * sysconf(_SC_CLK_TCK) +
-                         kp[i].ki_rusage.ru_utime.tv_usec * sysconf(_SC_CLK_TCK) / 1000000;
-        info.kernel_time = kp[i].ki_rusage.ru_stime.tv_sec * sysconf(_SC_CLK_TCK) +
-                           kp[i].ki_rusage.ru_stime.tv_usec * sysconf(_SC_CLK_TCK) / 1000000;
+        info.user_time = kp[i].ki_rusage.ru_utime.tv_sec * clock_ticks_ +
+                         kp[i].ki_rusage.ru_utime.tv_usec * clock_ticks_ / 1000000;
+        info.kernel_time = kp[i].ki_rusage.ru_stime.tv_sec * clock_ticks_ +
+                           kp[i].ki_rusage.ru_stime.tv_usec * clock_ticks_ / 1000000;
 
         // Start time
         auto start_sec = std::chrono::seconds(kp[i].ki_start.tv_sec);
@@ -174,10 +196,10 @@ std::optional<ProcessInfo> FreeBSDProcessDataProvider::get_process_info(int pid,
         info.memory_percent = (static_cast<double>(info.resident_memory) / total_memory) * 100.0;
     }
 
-    info.user_time = kp.ki_rusage.ru_utime.tv_sec * sysconf(_SC_CLK_TCK) +
-                     kp.ki_rusage.ru_utime.tv_usec * sysconf(_SC_CLK_TCK) / 1000000;
-    info.kernel_time = kp.ki_rusage.ru_stime.tv_sec * sysconf(_SC_CLK_TCK) +
-                       kp.ki_rusage.ru_stime.tv_usec * sysconf(_SC_CLK_TCK) / 1000000;
+    info.user_time = kp.ki_rusage.ru_utime.tv_sec * clock_ticks_ +
+                     kp.ki_rusage.ru_utime.tv_usec * clock_ticks_ / 1000000;
+    info.kernel_time = kp.ki_rusage.ru_stime.tv_sec * clock_ticks_ +
+                       kp.ki_rusage.ru_stime.tv_usec * clock_ticks_ / 1000000;
 
     auto start_sec = std::chrono::seconds(kp.ki_start.tv_sec);
     info.start_time = std::chrono::system_clock::time_point(start_sec);
@@ -238,7 +260,6 @@ std::vector<FileHandleInfo> FreeBSDProcessDataProvider::get_file_handles(int pid
         return handles;
     }
 
-    unsigned int fcnt;
     struct filestat_list* flist = procstat_getfiles(ps, proc, 0);
     if (flist) {
         struct filestat* fst;
@@ -352,20 +373,19 @@ std::vector<NetworkConnectionInfo> FreeBSDProcessDataProvider::get_network_conne
             conn.local_endpoint = local_addr;
             conn.remote_endpoint = remote_addr;
 
-            // TCP state
+            // TCP state - FreeBSD's procstat doesn't expose TCP state directly
+            // We infer state based on peer address: if remote is non-zero, likely connected
             if (ss.type == SOCK_STREAM) {
-                static const char* tcp_states[] = {
-                    "CLOSED", "LISTEN", "SYN_SENT", "SYN_RCVD",
-                    "ESTABLISHED", "CLOSE_WAIT", "FIN_WAIT_1", "CLOSING",
-                    "LAST_ACK", "FIN_WAIT_2", "TIME_WAIT"
-                };
-                if (ss.proto == IPPROTO_TCP && ss.so_pcb) {
-                    // The state would be in the TCP control block
-                    // For now, use a simple heuristic
-                    conn.state = "ESTABLISHED";
-                } else {
-                    conn.state = "-";
+                bool has_peer = false;
+                if (ss.dom_family == AF_INET) {
+                    struct sockaddr_in* sin_peer = (struct sockaddr_in*)&ss.sa_peer;
+                    has_peer = (sin_peer->sin_port != 0 || sin_peer->sin_addr.s_addr != 0);
+                } else if (ss.dom_family == AF_INET6) {
+                    struct sockaddr_in6* sin6_peer = (struct sockaddr_in6*)&ss.sa_peer;
+                    has_peer = (sin6_peer->sin6_port != 0);
                 }
+                // Without kernel TCP state access, infer: has peer = likely established/connected
+                conn.state = has_peer ? "ESTABLISHED" : "LISTEN";
             } else {
                 conn.state = "-";
             }
