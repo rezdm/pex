@@ -5,6 +5,9 @@
 #include <procfs.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <unistd.h>
 #include <pwd.h>
 
@@ -15,10 +18,226 @@
 #include <algorithm>
 #include <map>
 #include <filesystem>
+#include <cstdio>
+#include <cctype>
 
 namespace fs = std::filesystem;
 
 namespace pex {
+
+struct PfilesParseResult {
+    std::vector<FileHandleInfo> handles;
+    std::vector<NetworkConnectionInfo> connections;
+};
+
+static std::string trim(std::string value) {
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) {
+        value.erase(value.begin());
+    }
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) {
+        value.pop_back();
+    }
+    return value;
+}
+
+static int parse_port_from_line(const std::string& line) {
+    auto pos = line.find("port");
+    if (pos == std::string::npos) {
+        return 0;
+    }
+    pos = line.find_first_of("0123456789", pos);
+    if (pos == std::string::npos) {
+        return 0;
+    }
+    size_t end = pos;
+    while (end < line.size() && std::isdigit(static_cast<unsigned char>(line[end])) != 0) {
+        ++end;
+    }
+    return std::stoi(line.substr(pos, end - pos));
+}
+
+static bool parse_socket_endpoint(const std::string& line, std::string& endpoint, int& family) {
+    std::string rest = trim(line);
+    std::istringstream iss(rest);
+    std::string fam_token;
+    if (!(iss >> fam_token)) {
+        return false;
+    }
+    if (fam_token == "AF_UNSPEC") {
+        return false;
+    }
+    if (fam_token == "AF_INET6") {
+        family = AF_INET6;
+    } else if (fam_token == "AF_INET") {
+        family = AF_INET;
+    } else {
+        return false;
+    }
+
+    std::string addr;
+    if (!(iss >> addr)) {
+        addr = "*";
+    }
+
+    int port = parse_port_from_line(rest);
+    if (family == AF_INET6) {
+        endpoint = std::format("[{}]:{}", addr, port);
+    } else {
+        endpoint = std::format("{}:{}", addr, port);
+    }
+    return true;
+}
+
+static PfilesParseResult parse_pfiles(int pid) {
+    PfilesParseResult result;
+
+    std::string cmd = std::format("pfiles -F {} 2>/dev/null", pid);
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        return result;
+    }
+
+    struct SocketState {
+        bool active = false;
+        bool is_stream = false;
+        bool is_dgram = false;
+        int family = 0;
+        std::string local;
+        std::string remote;
+        std::string state;
+    } socket_state;
+
+    size_t current_index = std::string::npos;
+
+    auto flush_socket = [&]() {
+        if (!socket_state.active || socket_state.local.empty()) {
+            socket_state = {};
+            return;
+        }
+
+        NetworkConnectionInfo conn;
+        if (socket_state.family == AF_INET6) {
+            conn.protocol = socket_state.is_dgram ? "udp6" : "tcp6";
+        } else if (socket_state.family == AF_INET) {
+            conn.protocol = socket_state.is_dgram ? "udp" : "tcp";
+        } else {
+            conn.protocol = socket_state.is_dgram ? "udp" : "tcp";
+        }
+        conn.local_endpoint = socket_state.local;
+        conn.remote_endpoint = socket_state.remote.empty() ? "*:*" : socket_state.remote;
+        conn.state = socket_state.state.empty() ? "-" : socket_state.state;
+        result.connections.push_back(std::move(conn));
+        socket_state = {};
+    };
+
+    char buffer[4096];
+    while (fgets(buffer, sizeof(buffer), pipe)) {
+        std::string line = trim(buffer);
+        if (line.empty()) {
+            continue;
+        }
+
+        size_t pos = 0;
+        while (pos < line.size() && std::isdigit(static_cast<unsigned char>(line[pos])) != 0) {
+            ++pos;
+        }
+        if (pos > 0 && pos < line.size() && line[pos] == ':') {
+            flush_socket();
+
+            int fd_num = std::stoi(line.substr(0, pos));
+            std::string rest = trim(line.substr(pos + 1));
+
+            FileHandleInfo fh;
+            fh.fd = fd_num;
+
+            if (rest.find("S_IFSOCK") != std::string::npos || rest.find("SOCK") != std::string::npos) {
+                fh.type = "socket";
+                socket_state.active = true;
+                if (rest.find("SOCK_STREAM") != std::string::npos) {
+                    socket_state.is_stream = true;
+                } else if (rest.find("SOCK_DGRAM") != std::string::npos) {
+                    socket_state.is_dgram = true;
+                }
+            } else if (rest.find("S_IFREG") != std::string::npos) {
+                fh.type = "file";
+            } else if (rest.find("S_IFDIR") != std::string::npos) {
+                fh.type = "dir";
+            } else if (rest.find("S_IFCHR") != std::string::npos) {
+                fh.type = "char";
+            } else if (rest.find("S_IFBLK") != std::string::npos) {
+                fh.type = "block";
+            } else if (rest.find("S_IFIFO") != std::string::npos || rest.find("FIFO") != std::string::npos) {
+                fh.type = "fifo";
+            } else if (rest.find("DOOR") != std::string::npos) {
+                fh.type = "door";
+            } else {
+                fh.type = "unknown";
+            }
+
+            auto slash = rest.rfind('/');
+            if (slash != std::string::npos) {
+                auto start = rest.rfind(' ', slash);
+                if (start == std::string::npos) {
+                    start = 0;
+                } else {
+                    ++start;
+                }
+                fh.path = trim(rest.substr(start));
+            }
+
+            result.handles.push_back(std::move(fh));
+            current_index = result.handles.size() - 1;
+            continue;
+        }
+
+        if (current_index == std::string::npos) {
+            continue;
+        }
+
+        if (line.rfind("path:", 0) == 0 || line.rfind("vnode:", 0) == 0) {
+            auto path = trim(line.substr(line.find(':') + 1));
+            if (!path.empty() && result.handles[current_index].path.empty()) {
+                result.handles[current_index].path = std::move(path);
+            }
+            continue;
+        }
+
+        if (socket_state.active) {
+            if (line.rfind("sockname:", 0) == 0) {
+                std::string endpoint;
+                int family = 0;
+                if (parse_socket_endpoint(line.substr(9), endpoint, family)) {
+                    socket_state.local = std::move(endpoint);
+                    socket_state.family = family;
+                }
+            } else if (line.rfind("peername:", 0) == 0) {
+                std::string endpoint;
+                int family = 0;
+                if (parse_socket_endpoint(line.substr(9), endpoint, family)) {
+                    socket_state.remote = std::move(endpoint);
+                    socket_state.family = family;
+                }
+            } else if (line.rfind("state:", 0) == 0) {
+                socket_state.state = trim(line.substr(6));
+            }
+        }
+    }
+
+    flush_socket();
+    pclose(pipe);
+    return result;
+}
+
+static int open_fd_dup(const std::string& path) {
+    const int flags[] = {O_RDONLY | O_NONBLOCK, O_WRONLY | O_NONBLOCK, O_RDWR | O_NONBLOCK};
+    for (const int flag : flags) {
+        int fd = open(path.c_str(), flag);
+        if (fd >= 0) {
+            return fd;
+        }
+    }
+    return -1;
+}
 
 SolarisProcessDataProvider::SolarisProcessDataProvider() = default;
 SolarisProcessDataProvider::~SolarisProcessDataProvider() = default;
@@ -158,8 +377,19 @@ std::optional<ProcessInfo> SolarisProcessDataProvider::get_process_info(int pid,
 std::vector<ThreadInfo> SolarisProcessDataProvider::get_threads(int pid) {
     std::vector<ThreadInfo> threads;
     std::string lwp_path = "/proc/" + std::to_string(pid) + "/lwp";
+    std::string process_name;
 
     try {
+        std::string psinfo_path = "/proc/" + std::to_string(pid) + "/psinfo";
+        int ps_fd = open(psinfo_path.c_str(), O_RDONLY);
+        if (ps_fd >= 0) {
+            psinfo_t psinfo;
+            if (read(ps_fd, &psinfo, sizeof(psinfo)) == sizeof(psinfo)) {
+                process_name = psinfo.pr_fname;
+            }
+            close(ps_fd);
+        }
+
         for (const auto& entry : fs::directory_iterator(lwp_path)) {
             if (!entry.is_directory()) continue;
 
@@ -184,7 +414,13 @@ std::vector<ThreadInfo> SolarisProcessDataProvider::get_threads(int pid) {
 
             ThreadInfo ti;
             ti.tid = lwpinfo.pr_lwpid;
-            ti.name = lwpinfo.pr_name[0] ? lwpinfo.pr_name : "";
+            if (lwpinfo.pr_name[0]) {
+                ti.name = lwpinfo.pr_name;
+            } else if (!process_name.empty()) {
+                ti.name = process_name;
+            } else {
+                ti.name = std::format("LWP {}", lwpid);
+            }
             ti.state = map_state(lwpinfo.pr_sname);
             ti.priority = lwpinfo.pr_nice;
             ti.processor = lwpinfo.pr_onpro;
@@ -205,6 +441,7 @@ std::string SolarisProcessDataProvider::get_thread_stack([[maybe_unused]] int pi
 std::vector<FileHandleInfo> SolarisProcessDataProvider::get_file_handles(int pid) {
     std::vector<FileHandleInfo> handles;
     std::string fd_path = "/proc/" + std::to_string(pid) + "/fd";
+    std::string path_path = "/proc/" + std::to_string(pid) + "/path";
 
     try {
         for (const auto& entry : fs::directory_iterator(fd_path)) {
@@ -219,25 +456,50 @@ std::vector<FileHandleInfo> SolarisProcessDataProvider::get_file_handles(int pid
             FileHandleInfo fh;
             fh.fd = fd_num;
 
-            // Read the symlink to get the path
-            std::string link_path = entry.path().string();
+            // Prefer /proc/<pid>/path/<fd> for readable paths
+            std::string link_path = path_path + "/" + fd_str;
             try {
                 std::string target = fs::read_symlink(link_path).string();
                 fh.path = target;
-
-                // Determine type from path
-                if (target.find("socket") != std::string::npos) {
-                    fh.type = "socket";
-                } else if (target.find("pipe") != std::string::npos) {
-                    fh.type = "pipe";
-                } else if (target.starts_with("/dev/")) {
-                    fh.type = "device";
-                } else {
-                    fh.type = "file";
-                }
             } catch (...) {
-                fh.path = "[unknown]";
-                fh.type = "unknown";
+                // Fallback: try /proc/<pid>/fd/<fd>
+                try {
+                    std::string target = fs::read_symlink(entry.path()).string();
+                    fh.path = target;
+                } catch (...) {
+                    fh.path = "[unknown]";
+                }
+            }
+
+            // Determine type via fstat on duplicated fd when possible
+            int dup_fd = open_fd_dup(entry.path().string());
+            if (dup_fd >= 0) {
+                struct stat st{};
+                if (fstat(dup_fd, &st) == 0) {
+                    if (S_ISREG(st.st_mode)) fh.type = "file";
+                    else if (S_ISDIR(st.st_mode)) fh.type = "dir";
+                    else if (S_ISCHR(st.st_mode)) fh.type = "char";
+                    else if (S_ISBLK(st.st_mode)) fh.type = "block";
+                    else if (S_ISFIFO(st.st_mode)) fh.type = "fifo";
+                    else if (S_ISSOCK(st.st_mode)) fh.type = "socket";
+                    else fh.type = "unknown";
+                } else {
+                    fh.type = "unknown";
+                }
+                close(dup_fd);
+            } else {
+                // Heuristic fallback based on path
+                if (fh.path.find("socket") != std::string::npos) {
+                    fh.type = "socket";
+                } else if (fh.path.find("pipe") != std::string::npos) {
+                    fh.type = "pipe";
+                } else if (fh.path.starts_with("/dev/")) {
+                    fh.type = "device";
+                } else if (fh.path != "[unknown]") {
+                    fh.type = "file";
+                } else {
+                    fh.type = "unknown";
+                }
             }
 
             handles.push_back(std::move(fh));
@@ -246,13 +508,132 @@ std::vector<FileHandleInfo> SolarisProcessDataProvider::get_file_handles(int pid
         add_error("get_file_handles", e.what());
     }
 
+    bool needs_fallback = handles.empty();
+    if (!needs_fallback) {
+        needs_fallback = std::all_of(handles.begin(), handles.end(), [](const FileHandleInfo& fh) {
+            return fh.path.empty() || fh.path == "[unknown]" || fh.type == "unknown";
+        });
+    }
+
+    if (needs_fallback) {
+        auto parsed = parse_pfiles(pid);
+        if (!parsed.handles.empty()) {
+            return parsed.handles;
+        }
+    } else {
+        auto parsed = parse_pfiles(pid);
+        if (!parsed.handles.empty()) {
+            std::map<int, FileHandleInfo> parsed_map;
+            for (auto& fh : parsed.handles) {
+                parsed_map[fh.fd] = fh;
+            }
+            for (auto& fh : handles) {
+                auto it = parsed_map.find(fh.fd);
+                if (it == parsed_map.end()) continue;
+                if (fh.path.empty() || fh.path == "[unknown]") {
+                    fh.path = it->second.path;
+                }
+                if (fh.type.empty() || fh.type == "unknown") {
+                    fh.type = it->second.type;
+                }
+            }
+        }
+    }
+
     return handles;
 }
 
 std::vector<NetworkConnectionInfo> SolarisProcessDataProvider::get_network_connections([[maybe_unused]] int pid) {
-    // Solaris network connections would require parsing /etc/net/* or using libproc
-    // This is complex and platform-specific - return empty for now
-    return {};
+    std::vector<NetworkConnectionInfo> connections;
+    std::string fd_path = "/proc/" + std::to_string(pid) + "/fd";
+
+    try {
+        for (const auto& entry : fs::directory_iterator(fd_path)) {
+            std::string fd_str = entry.path().filename().string();
+            int fd_num = 0;
+            try {
+                fd_num = std::stoi(fd_str);
+            } catch (...) {
+                continue;
+            }
+
+            int fd = open(entry.path().string().c_str(), O_RDONLY);
+            if (fd < 0) {
+                fd = open_fd_dup(entry.path().string());
+            }
+            if (fd < 0) continue;
+
+            int sock_type = 0;
+            socklen_t opt_len = sizeof(sock_type);
+            if (getsockopt(fd, SOL_SOCKET, SO_TYPE, &sock_type, &opt_len) != 0) {
+                close(fd);
+                continue;
+            }
+
+            sockaddr_storage local{};
+            socklen_t local_len = sizeof(local);
+            if (getsockname(fd, reinterpret_cast<sockaddr*>(&local), &local_len) != 0) {
+                close(fd);
+                continue;
+            }
+
+            sockaddr_storage remote{};
+            socklen_t remote_len = sizeof(remote);
+            bool has_peer = (getpeername(fd, reinterpret_cast<sockaddr*>(&remote), &remote_len) == 0);
+
+            NetworkConnectionInfo conn;
+
+            if (local.ss_family == AF_INET) {
+                conn.protocol = (sock_type == SOCK_STREAM) ? "tcp" : "udp";
+                auto* sin_local = reinterpret_cast<sockaddr_in*>(&local);
+                char local_ip[INET_ADDRSTRLEN];
+                inet_ntop(AF_INET, &sin_local->sin_addr, local_ip, sizeof(local_ip));
+                conn.local_endpoint = std::format("{}:{}", local_ip, ntohs(sin_local->sin_port));
+
+                if (has_peer) {
+                    auto* sin_remote = reinterpret_cast<sockaddr_in*>(&remote);
+                    char remote_ip[INET_ADDRSTRLEN];
+                    inet_ntop(AF_INET, &sin_remote->sin_addr, remote_ip, sizeof(remote_ip));
+                    conn.remote_endpoint = std::format("{}:{}", remote_ip, ntohs(sin_remote->sin_port));
+                } else {
+                    conn.remote_endpoint = "*:*";
+                }
+            } else if (local.ss_family == AF_INET6) {
+                conn.protocol = (sock_type == SOCK_STREAM) ? "tcp6" : "udp6";
+                auto* sin6_local = reinterpret_cast<sockaddr_in6*>(&local);
+                char local_ip[INET6_ADDRSTRLEN];
+                inet_ntop(AF_INET6, &sin6_local->sin6_addr, local_ip, sizeof(local_ip));
+                conn.local_endpoint = std::format("[{}]:{}", local_ip, ntohs(sin6_local->sin6_port));
+
+                if (has_peer) {
+                    auto* sin6_remote = reinterpret_cast<sockaddr_in6*>(&remote);
+                    char remote_ip[INET6_ADDRSTRLEN];
+                    inet_ntop(AF_INET6, &sin6_remote->sin6_addr, remote_ip, sizeof(remote_ip));
+                    conn.remote_endpoint = std::format("[{}]:{}", remote_ip, ntohs(sin6_remote->sin6_port));
+                } else {
+                    conn.remote_endpoint = "*:*";
+                }
+            } else {
+                close(fd);
+                continue;
+            }
+
+            conn.state = (sock_type == SOCK_STREAM && has_peer) ? "ESTABLISHED" : "-";
+            connections.push_back(std::move(conn));
+            close(fd);
+        }
+    } catch (const std::exception& e) {
+        add_error("get_network_connections", e.what());
+    }
+
+    if (connections.empty()) {
+        auto parsed = parse_pfiles(pid);
+        if (!parsed.connections.empty()) {
+            return parsed.connections;
+        }
+    }
+
+    return connections;
 }
 
 std::vector<MemoryMapInfo> SolarisProcessDataProvider::get_memory_maps(int pid) {
@@ -303,11 +684,34 @@ std::vector<MemoryMapInfo> SolarisProcessDataProvider::get_memory_maps(int pid) 
 std::vector<EnvironmentVariable> SolarisProcessDataProvider::get_environment_variables(int pid) {
     std::vector<EnvironmentVariable> env;
 
-    // Read /proc/<pid>/psinfo to get pr_envp pointer, then read from /proc/<pid>/as
-    // This is complex - for now, try reading /proc/<pid>/auxv or return empty
-    // A simpler approach is to use pargs -e command output, but that requires exec
+    // Best-effort: use pargs -e to read environment (requires privileges for other users)
+    std::string cmd = std::format("pargs -e {} 2>/dev/null", pid);
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        add_error("get_environment_variables", "popen failed");
+        return env;
+    }
 
-    // Return empty for now - this could be implemented with libproc
+    char buffer[4096];
+    while (fgets(buffer, sizeof(buffer), pipe)) {
+        std::string line(buffer);
+        // Trim whitespace/newlines
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) {
+            line.pop_back();
+        }
+        if (line.empty()) continue;
+
+        // pargs -e may prefix entries; look for NAME=VALUE
+        const auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+
+        EnvironmentVariable ev;
+        ev.name = line.substr(0, eq);
+        ev.value = line.substr(eq + 1);
+        env.push_back(std::move(ev));
+    }
+
+    pclose(pipe);
     return env;
 }
 

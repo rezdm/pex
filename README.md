@@ -44,7 +44,19 @@ mkdir lib
 ln -s /usr/lib/64/libX11.so.4 ./lib/libX11.so.6
 LD_LIBRARY_PATH=$PWD/lib ./pex
 ```
-This is not correct, but at least allowes to test
+This is not correct, but at least allowes to test.
+Make make it possible to regular users to see properties of other's users processes, instead of `setcap` from Linux, in Solaris it would be something along
+```bash
+username=user_x
+# su...
+# printf '%s\n' 'Pex Monitor:::Run pex with process/FD/network read privileges:::' >> /etc/security/prof_attr
+# grep -n "Pex Monitor" /etc/security/prof_attr
+# getent prof_attr "Pex Monitor"
+# usermod -P +"Pex Monitor" user_x
+# profiles rezdm | grep "Pex Monitor"
+...
+$ pfexec pex
+```
 
 ## Installing
 ```bash
