@@ -97,12 +97,16 @@ target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
 # Find OpenGL
 find_package(OpenGL REQUIRED)
 
-# Core sources (platform-independent)
-set(PEX_CORE_SOURCES
-    src/main.cpp
+# Shared sources (used by both GUI and TUI)
+set(PEX_SHARED_SOURCES
     src/data_store.cpp
     src/name_resolver.cpp
     src/single_instance.cpp
+)
+
+# GUI-specific sources
+set(PEX_GUI_SOURCES
+    src/main.cpp
     src/stb_impl.cpp
 
     # ImGui application and views
@@ -113,6 +117,18 @@ set(PEX_CORE_SOURCES
     src/imgui/imgui_process_popup_view.cpp
     src/imgui/imgui_kill_dialog_view.cpp
     src/imgui/imgui_input.cpp
+)
+
+# TUI-specific sources
+set(PEX_TUI_SOURCES
+    src/main_tui.cpp
+    src/tui/tui_app.cpp
+    src/tui/tui_system_panel.cpp
+    src/tui/tui_process_list.cpp
+    src/tui/tui_details_panel.cpp
+    src/tui/tui_kill_dialog.cpp
+    src/tui/tui_input.cpp
+    src/tui/tui_colors.cpp
 )
 
 # Platform-specific sources
@@ -152,9 +168,10 @@ else()
     message(FATAL_ERROR "Unknown PEX_PLATFORM: ${PEX_PLATFORM}. Use 'linux', 'freebsd', 'solaris', or 'stub'.")
 endif()
 
-# Main executable
+# Main GUI executable
 add_executable(pex
-    ${PEX_CORE_SOURCES}
+    ${PEX_SHARED_SOURCES}
+    ${PEX_GUI_SOURCES}
     ${PEX_PLATFORM_SOURCES}
 )
 
@@ -162,10 +179,37 @@ target_compile_definitions(pex PRIVATE ${PEX_PLATFORM_DEFINE})
 target_include_directories(pex PRIVATE src ${stb_SOURCE_DIR} ${CMAKE_BINARY_DIR}/generated)
 target_link_libraries(pex PRIVATE imgui OpenGL::GL)
 
-# Platform-specific libraries
+# Platform-specific libraries for GUI
 if(PEX_PLATFORM STREQUAL "freebsd")
     target_link_libraries(pex PRIVATE procstat kvm)
 elseif(PEX_PLATFORM STREQUAL "solaris")
     target_link_libraries(pex PRIVATE kstat rt)
     target_link_libraries(glfw PUBLIC rt)
+endif()
+
+# TUI executable (pexc)
+find_package(Curses)
+option(BUILD_TUI "Build TUI version (pexc)" ON)
+
+if(BUILD_TUI AND CURSES_FOUND)
+    message(STATUS "Building TUI version (pexc)")
+
+    add_executable(pexc
+        ${PEX_SHARED_SOURCES}
+        ${PEX_TUI_SOURCES}
+        ${PEX_PLATFORM_SOURCES}
+    )
+
+    target_compile_definitions(pexc PRIVATE ${PEX_PLATFORM_DEFINE})
+    target_include_directories(pexc PRIVATE src ${CURSES_INCLUDE_DIR})
+    target_link_libraries(pexc PRIVATE ${CURSES_LIBRARIES})
+
+    # Platform-specific libraries for TUI
+    if(PEX_PLATFORM STREQUAL "freebsd")
+        target_link_libraries(pexc PRIVATE procstat kvm)
+    elseif(PEX_PLATFORM STREQUAL "solaris")
+        target_link_libraries(pexc PRIVATE kstat rt)
+    endif()
+elseif(BUILD_TUI)
+    message(WARNING "ncurses not found, TUI version (pexc) will not be built")
 endif()

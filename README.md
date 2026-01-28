@@ -58,6 +58,12 @@ username=user_x
 $ pfexec pex
 ```
 
+## Console version
+Additional functionality -- ncurses-based TUI version. Compiled by default together with GUI version. Not to build it:
+```bash
+... -DBUILD_TUI=OFF
+```
+
 ## Installing
 ```bash
 #git clone...
