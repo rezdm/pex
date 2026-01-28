@@ -1,5 +1,6 @@
 #include "tui_app.hpp"
 #include "tui_colors.hpp"
+#include <algorithm>
 
 namespace pex {
 
@@ -84,6 +85,10 @@ void TuiApp::handle_input(int ch) {
 
         case 27:  // Escape - clear search
             view_model_.process_list.search_text.clear();
+            return;
+
+        case KEY_MOUSE:
+            handle_mouse_event();
             return;
     }
 
@@ -380,6 +385,111 @@ void TuiApp::handle_kill_dialog_input(int ch) {
 void TuiApp::handle_help_input([[maybe_unused]] int ch) {
     // Any key closes help
     show_help_ = false;
+}
+
+void TuiApp::handle_mouse_event() {
+    MEVENT event;
+    if (getmouse(&event) != OK) {
+        return;
+    }
+
+    int y = event.y;
+    int x = event.x;
+
+    // Handle mouse wheel scrolling
+    if (event.bstate & BUTTON4_PRESSED) {
+        // Scroll up (wheel up)
+        if (current_focus_ == PanelFocus::ProcessList) {
+            move_selection(-3);
+        } else {
+            details_scroll_offset_ = std::max(0, details_scroll_offset_ - 3);
+        }
+        return;
+    }
+
+    if (event.bstate & BUTTON5_PRESSED) {
+        // Scroll down (wheel down)
+        if (current_focus_ == PanelFocus::ProcessList) {
+            move_selection(3);
+        } else {
+            details_scroll_offset_ += 3;
+        }
+        return;
+    }
+
+    // Handle clicks
+    if (event.bstate & (BUTTON1_CLICKED | BUTTON1_PRESSED | BUTTON1_RELEASED)) {
+        // Check if click is in process panel
+        if (y >= process_win_y_ && y < process_win_y_ + process_win_height_) {
+            // Switch focus to process panel
+            current_focus_ = PanelFocus::ProcessList;
+
+            // Calculate which row was clicked (accounting for border and header)
+            int row_in_window = y - process_win_y_;
+            if (row_in_window >= 2 && row_in_window < process_win_height_ - 1) {
+                // Valid data row clicked
+                int clicked_index = process_scroll_offset_ + (row_in_window - 2);
+
+                auto visible = get_visible_items();
+                if (clicked_index >= 0 && clicked_index < static_cast<int>(visible.size())) {
+                    int clicked_pid = visible[clicked_index]->info.pid;
+
+                    // Check for double-click to toggle expand/collapse
+                    if (event.bstate & BUTTON1_DOUBLE_CLICKED) {
+                        if (view_model_.process_list.is_tree_view) {
+                            auto& collapsed = view_model_.process_list.collapsed_pids;
+                            if (collapsed.count(clicked_pid)) {
+                                collapsed.erase(clicked_pid);
+                            } else {
+                                // Only collapse if has children
+                                if (!visible[clicked_index]->children.empty()) {
+                                    collapsed.insert(clicked_pid);
+                                }
+                            }
+                        }
+                    }
+
+                    view_model_.process_list.selected_pid = clicked_pid;
+                }
+            }
+            return;
+        }
+
+        // Check if click is in details panel
+        if (y >= details_win_y_ && y < details_win_y_ + details_win_height_) {
+            // Switch focus to details panel
+            current_focus_ = PanelFocus::DetailsPanel;
+
+            // Check if click is on tab bar (row 1 of details window)
+            int row_in_window = y - details_win_y_;
+            if (row_in_window == 1) {
+                // Tab bar - determine which tab was clicked based on x position
+                // Tab positions (approximate): [F]iles, [N]etwork, [T]hreads, [M]emory, [E]nv, [L]ibraries
+                // Each tab is roughly 10-12 chars wide, starting at x=2
+                int tab_x = x - 2;  // Adjust for border
+                if (tab_x >= 0 && tab_x < 10) {
+                    view_model_.details_panel.active_tab = DetailsTab::FileHandles;
+                    details_scroll_offset_ = 0;
+                } else if (tab_x >= 10 && tab_x < 21) {
+                    view_model_.details_panel.active_tab = DetailsTab::Network;
+                    details_scroll_offset_ = 0;
+                } else if (tab_x >= 21 && tab_x < 32) {
+                    view_model_.details_panel.active_tab = DetailsTab::Threads;
+                    details_scroll_offset_ = 0;
+                } else if (tab_x >= 32 && tab_x < 42) {
+                    view_model_.details_panel.active_tab = DetailsTab::Memory;
+                    details_scroll_offset_ = 0;
+                } else if (tab_x >= 42 && tab_x < 50) {
+                    view_model_.details_panel.active_tab = DetailsTab::Environment;
+                    details_scroll_offset_ = 0;
+                } else if (tab_x >= 50) {
+                    view_model_.details_panel.active_tab = DetailsTab::Libraries;
+                    details_scroll_offset_ = 0;
+                }
+            }
+            return;
+        }
+    }
 }
 
 } // namespace pex

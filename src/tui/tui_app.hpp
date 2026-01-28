@@ -60,6 +60,7 @@ private:
     void handle_search_input(int ch);
     void handle_kill_dialog_input(int ch);
     void handle_help_input(int ch);
+    void handle_mouse_event();
 
     // Navigation helpers
     [[nodiscard]] std::vector<ProcessNode*> get_visible_items() const;
@@ -132,6 +133,12 @@ private:
     int details_scroll_offset_ = 0;
     int visible_process_rows_ = 0;
     int visible_details_rows_ = 0;
+
+    // Window positions (for mouse click detection)
+    int process_win_y_ = 0;
+    int process_win_height_ = 0;
+    int details_win_y_ = 0;
+    int details_win_height_ = 0;
 
     // Layout constants
     static constexpr int kSystemPanelHeight = 4;

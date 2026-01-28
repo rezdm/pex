@@ -89,7 +89,7 @@ void TuiApp::render_help_overlay() {
 
     // Help dialog dimensions
     int help_width = 60;
-    int help_height = 24;
+    int help_height = 28;
     int help_x = (max_x - help_width) / 2;
     int help_y = (max_y - help_height) / 2;
 
@@ -121,6 +121,12 @@ void TuiApp::render_help_overlay() {
         "Details Panel:",
         "  1-6             Switch tab by number",
         "  f/w/h/m/e/l     Switch tab by letter",
+        "",
+        "Mouse:",
+        "  Click           Select row / switch panel",
+        "  Double-click    Expand/collapse tree node",
+        "  Scroll wheel    Scroll up/down",
+        "  Click on tab    Switch details tab",
         "",
         "Actions:",
         "  /               Search mode",

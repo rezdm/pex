@@ -47,6 +47,12 @@ void TuiApp::run() {
     nodelay(stdscr, TRUE);  // Non-blocking input
     mouseinterval(0);  // Disable mouse click delay
 
+    // Enable mouse support
+    mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, nullptr);
+    // Enable mouse tracking for wheel events
+    printf("\033[?1003h");  // Enable mouse movement tracking
+    fflush(stdout);
+
     // Initialize colors
     init_colors();
 
@@ -107,6 +113,11 @@ void TuiApp::run() {
     // Cleanup
     data_store_->stop();
     cleanup_windows();
+
+    // Disable mouse tracking
+    printf("\033[?1003l");
+    fflush(stdout);
+
     endwin();
 
     // Reset terminal title
@@ -133,10 +144,16 @@ void TuiApp::create_windows() {
         y += system_height;
     }
 
+    // Track process window position for mouse clicks
+    process_win_y_ = y;
+    process_win_height_ = process_height;
     process_win_ = newwin(process_height, max_x, y, 0);
     y += process_height;
     visible_process_rows_ = process_height - 2;  // Account for border
 
+    // Track details window position for mouse clicks
+    details_win_y_ = y;
+    details_win_height_ = details_height;
     details_win_ = newwin(details_height, max_x, y, 0);
     y += details_height;
     visible_details_rows_ = details_height - 3;  // Account for border and tabs
