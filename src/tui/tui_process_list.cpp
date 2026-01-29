@@ -34,10 +34,10 @@ void TuiApp::render_process_list() {
     // Draw border and title
     draw_box_title(process_win_, current_focus_ == PanelFocus::ProcessList ? "[Process List]" : "Process List");
 
-    // Column headers - fixed columns end at position 102, command line takes rest
+    // Column headers - fixed columns end at position 110, command line takes rest
     wattron(process_win_, COLOR_PAIR(COLOR_PAIR_HEADER) | A_BOLD);
-    mvwprintw(process_win_, 1, 2, "%-20s %7s %6s %9s %5s %7s %-8s %5s %7s %9s  %s",
-              "Process", "PID", "CPU%", "Memory", "Mem%", "Threads", "User", "State", "TreeCPU", "TreeMem", "Command");
+    mvwprintw(process_win_, 1, 2, "%-20s %7s %6s %9s %5s %7s %-8s %5s %7s %7s %9s  %s",
+              "Process", "PID", "CPU%", "Memory", "Mem%", "Threads", "User", "State", "TreeCPU", "TrCPTot", "TreeMem", "Command");
     wattroff(process_win_, COLOR_PAIR(COLOR_PAIR_HEADER) | A_BOLD);
 
     // Get flat list of processes
@@ -76,7 +76,11 @@ void TuiApp::render_process_list() {
     }
 
     // Fixed columns width (before command line)
-    const int fixed_cols_end = 102;
+    const int fixed_cols_end = 110;
+
+    // Get number of CPU cores for total CPU calculation
+    size_t num_cores = view_model_.system_panel.per_cpu_usage.size();
+    if (num_cores == 0) num_cores = 1;
 
     for (size_t i = process_scroll_offset_;
          i < processes.size() && row < max_y - 1;
@@ -89,6 +93,7 @@ void TuiApp::render_process_list() {
 
         // Calculate tree totals
         auto [tree_cpu, tree_mem] = get_tree_totals(node);
+        double tree_cpu_total = tree_cpu / static_cast<double>(num_cores);
 
         // Highlight selected row
         if (is_selected) {
@@ -110,7 +115,7 @@ void TuiApp::render_process_list() {
         }
 
         // Process info columns
-        mvwprintw(process_win_, row, 2, "%-20s %7d %5.1f%% %9s %4.1f%% %7d %-8s   %c  %6.1f%% %9s  ",
+        mvwprintw(process_win_, row, 2, "%-20s %7d %5.1f%% %9s %4.1f%% %7d %-8s   %c  %6.1f%% %6.1f%% %9s  ",
                   name.c_str(),
                   info.pid,
                   info.cpu_percent,
@@ -120,6 +125,7 @@ void TuiApp::render_process_list() {
                   info.user_name.substr(0, 8).c_str(),
                   info.state_char,
                   tree_cpu,
+                  tree_cpu_total,
                   format_bytes(tree_mem).c_str());
 
         // Command line column (truncate to fit remaining space)
@@ -217,10 +223,10 @@ void TuiApp::render_process_tree() {
     // Draw border and title
     draw_box_title(process_win_, current_focus_ == PanelFocus::ProcessList ? "[Process Tree]" : "Process Tree");
 
-    // Column headers - fixed columns end at position 114, command line takes rest
+    // Column headers - fixed columns end at position 122, command line takes rest
     wattron(process_win_, COLOR_PAIR(COLOR_PAIR_HEADER) | A_BOLD);
-    mvwprintw(process_win_, 1, 2, "%-30s %7s %6s %9s %5s %7s %-8s %5s %7s %9s  %s",
-              "Process", "PID", "CPU%", "Memory", "Mem%", "Threads", "User", "State", "TreeCPU", "TreeMem", "Command");
+    mvwprintw(process_win_, 1, 2, "%-30s %7s %6s %9s %5s %7s %-8s %5s %7s %7s %9s  %s",
+              "Process", "PID", "CPU%", "Memory", "Mem%", "Threads", "User", "State", "TreeCPU", "TrCPTot", "TreeMem", "Command");
     wattroff(process_win_, COLOR_PAIR(COLOR_PAIR_HEADER) | A_BOLD);
 
     int available_rows = max_y - 3;
@@ -233,7 +239,11 @@ void TuiApp::render_process_tree() {
     scroll_to_selection();
 
     // Fixed columns width (before command line)
-    const int fixed_cols_end = 114;
+    const int fixed_cols_end = 122;
+
+    // Get number of CPU cores for total CPU calculation
+    size_t num_cores = view_model_.system_panel.per_cpu_usage.size();
+    if (num_cores == 0) num_cores = 1;
 
     int row = 2;
 
@@ -250,6 +260,7 @@ void TuiApp::render_process_tree() {
 
         // Calculate tree totals
         auto [tree_cpu, tree_mem] = get_tree_totals(node);
+        double tree_cpu_total = tree_cpu / static_cast<double>(num_cores);
 
         // Check if this node has a visible parent
         bool has_parent = has_visible_parent(node, current_data_->process_map);
@@ -350,7 +361,7 @@ void TuiApp::render_process_tree() {
         mvwprintw(process_win_, row, col, " %-*s", name_width - 1, name.c_str());
         col = 34;  // Fixed position for rest of columns
 
-        mvwprintw(process_win_, row, col, "%7d %5.1f%% %9s %4.1f%% %7d %-8s   %c  %6.1f%% %9s  ",
+        mvwprintw(process_win_, row, col, "%7d %5.1f%% %9s %4.1f%% %7d %-8s   %c  %6.1f%% %6.1f%% %9s  ",
                   info.pid,
                   info.cpu_percent,
                   format_bytes(info.resident_memory).c_str(),
@@ -359,6 +370,7 @@ void TuiApp::render_process_tree() {
                   info.user_name.substr(0, 8).c_str(),
                   info.state_char,
                   tree_cpu,
+                  tree_cpu_total,
                   format_bytes(tree_mem).c_str());
 
         // Command line column (truncate to fit remaining space)
