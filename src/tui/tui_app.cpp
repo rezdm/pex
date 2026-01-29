@@ -47,10 +47,11 @@ void TuiApp::run() {
     nodelay(stdscr, TRUE);  // Non-blocking input
     mouseinterval(0);  // Disable mouse click delay
 
-    // Enable mouse support
-    mousemask(ALL_MOUSE_EVENTS | REPORT_MOUSE_POSITION, nullptr);
-    // Enable mouse tracking for wheel events
-    printf("\033[?1003h");  // Enable mouse movement tracking
+    // Enable mouse support (button presses and scroll wheel, not movement tracking)
+    mousemask(ALL_MOUSE_EVENTS, nullptr);
+    // Use mode 1000 for basic mouse support (button press/release only)
+    // Mode 1003 causes continuous mouse movement events which floods input
+    printf("\033[?1000h");
     fflush(stdout);
 
     // Initialize colors
@@ -115,7 +116,7 @@ void TuiApp::run() {
     cleanup_windows();
 
     // Disable mouse tracking
-    printf("\033[?1003l");
+    printf("\033[?1000l");
     fflush(stdout);
 
     endwin();
@@ -232,7 +233,15 @@ void TuiApp::render() {
     render_details_panel();
     render_status_bar();
 
-    // Render overlays
+    // Refresh main windows FIRST, before overlays
+    if (system_win_) wnoutrefresh(system_win_);
+    wnoutrefresh(process_win_);
+    wnoutrefresh(details_win_);
+    wnoutrefresh(status_win_);
+    doupdate();
+
+    // Render overlays AFTER main window refresh
+    // These use wrefresh() which updates screen immediately
     if (view_model_.kill_dialog.is_visible) {
         render_kill_dialog();
     }
@@ -244,13 +253,6 @@ void TuiApp::render() {
     if (search_mode_) {
         render_search_bar();
     }
-
-    // Refresh all windows
-    if (system_win_) wnoutrefresh(system_win_);
-    wnoutrefresh(process_win_);
-    wnoutrefresh(details_win_);
-    wnoutrefresh(status_win_);
-    doupdate();
 }
 
 void TuiApp::draw_box_title(WINDOW* win, const std::string& title) {
@@ -541,6 +543,8 @@ void TuiApp::request_kill_process(int pid, const std::string& name, bool is_tree
     view_model_.kill_dialog.is_tree_kill = is_tree;
     view_model_.kill_dialog.error_message.clear();
     view_model_.kill_dialog.show_force_option = false;
+    flushinp();  // Clear any pending input
+    dialog_debounce_ = 5;  // Ignore input for 5 frames
 }
 
 void TuiApp::execute_kill(bool force) {

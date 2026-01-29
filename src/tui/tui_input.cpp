@@ -5,6 +5,17 @@
 namespace pex {
 
 void TuiApp::handle_input(int ch) {
+    // Debounce: ignore input for a few frames after showing dialogs
+    if (dialog_debounce_ > 0) {
+        dialog_debounce_--;
+        // Still consume mouse events to prevent queue buildup
+        if (ch == KEY_MOUSE) {
+            MEVENT event;
+            getmouse(&event);
+        }
+        return;
+    }
+
     // Help overlay takes priority
     if (show_help_) {
         handle_help_input(ch);
@@ -33,6 +44,8 @@ void TuiApp::handle_input(int ch) {
         case '?':
         case KEY_F(1):
             show_help_ = true;
+            flushinp();  // Clear any pending input
+            dialog_debounce_ = 5;  // Ignore input for 5 frames
             return;
 
         case '/':
@@ -393,6 +406,13 @@ void TuiApp::handle_search_input(int ch) {
 }
 
 void TuiApp::handle_kill_dialog_input(int ch) {
+    // Ignore mouse events in kill dialog
+    if (ch == KEY_MOUSE) {
+        MEVENT event;
+        getmouse(&event);
+        return;
+    }
+
     auto& kd = view_model_.kill_dialog;
 
     switch (ch) {
@@ -407,12 +427,37 @@ void TuiApp::handle_kill_dialog_input(int ch) {
             kd.is_visible = false;
             kd.target_pid = -1;
             break;
+        // Ignore other keys
+        default:
+            break;
     }
 }
 
-void TuiApp::handle_help_input([[maybe_unused]] int ch) {
-    // Any key closes help
-    show_help_ = false;
+void TuiApp::handle_help_input(int ch) {
+    // Ignore mouse events in help overlay
+    if (ch == KEY_MOUSE) {
+        // Consume the mouse event but don't close
+        MEVENT event;
+        getmouse(&event);
+        return;
+    }
+
+    // Close help on specific keys only (not on escape sequences)
+    switch (ch) {
+        case 27:        // Escape
+        case 'q':
+        case 'Q':
+        case '\n':
+        case '\r':
+        case ' ':
+        case '?':
+        case KEY_F(1):
+            show_help_ = false;
+            break;
+        // Ignore other keys (escape sequence bytes, etc.)
+        default:
+            break;
+    }
 }
 
 void TuiApp::handle_mouse_event() {

@@ -129,6 +129,7 @@ private:
     bool system_panel_expanded_ = false;  // When false, show compact CPU summary
     std::string search_input_;
     std::atomic<bool> running_{false};
+    int dialog_debounce_ = 0;  // Frames to ignore input after showing dialog
 
     // Scroll positions
     int process_scroll_offset_ = 0;
