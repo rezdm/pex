@@ -92,6 +92,7 @@ private:
     void create_windows();
     void resize_windows();
     void cleanup_windows();
+    [[nodiscard]] int calc_system_panel_height() const;
 
     // Utility
     static std::string format_bytes(int64_t bytes);
@@ -125,6 +126,7 @@ private:
     PanelFocus current_focus_ = PanelFocus::ProcessList;
     bool show_help_ = false;
     bool search_mode_ = false;
+    bool system_panel_expanded_ = false;  // When false, show compact CPU summary
     std::string search_input_;
     std::atomic<bool> running_{false};
 
@@ -141,7 +143,7 @@ private:
     int details_win_height_ = 0;
 
     // Layout constants
-    static constexpr int kSystemPanelHeight = 4;
+    static constexpr int kSystemPanelCollapsedHeight = 3;  // Compact: avg CPU, mem, tasks
     static constexpr int kStatusBarHeight = 1;
     static constexpr int kMinDetailsHeight = 8;
     static constexpr double kProcessPanelRatio = 0.5;  // Percentage of remaining space

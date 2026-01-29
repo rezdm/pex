@@ -89,7 +89,7 @@ void TuiApp::render_help_overlay() {
 
     // Help dialog dimensions
     int help_width = 60;
-    int help_height = 28;
+    int help_height = 29;
     int help_x = (max_x - help_width) / 2;
     int help_y = (max_y - help_height) / 2;
 
@@ -117,6 +117,7 @@ void TuiApp::render_help_overlay() {
         "  Left            Collapse tree node",
         "  t               Toggle tree/list view",
         "  s               Toggle system panel",
+        "  c               Expand/collapse CPUs",
         "",
         "Details Panel:",
         "  1-6             Switch tab by number",
@@ -177,7 +178,7 @@ void TuiApp::render_status_bar() {
     werase(status_win_);
 
     // Left side: key hints
-    const char* hints = "q:Quit  /:Search  t:Tree/List  Tab:Panel  x:Kill  ?:Help";
+    const char* hints = "q:Quit  /:Search  t:Tree  c:CPUs  Tab:Panel  x:Kill  ?:Help";
     mvwprintw(status_win_, 0, 1, "%s", hints);
 
     // Right side: search text if active

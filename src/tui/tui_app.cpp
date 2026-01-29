@@ -125,12 +125,32 @@ void TuiApp::run() {
     fflush(stdout);
 }
 
+int TuiApp::calc_system_panel_height() const {
+    if (!view_model_.system_panel.is_visible) return 0;
+    if (!system_panel_expanded_) return kSystemPanelCollapsedHeight;
+
+    // Expanded: calculate rows needed for all CPUs
+    int max_y, max_x;
+    getmaxyx(stdscr, max_y, max_x);
+    (void)max_y;
+
+    size_t num_cpus = view_model_.system_panel.per_cpu_usage.size();
+    if (num_cpus == 0) num_cpus = 1;
+
+    int bar_width = 15;  // Shorter bars in expanded mode
+    int cpu_section_width = bar_width + 12;
+    int cpus_per_row = std::max(1, (max_x - 2) / cpu_section_width);
+
+    int cpu_rows = static_cast<int>((num_cpus + cpus_per_row - 1) / cpus_per_row);
+    return cpu_rows + 2;  // +2 for memory row and tasks row
+}
+
 void TuiApp::create_windows() {
     int max_y, max_x;
     getmaxyx(stdscr, max_y, max_x);
 
     // Calculate panel heights
-    int system_height = view_model_.system_panel.is_visible ? kSystemPanelHeight : 0;
+    int system_height = calc_system_panel_height();
     int status_height = kStatusBarHeight;
     int remaining = max_y - system_height - status_height;
     int process_height = std::max(5, static_cast<int>(remaining * kProcessPanelRatio));

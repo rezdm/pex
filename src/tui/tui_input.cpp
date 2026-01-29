@@ -52,9 +52,16 @@ void TuiApp::handle_input(int ch) {
             }
             return;
 
-        case 's':  // Toggle system panel
+        case 's':  // Toggle system panel visibility
             view_model_.system_panel.is_visible = !view_model_.system_panel.is_visible;
             resize_windows();
+            return;
+
+        case 'c':  // Toggle system panel expand/collapse (show all CPUs)
+            if (view_model_.system_panel.is_visible) {
+                system_panel_expanded_ = !system_panel_expanded_;
+                resize_windows();
+            }
             return;
 
         case 't':  // Toggle tree/list view
