@@ -89,7 +89,7 @@ void TuiApp::render_help_overlay() {
 
     // Help dialog dimensions
     int help_width = 60;
-    int help_height = 29;
+    int help_height = 31;
     int help_x = (max_x - help_width) / 2;
     int help_y = (max_y - help_height) / 2;
 
@@ -113,8 +113,10 @@ void TuiApp::render_help_overlay() {
         "  Tab             Switch panel focus",
         "",
         "Process List:",
-        "  Enter/Right     Expand tree node",
-        "  Left            Collapse tree node",
+        "  Enter/Right     Expand node / scroll right",
+        "  Left            Collapse node / scroll left",
+        "  </> or ,/.      Horizontal scroll",
+        "  0               Reset horizontal scroll",
         "  t               Toggle tree/list view",
         "  s               Toggle system panel",
         "  c               Expand/collapse CPUs",

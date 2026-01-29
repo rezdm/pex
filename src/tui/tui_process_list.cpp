@@ -32,12 +32,32 @@ void TuiApp::render_process_list() {
     getmaxyx(process_win_, max_y, max_x);
 
     // Draw border and title
-    draw_box_title(process_win_, current_focus_ == PanelFocus::ProcessList ? "[Process List]" : "Process List");
+    std::string title = current_focus_ == PanelFocus::ProcessList ? "[Process List]" : "Process List";
+    if (process_h_scroll_ > 0) {
+        title += " [</>:scroll]";
+    }
+    draw_box_title(process_win_, title);
 
-    // Column headers - fixed columns end at position 110, command line takes rest
+    // Fixed column width (Process name)
+    const int name_col_width = 22;  // "%-20s" + 2 for padding
+
+    // Build scrollable header (everything after Process name)
+    std::string header_scroll = "   PID   CPU%    Memory  Mem% Threads User       State TreeCPU TrCPTot   TreeMem  Command";
+
+    // Render header
     wattron(process_win_, COLOR_PAIR(COLOR_PAIR_HEADER) | A_BOLD);
-    mvwprintw(process_win_, 1, 2, "%-20s %7s %6s %9s %5s %7s %-8s %5s %7s %7s %9s  %s",
-              "Process", "PID", "CPU%", "Memory", "Mem%", "Threads", "User", "State", "TreeCPU", "TrCPTot", "TreeMem", "Command");
+    mvwprintw(process_win_, 1, 2, "%-20s", "Process");
+
+    // Render scrollable part of header
+    int scroll_start = name_col_width;
+    int scroll_width = max_x - scroll_start - 2;
+    if (scroll_width > 0 && process_h_scroll_ < static_cast<int>(header_scroll.length())) {
+        std::string visible_header = header_scroll.substr(process_h_scroll_);
+        if (static_cast<int>(visible_header.length()) > scroll_width) {
+            visible_header = visible_header.substr(0, scroll_width);
+        }
+        mvwprintw(process_win_, 1, scroll_start, "%s", visible_header.c_str());
+    }
     wattroff(process_win_, COLOR_PAIR(COLOR_PAIR_HEADER) | A_BOLD);
 
     // Get flat list of processes
@@ -55,7 +75,7 @@ void TuiApp::render_process_list() {
     }
 
     int row = 2;
-    int available_rows = max_y - 3;  // Account for border and header
+    int available_rows = max_y - 3;
     visible_process_rows_ = available_rows;
 
     // Adjust scroll for list view
@@ -74,9 +94,6 @@ void TuiApp::render_process_list() {
             process_scroll_offset_ = selected_idx - available_rows + 1;
         }
     }
-
-    // Fixed columns width (before command line)
-    const int fixed_cols_end = 110;
 
     // Get number of CPU cores for total CPU calculation
     size_t num_cores = view_model_.system_panel.per_cpu_usage.size();
@@ -103,39 +120,41 @@ void TuiApp::render_process_list() {
             wattron(process_win_, COLOR_PAIR(COLOR_PAIR_SEARCH));
             mvwhline(process_win_, row, 1, ' ', max_x - 2);
         } else {
-            // State color only when not selected/matched
             int state_color = get_state_color(info.state_char);
             wattron(process_win_, COLOR_PAIR(state_color));
         }
 
-        // Truncate process name if needed
+        // Process name (fixed column)
         std::string name = info.name;
         if (name.length() > 20) {
             name = name.substr(0, 17) + "...";
         }
+        mvwprintw(process_win_, row, 2, "%-20s", name.c_str());
 
-        // Process info columns
-        mvwprintw(process_win_, row, 2, "%-20s %7d %5.1f%% %9s %4.1f%% %7d %-8s   %c  %6.1f%% %6.1f%% %9s  ",
-                  name.c_str(),
-                  info.pid,
-                  info.cpu_percent,
-                  format_bytes(info.resident_memory).c_str(),
-                  info.memory_percent,
-                  info.thread_count,
-                  info.user_name.substr(0, 8).c_str(),
-                  info.state_char,
-                  tree_cpu,
-                  tree_cpu_total,
-                  format_bytes(tree_mem).c_str());
+        // Build scrollable data row
+        char data_buf[512];
+        snprintf(data_buf, sizeof(data_buf),
+                 "%7d %5.1f%% %9s %4.1f%% %7d %-8s     %c  %6.1f%% %6.1f%% %9s  %s",
+                 info.pid,
+                 info.cpu_percent,
+                 format_bytes(info.resident_memory).c_str(),
+                 info.memory_percent,
+                 info.thread_count,
+                 info.user_name.substr(0, 8).c_str(),
+                 info.state_char,
+                 tree_cpu,
+                 tree_cpu_total,
+                 format_bytes(tree_mem).c_str(),
+                 info.command_line.c_str());
 
-        // Command line column (truncate to fit remaining space)
-        int cmdline_max = max_x - fixed_cols_end - 2;
-        if (cmdline_max > 3) {
-            std::string cmdline = info.command_line;
-            if (static_cast<int>(cmdline.length()) > cmdline_max) {
-                cmdline = cmdline.substr(0, cmdline_max - 3) + "...";
+        // Render scrollable part
+        std::string data_str(data_buf);
+        if (scroll_width > 0 && process_h_scroll_ < static_cast<int>(data_str.length())) {
+            std::string visible_data = data_str.substr(process_h_scroll_);
+            if (static_cast<int>(visible_data.length()) > scroll_width) {
+                visible_data = visible_data.substr(0, scroll_width);
             }
-            mvwprintw(process_win_, row, fixed_cols_end, "%s", cmdline.c_str());
+            mvwprintw(process_win_, row, scroll_start, "%s", visible_data.c_str());
         }
 
         // Turn off the attribute we used
@@ -221,12 +240,32 @@ void TuiApp::render_process_tree() {
     getmaxyx(process_win_, max_y, max_x);
 
     // Draw border and title
-    draw_box_title(process_win_, current_focus_ == PanelFocus::ProcessList ? "[Process Tree]" : "Process Tree");
+    std::string title = current_focus_ == PanelFocus::ProcessList ? "[Process Tree]" : "Process Tree";
+    if (process_h_scroll_ > 0) {
+        title += " [</>:scroll]";
+    }
+    draw_box_title(process_win_, title);
 
-    // Column headers - fixed columns end at position 122, command line takes rest
+    // Fixed column width (Process name with tree structure)
+    const int tree_col_width = 32;  // Tree + name column
+
+    // Build scrollable header
+    std::string header_scroll = "   PID   CPU%    Memory  Mem% Threads User       State TreeCPU TrCPTot   TreeMem  Command";
+
+    // Render header
     wattron(process_win_, COLOR_PAIR(COLOR_PAIR_HEADER) | A_BOLD);
-    mvwprintw(process_win_, 1, 2, "%-30s %7s %6s %9s %5s %7s %-8s %5s %7s %7s %9s  %s",
-              "Process", "PID", "CPU%", "Memory", "Mem%", "Threads", "User", "State", "TreeCPU", "TrCPTot", "TreeMem", "Command");
+    mvwprintw(process_win_, 1, 2, "%-30s", "Process");
+
+    // Render scrollable part of header
+    int scroll_start = tree_col_width;
+    int scroll_width = max_x - scroll_start - 2;
+    if (scroll_width > 0 && process_h_scroll_ < static_cast<int>(header_scroll.length())) {
+        std::string visible_header = header_scroll.substr(process_h_scroll_);
+        if (static_cast<int>(visible_header.length()) > scroll_width) {
+            visible_header = visible_header.substr(0, scroll_width);
+        }
+        mvwprintw(process_win_, 1, scroll_start, "%s", visible_header.c_str());
+    }
     wattroff(process_win_, COLOR_PAIR(COLOR_PAIR_HEADER) | A_BOLD);
 
     int available_rows = max_y - 3;
@@ -237,9 +276,6 @@ void TuiApp::render_process_tree() {
 
     // Adjust scroll to keep selection visible
     scroll_to_selection();
-
-    // Fixed columns width (before command line)
-    const int fixed_cols_end = 122;
 
     // Get number of CPU cores for total CPU calculation
     size_t num_cores = view_model_.system_panel.per_cpu_usage.size();
@@ -359,28 +395,31 @@ void TuiApp::render_process_tree() {
         }
 
         mvwprintw(process_win_, row, col, " %-*s", name_width - 1, name.c_str());
-        col = 34;  // Fixed position for rest of columns
 
-        mvwprintw(process_win_, row, col, "%7d %5.1f%% %9s %4.1f%% %7d %-8s   %c  %6.1f%% %6.1f%% %9s  ",
-                  info.pid,
-                  info.cpu_percent,
-                  format_bytes(info.resident_memory).c_str(),
-                  info.memory_percent,
-                  info.thread_count,
-                  info.user_name.substr(0, 8).c_str(),
-                  info.state_char,
-                  tree_cpu,
-                  tree_cpu_total,
-                  format_bytes(tree_mem).c_str());
+        // Build scrollable data row
+        char data_buf[512];
+        snprintf(data_buf, sizeof(data_buf),
+                 "%7d %5.1f%% %9s %4.1f%% %7d %-8s     %c  %6.1f%% %6.1f%% %9s  %s",
+                 info.pid,
+                 info.cpu_percent,
+                 format_bytes(info.resident_memory).c_str(),
+                 info.memory_percent,
+                 info.thread_count,
+                 info.user_name.substr(0, 8).c_str(),
+                 info.state_char,
+                 tree_cpu,
+                 tree_cpu_total,
+                 format_bytes(tree_mem).c_str(),
+                 info.command_line.c_str());
 
-        // Command line column (truncate to fit remaining space)
-        int cmdline_max = max_x - fixed_cols_end - 2;
-        if (cmdline_max > 3) {
-            std::string cmdline = info.command_line;
-            if (static_cast<int>(cmdline.length()) > cmdline_max) {
-                cmdline = cmdline.substr(0, cmdline_max - 3) + "...";
+        // Render scrollable part
+        std::string data_str(data_buf);
+        if (scroll_width > 0 && process_h_scroll_ < static_cast<int>(data_str.length())) {
+            std::string visible_data = data_str.substr(process_h_scroll_);
+            if (static_cast<int>(visible_data.length()) > scroll_width) {
+                visible_data = visible_data.substr(0, scroll_width);
             }
-            mvwprintw(process_win_, row, fixed_cols_end, "%s", cmdline.c_str());
+            mvwprintw(process_win_, row, scroll_start, "%s", visible_data.c_str());
         }
 
         // Turn off attributes

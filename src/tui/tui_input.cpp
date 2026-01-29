@@ -154,14 +154,17 @@ void TuiApp::handle_process_list_input(int ch) {
         case KEY_RIGHT:
         case '\n':
         case '\r':
-            // Expand node (tree view) or no-op (list view)
+            // Expand node (tree view) or horizontal scroll (list view)
             if (pl.is_tree_view && pl.selected_pid > 0) {
                 pl.collapsed_pids.erase(pl.selected_pid);
+            } else if (!pl.is_tree_view) {
+                // Horizontal scroll right in list view
+                process_h_scroll_ += 10;
             }
             break;
 
         case KEY_LEFT:
-            // Collapse node (tree view) or no-op (list view)
+            // Collapse node (tree view) or horizontal scroll (list view)
             if (pl.is_tree_view && pl.selected_pid > 0) {
                 // Check if node has children
                 if (current_data_ && current_data_->process_map.count(pl.selected_pid)) {
@@ -178,7 +181,25 @@ void TuiApp::handle_process_list_input(int ch) {
                         }
                     }
                 }
+            } else if (!pl.is_tree_view) {
+                // Horizontal scroll left in list view
+                process_h_scroll_ = std::max(0, process_h_scroll_ - 10);
             }
+            break;
+
+        case '>':  // Horizontal scroll right (works in both views)
+        case '.':  // Alternative for > without shift
+            process_h_scroll_ += 10;
+            break;
+
+        case '<':  // Horizontal scroll left (works in both views)
+        case ',':  // Alternative for < without shift
+            process_h_scroll_ = std::max(0, process_h_scroll_ - 10);
+            break;
+
+        case KEY_SHOME:  // Shift+Home - reset horizontal scroll
+        case '0':
+            process_h_scroll_ = 0;
             break;
 
         case 'K':  // Kill process tree

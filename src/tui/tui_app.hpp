@@ -132,6 +132,7 @@ private:
 
     // Scroll positions
     int process_scroll_offset_ = 0;
+    int process_h_scroll_ = 0;  // Horizontal scroll for process list
     int details_scroll_offset_ = 0;
     int visible_process_rows_ = 0;
     int visible_details_rows_ = 0;
