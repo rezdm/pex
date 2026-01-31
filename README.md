@@ -8,13 +8,22 @@ I needed a one-off tool that would show me alltogether a process tree (think of 
 
 It is AI generated code, it is a one-off project, not sure it makes sense to continue it, I needed it once and found it useful to have it on my computer.
 
-## Screenshot
+## Screenshots
 
-![pex-screenshot.png](pex-screenshot.png)
+
+![GUI version](pex-screenshot.png)
+
+
+![Console (TUI) version](pexc-screenshot.png)
 
 ## Requirements
 
-Debian, Wayland, libxkb, ...
+Being able to compile. Tested to run on:
+* Debian 13, GNOME/Wayland
+* Gentoo, KDE/X11
+* FreeBSD 15-RELEASE, XFCE/X11
+* Solaris 11.4, GNOME/X11
+* Solaris, Debian, FreeBSD: terminal
 
 ## Building
 
@@ -56,6 +65,28 @@ username=user_x
 # profiles rezdm | grep "Pex Monitor"
 ...
 $ pfexec pex
+```
+
+## Console version
+Additional functionality -- ncurses-based TUI version. Compiled by default together with GUI version. Not to build it:
+```bash
+... -DBUILD_TUI=OFF
+```
+
+### Challenges in Solaris
+Solaris has its own curses library that interferes with code. User should either compile/install ncurses manually or rely on this project's `CMakeLists.txt` to retrieve it: 
+Compiling/installing manually, then:
+```bash
+rm -rf * && \
+cmake ..\
+  -DPEX_PLATFORM=solaris \
+  -DCURSES_INCLUDE_DIR="/opt/ncurses6.6/include;/opt/ncurses6.6/include/ncursesw" \
+  -DCURSES_LIBRARY=/opt/ncurses6.6/lib/libncursesw.a && \
+gmake -j8 pexc
+```
+or build ncurses automatically during the build process:
+```bash
+cmake .. -DPEX_PLATFORM=solaris -DBUILD_NCURSES=ON
 ```
 
 ## Installing

@@ -212,15 +212,13 @@ static PfilesParseResult parse_pfiles(int pid) {
         if (socket_state.active) {
             if (line.rfind("sockname:", 0) == 0) {
                 std::string endpoint;
-                int family = 0;
-                if (parse_socket_endpoint(line.substr(9), endpoint, family)) {
+                if (int family = 0; parse_socket_endpoint(line.substr(9), endpoint, family)) {
                     socket_state.local = std::move(endpoint);
                     socket_state.family = family;
                 }
             } else if (line.rfind("peername:", 0) == 0) {
                 std::string endpoint;
-                int family = 0;
-                if (parse_socket_endpoint(line.substr(9), endpoint, family)) {
+                if (int family = 0; parse_socket_endpoint(line.substr(9), endpoint, family)) {
                     socket_state.remote = std::move(endpoint);
                     socket_state.family = family;
                 }
@@ -539,7 +537,7 @@ std::vector<FileHandleInfo> SolarisProcessDataProvider::get_file_handles(int pid
 
     bool needs_fallback = handles.empty();
     if (!needs_fallback) {
-        needs_fallback = std::all_of(handles.begin(), handles.end(), [](const FileHandleInfo& fh) {
+        needs_fallback = std::ranges::all_of(handles, [](const FileHandleInfo& fh) {
             return fh.path.empty() || fh.path == "[unknown]" || fh.type == "unknown";
         });
     }
@@ -579,8 +577,8 @@ std::vector<NetworkConnectionInfo> SolarisProcessDataProvider::get_network_conne
     try {
         for (const auto& entry : fs::directory_iterator(fd_path)) {
             std::string fd_str = entry.path().filename().string();
-            int fd_num = 0;
             try {
+                int fd_num = 0;
                 fd_num = std::stoi(fd_str);
             } catch (...) {
                 continue;
@@ -733,8 +731,7 @@ std::vector<EnvironmentVariable> SolarisProcessDataProvider::get_environment_var
         // pargs -e outputs lines like "envp[0]: PATH=/usr/bin:..."
         // Strip the "envp[N]: " prefix if present
         if (line.rfind("envp[", 0) == 0) {
-            auto colon = line.find("]: ");
-            if (colon != std::string::npos) {
+            if (const auto colon = line.find("]: "); colon != std::string::npos) {
                 line = line.substr(colon + 3);
             }
         }

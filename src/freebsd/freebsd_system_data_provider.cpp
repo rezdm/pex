@@ -13,6 +13,9 @@
 #include <unistd.h>
 #include <cstring>
 #include <ctime>
+#include <cerrno>
+#include <cstdlib>
+#include <cstdio>
 
 #if __has_include(<sys/swap.h>)
 #include <sys/swap.h>
@@ -81,8 +84,6 @@ MemoryInfo FreeBSDSystemDataProvider::get_memory_info() {
     size_t len = sizeof(info.total);
     sysctlbyname("hw.physmem", &info.total, &len, nullptr, 0);
 
-    // vm.stats.* sysctls provide page counts directly
-
     unsigned int page_size = getpagesize();
 
     // Free pages
@@ -98,6 +99,7 @@ MemoryInfo FreeBSDSystemDataProvider::get_memory_info() {
     // Cache pages (also available)
     unsigned int v_cache_count = 0;
     len = sizeof(v_cache_count);
+    // Note: v_cache_count doesn't exist in newer FreeBSD (13+) - not an error
     sysctlbyname("vm.stats.vm.v_cache_count", &v_cache_count, &len, nullptr, 0);
 
     // Available = free + inactive + cache
@@ -153,7 +155,6 @@ LoadAverage FreeBSDSystemDataProvider::get_load_average() {
     // Running processes
     mib[2] = KERN_PROC_PROC;  // Only actual processes, not threads
     if (sysctl(mib, 3, nullptr, &len, nullptr, 0) == 0) {
-        // Count running processes by iterating
         std::vector<char> buf(len * 5 / 4);
         size_t actual_len = buf.size();
         if (sysctl(mib, 3, buf.data(), &actual_len, nullptr, 0) == 0) {
@@ -184,7 +185,6 @@ UptimeInfo FreeBSDSystemDataProvider::get_uptime() {
     }
 
     // FreeBSD doesn't have a direct idle time metric like Linux
-    // We can estimate it from CPU idle percentage, but for simplicity return 0
     info.idle_seconds = 0;
 
     return info;

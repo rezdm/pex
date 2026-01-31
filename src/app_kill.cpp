@@ -38,9 +38,9 @@ static int get_ppid(int pid) {
 static void collect_descendants_from_proc(const int root_pid, std::vector<int>& result) {
     // Build parent -> children map by scanning /proc
     std::map<int, std::vector<int>> children_map;
-    std::set<int> all_pids;
 
     try {
+        std::set<int> all_pids;
         for (const auto& entry : fs::directory_iterator("/proc")) {
             try {
                 if (!entry.is_directory()) continue;

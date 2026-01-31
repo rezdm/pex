@@ -81,7 +81,7 @@ uint64_t LinuxSystemDataProvider::get_boot_time_ticks() const {
 }
 
 std::string LinuxSystemDataProvider::get_system_info_string() const {
-    struct utsname uts;
+    struct utsname uts{};
     if (uname(&uts) != 0) {
         return "Linux";
     }

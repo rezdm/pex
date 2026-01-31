@@ -25,7 +25,7 @@ public:
     void clear_errors() override;
 
 private:
-    char map_state(char state);
+    static char map_state(char state);
     std::string get_username(uid_t uid);
     std::optional<ProcessInfo> read_process_info(int pid, int64_t total_memory);
     void add_error(const std::string& context, const std::string& message);

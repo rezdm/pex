@@ -152,9 +152,8 @@ LoadAverage SolarisSystemDataProvider::get_load_average() {
     int total = 0;
     int running = 0;
 
-    DIR* dir = opendir("/proc");
-    if (dir) {
-        struct dirent* entry;
+    if (DIR* dir = opendir("/proc")) {
+        dirent* entry;
         while ((entry = readdir(dir)) != nullptr) {
             // Skip non-numeric entries
             if (entry->d_name[0] < '0' || entry->d_name[0] > '9') continue;
@@ -241,8 +240,7 @@ uint64_t SolarisSystemDataProvider::get_boot_time_ticks() const {
 std::string SolarisSystemDataProvider::get_system_info_string() const {
     std::string result = "SunOS";
 
-    struct utsname uts;
-    memset(&uts, 0, sizeof(uts));
+    struct utsname uts = {};
 
     // Note: On Solaris, uname() returns non-negative on success (not necessarily 0)
     if (uname(&uts) >= 0) {
@@ -266,8 +264,7 @@ std::string SolarisSystemDataProvider::get_system_info_string() const {
     }
 
     // Try to get friendly release name from /etc/release
-    FILE* f = fopen("/etc/release", "r");
-    if (f) {
+    if (FILE* f = fopen("/etc/release", "r")) {
         char line[256] = {0};
         if (fgets(line, sizeof(line), f)) {
             // Trim trailing whitespace/newlines

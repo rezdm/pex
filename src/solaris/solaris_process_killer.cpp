@@ -26,9 +26,7 @@ KillResult SolarisProcessKiller::kill_process(int pid, bool force) {
         return result;
     }
 
-    int sig = force ? SIGKILL : SIGTERM;
-
-    if (::kill(pid, sig) == 0) {
+    if (const int sig = force ? SIGKILL : SIGTERM; ::kill(pid, sig) == 0) {
         if (!force) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             if (::kill(pid, 0) == 0) {
@@ -108,7 +106,7 @@ KillResult SolarisProcessKiller::kill_process_tree(int pid, bool force) {
     while (found_new) {
         found_new = false;
         for (const auto& [proc_pid, ppid] : all_procs) {
-            if (pids_to_kill.count(ppid) && !pids_to_kill.count(proc_pid)) {
+            if (pids_to_kill.contains(ppid) && !pids_to_kill.contains(proc_pid)) {
                 pids_to_kill.insert(proc_pid);
                 found_new = true;
             }

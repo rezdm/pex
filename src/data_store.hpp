@@ -107,6 +107,8 @@ private:
     std::thread collection_thread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> paused_{false};
+    std::atomic<bool> force_refresh_{false};  // For refresh_now() to wake thread
+    std::atomic<bool> refresh_pending_{false};  // Queue refresh while paused
     std::atomic<int> refresh_interval_ms_{1000};
     std::condition_variable cv_;
     std::mutex cv_mutex_;

@@ -21,6 +21,9 @@
 #include <format>
 #include <algorithm>
 #include <map>
+#include <cerrno>
+#include <cstdio>
+#include <cstdlib>
 
 namespace pex {
 
@@ -65,8 +68,7 @@ std::string FreeBSDProcessDataProvider::get_username(uid_t uid) {
 
     // Lookup and cache
     std::string name;
-    struct passwd* pw = getpwuid(uid);
-    if (pw) {
+    if (const passwd* pw = getpwuid(uid)) {
         name = pw->pw_name;
     } else {
         name = std::to_string(uid);
@@ -112,6 +114,15 @@ std::vector<ProcessInfo> FreeBSDProcessDataProvider::get_all_processes(int64_t t
     struct kinfo_proc* kp = reinterpret_cast<struct kinfo_proc*>(buf.data());
 
     for (size_t i = 0; i < count; ++i) {
+        // Skip kernel idle processes - these accumulate idle time across all CPUs
+        // and don't represent meaningful process activity. The name is typically
+        // "idle" with PID 0 or part of the kernel (PPID 0, PID < 10).
+        if ((kp[i].ki_pid == 0) ||
+            (kp[i].ki_ppid == 0 && kp[i].ki_pid <= 10 &&
+             std::string(kp[i].ki_comm) == "idle")) {
+            continue;
+        }
+
         ProcessInfo info;
         info.pid = kp[i].ki_pid;
         info.parent_pid = kp[i].ki_ppid;
@@ -142,7 +153,7 @@ std::vector<ProcessInfo> FreeBSDProcessDataProvider::get_all_processes(int64_t t
         struct procstat* ps = procstat_open_sysctl();
         if (ps) {
             unsigned int cnt;
-            struct kinfo_proc* kproc = procstat_getprocs(ps, KERN_PROC_PID, info.pid, &cnt);
+            kinfo_proc* kproc = procstat_getprocs(ps, KERN_PROC_PID, info.pid, &cnt);
             if (kproc && cnt > 0) {
                 char** args = procstat_getargv(ps, kproc, 0);
                 if (args) {

@@ -69,6 +69,11 @@ std::shared_ptr<DataSnapshot> DataStore::get_snapshot() const {
 }
 
 void DataStore::refresh_now() {
+    if (paused_) {
+        refresh_pending_ = true;
+        return;
+    }
+    force_refresh_ = true;
     cv_.notify_all();
 }
 
@@ -78,6 +83,9 @@ void DataStore::pause() {
 
 void DataStore::resume() {
     paused_ = false;
+    if (refresh_pending_.exchange(false)) {
+        force_refresh_ = true;
+    }
     cv_.notify_all();  // Wake up to resume collection
 }
 
@@ -101,8 +109,13 @@ void DataStore::collection_thread_func() {
     while (running_) {
         std::unique_lock lock(cv_mutex_);
         cv_.wait_for(lock, std::chrono::milliseconds(refresh_interval_ms_), [this] {
-            return !running_;
+            return !running_ || force_refresh_.load();
         });
+
+        // Handle force_refresh_ - if paused, retain as pending
+        if (force_refresh_.exchange(false) && paused_) {
+            refresh_pending_ = true;
+        }
 
         if (running_ && !paused_) {
             collect_data();

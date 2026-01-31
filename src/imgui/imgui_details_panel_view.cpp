@@ -113,7 +113,7 @@ void ImGuiApp::render_network_tab() {
     auto& dp = view_model_.details_panel;
 
     auto parse_endpoint = [](const std::string& endpoint) -> std::pair<std::string, uint16_t> {
-        size_t colon_pos = endpoint.rfind(':');
+        const size_t colon_pos = endpoint.rfind(':');
         if (colon_pos == std::string::npos) return {endpoint, 0};
 
         std::string ip = endpoint.substr(0, colon_pos);
@@ -124,7 +124,7 @@ void ImGuiApp::render_network_tab() {
     };
 
     auto get_port = [](const std::string& endpoint) -> uint16_t {
-        size_t colon_pos = endpoint.rfind(':');
+        const size_t colon_pos = endpoint.rfind(':');
         if (colon_pos == std::string::npos) return 0;
         uint16_t port = 0;
         std::from_chars(endpoint.data() + colon_pos + 1,
@@ -570,7 +570,7 @@ void ImGuiApp::render_libraries_tab() {
 }
 
 void ImGuiApp::refresh_selected_details() {
-    auto& pl = view_model_.process_list;
+    const auto& pl = view_model_.process_list;
     auto& dp = view_model_.details_panel;
 
     if (pl.selected_pid <= 0) {
