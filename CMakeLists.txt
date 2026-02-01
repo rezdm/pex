@@ -97,98 +97,110 @@ target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
 # Find OpenGL
 find_package(OpenGL REQUIRED)
 
-# Shared sources (used by both GUI and TUI)
-set(PEX_SHARED_SOURCES
-    src/data_store.cpp
-    src/name_resolver.cpp
-    src/single_instance.cpp
+# =============================================================================
+# pex_core - Core library (model + services)
+# =============================================================================
+add_library(pex_core STATIC
+    src/core/services/data_store.cpp
+    src/core/services/name_resolver.cpp
+    src/core/services/single_instance.cpp
+    src/core/model/system_info.cpp
 )
+target_include_directories(pex_core PUBLIC src)
+find_package(Threads REQUIRED)
+target_link_libraries(pex_core PUBLIC Threads::Threads)
 
-# GUI-specific sources
-set(PEX_GUI_SOURCES
-    src/main.cpp
-    src/stb_impl.cpp
-
-    # ImGui application and views
-    src/imgui/imgui_app.cpp
-    src/imgui/imgui_system_panel_view.cpp
-    src/imgui/imgui_process_list_view.cpp
-    src/imgui/imgui_details_panel_view.cpp
-    src/imgui/imgui_process_popup_view.cpp
-    src/imgui/imgui_kill_dialog_view.cpp
-    src/imgui/imgui_input.cpp
-)
-
-# TUI-specific sources
-set(PEX_TUI_SOURCES
-    src/main_tui.cpp
-    src/tui/tui_app.cpp
-    src/tui/tui_system_panel.cpp
-    src/tui/tui_process_list.cpp
-    src/tui/tui_details_panel.cpp
-    src/tui/tui_kill_dialog.cpp
-    src/tui/tui_input.cpp
-    src/tui/tui_colors.cpp
-)
-
-# Platform-specific sources
+# =============================================================================
+# pex_platform - Platform-specific library
+# =============================================================================
 if(PEX_PLATFORM STREQUAL "linux")
     set(PEX_PLATFORM_SOURCES
-        src/procfs_reader.cpp
-        src/system_info.cpp
-        src/linux/linux_process_data_provider.cpp
-        src/linux/linux_system_data_provider.cpp
-        src/linux/linux_process_killer.cpp
-        src/linux/platform_factory_linux.cpp
+        src/platform/linux/procfs/procfs_common.cpp
+        src/platform/linux/procfs/procfs_processes.cpp
+        src/platform/linux/procfs/procfs_threads.cpp
+        src/platform/linux/procfs/procfs_fds.cpp
+        src/platform/linux/procfs/procfs_network.cpp
+        src/platform/linux/procfs/procfs_memory.cpp
+        src/platform/linux/procfs/procfs_environment.cpp
+        src/platform/linux/procfs/procfs_libraries.cpp
+        src/platform/linux/linux_process_data_provider.cpp
+        src/platform/linux/linux_system_data_provider.cpp
+        src/platform/linux/linux_process_killer.cpp
+        src/platform/linux/platform_factory_linux.cpp
     )
     set(PEX_PLATFORM_DEFINE "PEX_PLATFORM_LINUX")
+    set(PEX_PLATFORM_LIBS "")
 elseif(PEX_PLATFORM STREQUAL "freebsd")
     set(PEX_PLATFORM_SOURCES
-        src/freebsd/freebsd_process_data_provider.cpp
-        src/freebsd/freebsd_system_data_provider.cpp
-        src/freebsd/freebsd_process_killer.cpp
-        src/freebsd/platform_factory_freebsd.cpp
+        src/platform/freebsd/freebsd_process_data_provider.cpp
+        src/platform/freebsd/freebsd_process_details.cpp
+        src/platform/freebsd/freebsd_system_data_provider.cpp
+        src/platform/freebsd/freebsd_process_killer.cpp
+        src/platform/freebsd/platform_factory_freebsd.cpp
     )
     set(PEX_PLATFORM_DEFINE "PEX_PLATFORM_FREEBSD")
+    set(PEX_PLATFORM_LIBS procstat kvm)
 elseif(PEX_PLATFORM STREQUAL "solaris")
     set(PEX_PLATFORM_SOURCES
-        src/solaris/solaris_process_data_provider.cpp
-        src/solaris/solaris_system_data_provider.cpp
-        src/solaris/solaris_process_killer.cpp
-        src/solaris/platform_factory_solaris.cpp
+        src/platform/solaris/solaris_process_data_provider.cpp
+        src/platform/solaris/solaris_process_details.cpp
+        src/platform/solaris/solaris_system_data_provider.cpp
+        src/platform/solaris/solaris_process_killer.cpp
+        src/platform/solaris/platform_factory_solaris.cpp
     )
     set(PEX_PLATFORM_DEFINE "PEX_PLATFORM_SOLARIS")
+    set(PEX_PLATFORM_LIBS kstat rt)
+    # GLFW needs rt on Solaris
+    target_link_libraries(glfw PUBLIC rt)
 elseif(PEX_PLATFORM STREQUAL "stub")
     set(PEX_PLATFORM_SOURCES
-        src/stub/stub_providers.cpp
-        src/stub/platform_factory_stub.cpp
+        src/platform/stub/stub_providers.cpp
+        src/platform/stub/platform_factory_stub.cpp
     )
     set(PEX_PLATFORM_DEFINE "PEX_PLATFORM_STUB")
+    set(PEX_PLATFORM_LIBS "")
 else()
     message(FATAL_ERROR "Unknown PEX_PLATFORM: ${PEX_PLATFORM}. Use 'linux', 'freebsd', 'solaris', or 'stub'.")
 endif()
 
-# Main GUI executable
-add_executable(pex
-    ${PEX_SHARED_SOURCES}
-    ${PEX_GUI_SOURCES}
-    ${PEX_PLATFORM_SOURCES}
-)
-
-target_compile_definitions(pex PRIVATE ${PEX_PLATFORM_DEFINE})
-target_include_directories(pex PRIVATE src ${stb_SOURCE_DIR} ${CMAKE_BINARY_DIR}/generated)
-target_link_libraries(pex PRIVATE imgui OpenGL::GL)
-
-# Platform-specific libraries for GUI
-if(PEX_PLATFORM STREQUAL "freebsd")
-    target_link_libraries(pex PRIVATE procstat kvm)
-elseif(PEX_PLATFORM STREQUAL "solaris")
-    target_link_libraries(pex PRIVATE kstat rt)
-    target_link_libraries(glfw PUBLIC rt)
+add_library(pex_platform STATIC ${PEX_PLATFORM_SOURCES})
+target_include_directories(pex_platform PUBLIC src)
+target_compile_definitions(pex_platform PUBLIC ${PEX_PLATFORM_DEFINE})
+target_link_libraries(pex_platform PUBLIC pex_core)
+if(PEX_PLATFORM_LIBS)
+    target_link_libraries(pex_platform PUBLIC ${PEX_PLATFORM_LIBS})
 endif()
 
-# TUI executable (pexc)
-find_package(Threads REQUIRED)
+# =============================================================================
+# pex_ui_imgui - ImGui UI library
+# =============================================================================
+add_library(pex_ui_imgui STATIC
+    src/ui/imgui/imgui_app.cpp
+    src/ui/imgui/imgui_app_menus.cpp
+    src/ui/imgui/imgui_system_panel_view.cpp
+    src/ui/imgui/imgui_process_list_view.cpp
+    src/ui/imgui/imgui_details_panel_view.cpp
+    src/ui/imgui/imgui_details_tabs.cpp
+    src/ui/imgui/imgui_process_popup_view.cpp
+    src/ui/imgui/imgui_kill_dialog_view.cpp
+    src/ui/imgui/imgui_input.cpp
+)
+target_include_directories(pex_ui_imgui PUBLIC src PRIVATE ${stb_SOURCE_DIR} ${CMAKE_BINARY_DIR}/generated)
+target_link_libraries(pex_ui_imgui PUBLIC pex_core pex_platform imgui)
+
+# =============================================================================
+# Main GUI executable (pex)
+# =============================================================================
+add_executable(pex
+    src/main.cpp
+    src/stb_impl.cpp
+)
+target_include_directories(pex PRIVATE ${stb_SOURCE_DIR} ${CMAKE_BINARY_DIR}/generated)
+target_link_libraries(pex PRIVATE pex_ui_imgui OpenGL::GL)
+
+# =============================================================================
+# TUI executable (pexc) - optional, requires ncurses
+# =============================================================================
 option(BUILD_TUI "Build TUI version (pexc)" ON)
 option(BUILD_NCURSES "Build ncurses from source if not found" OFF)
 
@@ -234,7 +246,7 @@ if(NOT NCURSES_FOUND AND BUILD_TUI AND BUILD_NCURSES)
             --without-ada
             --enable-widec
             --disable-stripping
-        BUILD_COMMAND make 
+        BUILD_COMMAND make
         INSTALL_COMMAND make install
         BUILD_IN_SOURCE 1
     )
@@ -249,26 +261,31 @@ endif()
 if(BUILD_TUI AND NCURSES_FOUND)
     message(STATUS "Building TUI version (pexc)")
 
-    add_executable(pexc
-        ${PEX_SHARED_SOURCES}
-        ${PEX_TUI_SOURCES}
-        ${PEX_PLATFORM_SOURCES}
+    # pex_ui_tui - TUI UI library
+    add_library(pex_ui_tui STATIC
+        src/ui/tui/tui_app.cpp
+        src/ui/tui/tui_app_windows.cpp
+        src/ui/tui/tui_app_navigation.cpp
+        src/ui/tui/tui_app_helpers.cpp
+        src/ui/tui/tui_system_panel.cpp
+        src/ui/tui/tui_process_list.cpp
+        src/ui/tui/tui_details_panel.cpp
+        src/ui/tui/tui_details_tabs.cpp
+        src/ui/tui/tui_kill_dialog.cpp
+        src/ui/tui/tui_input.cpp
+        src/ui/tui/tui_input_panels.cpp
+        src/ui/tui/tui_colors.cpp
     )
+    target_include_directories(pex_ui_tui PUBLIC src ${CURSES_INCLUDE_DIR})
+    target_link_libraries(pex_ui_tui PUBLIC pex_core pex_platform ${CURSES_LIBRARIES})
 
-    target_compile_definitions(pexc PRIVATE ${PEX_PLATFORM_DEFINE})
-    target_include_directories(pexc PRIVATE src ${CURSES_INCLUDE_DIR})
-    target_link_libraries(pexc PRIVATE ${CURSES_LIBRARIES} Threads::Threads)
-
-    # Platform-specific libraries for TUI
-    if(PEX_PLATFORM STREQUAL "freebsd")
-        target_link_libraries(pexc PRIVATE procstat kvm)
-    elseif(PEX_PLATFORM STREQUAL "solaris")
-        target_link_libraries(pexc PRIVATE kstat rt)
-    endif()
+    # Main TUI executable
+    add_executable(pexc src/main_tui.cpp)
+    target_link_libraries(pexc PRIVATE pex_ui_tui)
 
     # If ncurses was built from source, add dependency
     if(NCURSES_BUILT_FROM_SOURCE)
-        add_dependencies(pexc ncurses_external)
+        add_dependencies(pex_ui_tui ncurses_external)
         # Set RPATH so the executable can find the shared library at runtime
         set_target_properties(pexc PROPERTIES
             BUILD_RPATH "${NCURSES_PREFIX}/lib"
