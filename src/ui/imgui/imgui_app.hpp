@@ -83,6 +83,13 @@ private:
     // ViewModel (holds all UI state - single source of truth)
     AppViewModel view_model_;
 
+    // Details refresh tracking (avoid heavy syscalls every tick)
+    int details_last_pid_ = -1;
+    DetailsTab details_last_tab_ = DetailsTab::FileHandles;
+    std::chrono::steady_clock::time_point details_last_refresh_{};
+    bool details_force_refresh_ = false;
+    static constexpr auto kDetailsRefreshInterval = std::chrono::milliseconds(500);
+
     // Window pointer for focus handling
     GLFWwindow* window_ = nullptr;
     std::atomic<bool> focus_requested_{false};

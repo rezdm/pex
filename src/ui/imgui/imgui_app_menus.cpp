@@ -19,6 +19,7 @@ void ImGuiApp::render_menu_bar() {
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Refresh Now", "F5")) {
+                details_force_refresh_ = true;
                 data_store_->refresh_now();
             }
             ImGui::EndMenu();
@@ -92,6 +93,7 @@ void ImGuiApp::render_toolbar() {
     ImGui::SameLine();
 
     if (ImGui::Button("Refresh")) {
+        details_force_refresh_ = true;
         data_store_->refresh_now();
     }
     ImGui::SameLine();

@@ -71,13 +71,20 @@ std::string NameResolver::get_service_name(const uint16_t port, const std::strin
 }
 
 std::string NameResolver::get_hostname(const std::string& ip) {
-    if (ip.empty() || ip == "0.0.0.0" || ip == "[::]") {
+    std::string normalized = ip;
+    if (normalized.size() >= 2 && normalized.front() == '[' && normalized.back() == ']') {
+        normalized = normalized.substr(1, normalized.size() - 2);
+    }
+
+    if (normalized.empty() || normalized == "*" ||
+        normalized == "0.0.0.0" ||
+        normalized == "::" || normalized == "0:0:0:0:0:0:0:0") {
         return "*";
     }
 
     {
         std::lock_guard lock(dns_mutex_);
-        if (const auto it = dns_cache_.find(ip); it != dns_cache_.end()) {
+        if (const auto it = dns_cache_.find(normalized); it != dns_cache_.end()) {
             if (it->second == kResolving) {
                 return {};  // Still resolving
             }
@@ -88,12 +95,12 @@ std::string NameResolver::get_hostname(const std::string& ip) {
         }
 
         // Mark as resolving and queue for resolution
-        dns_cache_[ip] = kResolving;
+        dns_cache_[normalized] = kResolving;
     }
 
     {
         std::lock_guard lock(queue_mutex_);
-        resolve_queue_.push(ip);
+        resolve_queue_.push(normalized);
     }
     queue_cv_.notify_one();
 

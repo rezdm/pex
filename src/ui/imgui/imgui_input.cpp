@@ -48,6 +48,7 @@ void ImGuiApp::handle_keyboard_navigation() {
 
     // F5 for refresh
     if (ImGui::IsKeyPressed(ImGuiKey_F5)) {
+        details_force_refresh_ = true;
         data_store_->refresh_now();
         return;
     }

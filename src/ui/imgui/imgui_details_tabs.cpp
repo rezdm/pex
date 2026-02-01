@@ -63,11 +63,18 @@ void ImGuiApp::render_file_handles_tab() {
 void ImGuiApp::render_network_tab() {
     auto& dp = view_model_.details_panel;
 
-    auto parse_endpoint = [](const std::string& endpoint) -> std::pair<std::string, uint16_t> {
+    auto normalize_ip = [](std::string ip) -> std::string {
+        if (ip.size() >= 2 && ip.front() == '[' && ip.back() == ']') {
+            ip = ip.substr(1, ip.size() - 2);
+        }
+        return ip;
+    };
+
+    auto parse_endpoint = [&normalize_ip](const std::string& endpoint) -> std::pair<std::string, uint16_t> {
         const size_t colon_pos = endpoint.rfind(':');
         if (colon_pos == std::string::npos) return {endpoint, 0};
 
-        std::string ip = endpoint.substr(0, colon_pos);
+        std::string ip = normalize_ip(endpoint.substr(0, colon_pos));
         uint16_t port = 0;
         std::from_chars(endpoint.data() + colon_pos + 1,
                        endpoint.data() + endpoint.size(), port);

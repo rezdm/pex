@@ -74,9 +74,12 @@ FetchContent_MakeAvailable(imgui)
 FetchContent_Declare(
     stb
     GIT_REPOSITORY https://github.com/nothings/stb.git
-    GIT_TAG master
+    GIT_TAG f1c79c02822848a9bed4315b12c8c8f3761e1296
 )
 FetchContent_MakeAvailable(stb)
+
+# Find OpenGL
+find_package(OpenGL REQUIRED)
 
 # ImGui library
 add_library(imgui STATIC
@@ -93,9 +96,6 @@ target_include_directories(imgui PUBLIC
     ${imgui_SOURCE_DIR}/backends
 )
 target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
-
-# Find OpenGL
-find_package(OpenGL REQUIRED)
 
 # =============================================================================
 # pex_core - Core library (model + services)
