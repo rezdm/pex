@@ -4,6 +4,7 @@
 #include "../../platform/interfaces/i_system_data_provider.hpp"
 #include "../../platform/interfaces/i_process_killer.hpp"
 #include "../../core/services/data_store.hpp"
+#include "../../core/services/name_resolver.hpp"
 #include "../common/viewmodels/app_view_model.hpp"
 #include <memory>
 #include <atomic>
@@ -115,6 +116,9 @@ private:
 
     // ViewModel (holds all UI state)
     AppViewModel view_model_;
+
+    // Name resolver for DNS lookups in network tab
+    mutable NameResolver name_resolver_;
 
     // ncurses windows
     WINDOW* main_win_ = nullptr;

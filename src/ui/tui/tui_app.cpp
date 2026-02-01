@@ -72,7 +72,8 @@ void TuiApp::run() {
     // Create windows
     create_windows();
 
-    // Start data collection
+    // Start background services
+    name_resolver_.start();
     data_store_->start();
 
     // Get initial data - wait for actual data (not just empty snapshot)
@@ -89,6 +90,8 @@ void TuiApp::run() {
         printf("\033]0;\007");   // Reset terminal title
         fflush(stdout);
         endwin();
+        data_store_->stop();
+        name_resolver_.stop();
         fprintf(stderr, "pexc: Failed to get process data from system\n");
         return;
     }
@@ -133,6 +136,7 @@ void TuiApp::run() {
 
     // Cleanup
     data_store_->stop();
+    name_resolver_.stop();
     cleanup_windows();
 
     // Disable mouse tracking

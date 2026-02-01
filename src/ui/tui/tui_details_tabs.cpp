@@ -3,6 +3,8 @@
 #include <sstream>
 #include <iomanip>
 #include <cstring>
+#include <charconv>
+#include <algorithm>
 
 namespace pex {
 
@@ -61,9 +63,82 @@ void TuiApp::render_network_tab() const {
 
     const auto& connections = view_model_.details_panel.network_connections;
 
+    auto normalize_ip = [](std::string ip) -> std::string {
+        if (ip.size() >= 2 && ip.front() == '[' && ip.back() == ']') {
+            ip = ip.substr(1, ip.size() - 2);
+        }
+        return ip;
+    };
+
+    auto parse_endpoint = [&normalize_ip](const std::string& endpoint) -> std::pair<std::string, uint16_t> {
+        const size_t colon_pos = endpoint.rfind(':');
+        if (colon_pos == std::string::npos) return {endpoint, 0};
+
+        std::string ip = normalize_ip(endpoint.substr(0, colon_pos));
+        uint16_t port = 0;
+        std::from_chars(endpoint.data() + colon_pos + 1,
+                       endpoint.data() + endpoint.size(), port);
+        return {ip, port};
+    };
+
+    auto format_numeric_endpoint = [&](const std::string& endpoint) -> std::string {
+        auto [ip, port] = parse_endpoint(endpoint);
+        if (ip.empty()) return endpoint;
+
+        std::string label = ip;
+        if (port > 0) {
+            if (label.find(':') != std::string::npos && label.front() != '[') {
+                label = "[" + label + "]";
+            }
+            label += ":" + std::to_string(port);
+        }
+        return label;
+    };
+
+    auto format_remote_name = [&](const std::string& endpoint) -> std::string {
+        auto [ip, _port] = parse_endpoint(endpoint);
+        if (ip.empty()) return {};
+        const std::string host = name_resolver_.get_hostname(ip);
+        if (host.empty()) return "-";
+        return host;
+    };
+
+    auto fit = [](const std::string& text, const int width) -> std::string {
+        if (width <= 0) return {};
+        if (static_cast<int>(text.size()) <= width) return text;
+        if (width <= 3) return text.substr(0, width);
+        return text.substr(0, width - 3) + "...";
+    };
+
+    const int proto_w = 6;
+    const int state_w = 8;
+    const int gap = 1;
+    const int usable = max_x - 2 - 2 - proto_w - state_w - gap * 4;
+    const int min_addr_w = 8;
+    const int min_name_w = 4;
+
+    int addr_w = (usable > 0) ? std::max(min_addr_w, usable / 3) : min_addr_w;
+    int name_w = usable - addr_w * 2;
+    if (name_w < min_name_w) {
+        name_w = min_name_w;
+        addr_w = (usable - name_w) / 2;
+        if (addr_w < min_addr_w) addr_w = min_addr_w;
+        name_w = std::max(0, usable - addr_w * 2);
+    }
+
+    const int proto_x = 2;
+    const int local_x = proto_x + proto_w + gap;
+    const int remote_x = local_x + addr_w + gap;
+    const int remote_name_x = remote_x + addr_w + gap;
+    const int state_x = remote_name_x + name_w + gap;
+
     // Header
     wattron(details_win_, COLOR_PAIR(COLOR_PAIR_HEADER) | A_BOLD);
-    mvwprintw(details_win_, 3, 2, "%-8s %-25s %-25s %s", "Proto", "Local Address", "Remote Address", "State");
+    mvwprintw(details_win_, 3, proto_x, "%-*s", proto_w, fit("Proto", proto_w).c_str());
+    mvwprintw(details_win_, 3, local_x, "%-*s", addr_w, fit("Local Address", addr_w).c_str());
+    mvwprintw(details_win_, 3, remote_x, "%-*s", addr_w, fit("Remote Address", addr_w).c_str());
+    mvwprintw(details_win_, 3, remote_name_x, "%-*s", name_w, fit("Remote Name", name_w).c_str());
+    mvwprintw(details_win_, 3, state_x, "%-*s", state_w, fit("State", state_w).c_str());
     wattroff(details_win_, COLOR_PAIR(COLOR_PAIR_HEADER) | A_BOLD);
 
     if (connections.empty()) {
@@ -78,17 +153,15 @@ void TuiApp::render_network_tab() const {
 
         const auto& conn = connections[i];
 
-        std::string local = conn.local_endpoint;
-        std::string remote = conn.remote_endpoint;
+        std::string local = fit(format_numeric_endpoint(conn.local_endpoint), addr_w);
+        std::string remote = fit(format_numeric_endpoint(conn.remote_endpoint), addr_w);
+        std::string remote_name = fit(format_remote_name(conn.remote_endpoint), name_w);
 
-        if (local.length() > 25) local = local.substr(0, 22) + "...";
-        if (remote.length() > 25) remote = remote.substr(0, 22) + "...";
-
-        mvwprintw(details_win_, row, 2, "%-8s %-25s %-25s %s",
-                  conn.protocol.c_str(),
-                  local.c_str(),
-                  remote.c_str(),
-                  conn.state.c_str());
+        mvwprintw(details_win_, row, proto_x, "%-*s", proto_w, fit(conn.protocol, proto_w).c_str());
+        mvwprintw(details_win_, row, local_x, "%-*s", addr_w, local.c_str());
+        mvwprintw(details_win_, row, remote_x, "%-*s", addr_w, remote.c_str());
+        mvwprintw(details_win_, row, remote_name_x, "%-*s", name_w, remote_name.c_str());
+        mvwprintw(details_win_, row, state_x, "%-*s", state_w, fit(conn.state, state_w).c_str());
     }
 
     // Scroll indicators
