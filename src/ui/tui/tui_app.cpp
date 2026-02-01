@@ -1,0 +1,198 @@
+#include "tui_app.hpp"
+#include "tui_colors.hpp"
+#include <cassert>
+#include <csignal>
+#include <cstdlib>
+#include <cstring>
+#include <chrono>
+#include <thread>
+
+namespace pex {
+
+// Signal handler for terminal resize - use sig_atomic_t for signal safety
+static volatile sig_atomic_t g_resize_requested = 0;
+
+static void handle_resize([[maybe_unused]] int sig) {
+    g_resize_requested = 1;
+}
+
+TuiApp::TuiApp(DataStore* data_store,
+               ISystemDataProvider* system_provider,
+               IProcessDataProvider* details_provider,
+               IProcessKiller* killer)
+    : data_store_(data_store)
+    , system_provider_(system_provider)
+    , details_provider_(details_provider)
+    , killer_(killer)
+{
+    assert(data_store_ != nullptr);
+    assert(system_provider_ != nullptr);
+    assert(details_provider_ != nullptr);
+    assert(killer_ != nullptr);
+}
+
+TuiApp::~TuiApp() {
+    cleanup_windows();
+}
+
+void TuiApp::run() {
+    // Initialize ncurses
+    if (!initscr()) {
+        fprintf(stderr, "pexc: initscr() failed\n");
+        return;
+    }
+
+    cbreak();
+    noecho();
+    keypad(stdscr, TRUE);
+    curs_set(0);  // Hide cursor
+    nodelay(stdscr, TRUE);  // Non-blocking input
+    mouseinterval(200);  // Double-click timeout in milliseconds
+
+    // Enable mouse support (button presses and scroll wheel, not movement tracking)
+    mousemask(ALL_MOUSE_EVENTS, nullptr);
+    printf("\033[?1000h");
+    fflush(stdout);
+
+    // Initialize colors
+    init_colors();
+
+    // Set terminal title (like GUI version: "PEX: uname-info")
+    const std::string title = "PEX: " + system_provider_->get_system_info_string();
+    printf("\033]0;%s\007", title.c_str());
+    fflush(stdout);
+
+    // Set up resize handler
+    signal(SIGWINCH, handle_resize);
+
+    // Clear and refresh stdscr first to initialize the screen properly
+    clear();
+    refresh();
+
+    // Create windows
+    create_windows();
+
+    // Start background services
+    name_resolver_.start();
+    data_store_->start();
+
+    // Get initial data - wait for actual data (not just empty snapshot)
+    int retries = 50;  // 5 seconds max
+    current_data_ = data_store_->get_snapshot();
+    while (retries-- > 0 && (!current_data_ || current_data_->process_count == 0)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        current_data_ = data_store_->get_snapshot();
+    }
+
+    if (!current_data_ || current_data_->process_count == 0) {
+        // Restore terminal state before exiting
+        printf("\033[?1000l");  // Disable mouse tracking
+        printf("\033]0;\007");   // Reset terminal title
+        fflush(stdout);
+        endwin();
+        data_store_->stop();
+        name_resolver_.stop();
+        fprintf(stderr, "pexc: Failed to get process data from system\n");
+        return;
+    }
+
+    view_model_.update_from_snapshot(current_data_);
+
+    running_ = true;
+    auto last_update = std::chrono::steady_clock::now();
+    constexpr auto update_interval = std::chrono::milliseconds(100);
+
+    while (running_) {
+        // Handle terminal resize
+        if (g_resize_requested) {
+            g_resize_requested = 0;
+            endwin();
+            refresh();
+            resize_windows();
+        }
+
+        // Handle input (non-blocking)
+        if (const int ch = getch(); ch != ERR) {
+            handle_input(ch);
+        }
+
+        // Update data periodically
+        auto now = std::chrono::steady_clock::now();
+        if (now - last_update >= update_interval) {
+            const auto new_data = data_store_->get_snapshot();
+            if (new_data && (!current_data_ || new_data->timestamp != current_data_->timestamp)) {
+                current_data_ = new_data;
+                view_model_.update_from_snapshot(current_data_);
+            }
+            last_update = now;
+        }
+
+        // Render
+        render();
+
+        // Small sleep to reduce CPU usage
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
+
+    // Cleanup
+    data_store_->stop();
+    name_resolver_.stop();
+    cleanup_windows();
+
+    // Disable mouse tracking
+    printf("\033[?1000l");
+    fflush(stdout);
+
+    endwin();
+
+    // Reset terminal title
+    printf("\033]0;\007");
+    fflush(stdout);
+}
+
+void TuiApp::render() {
+    // Safety check: verify we have valid windows
+    if (!process_win_ || !details_win_ || !status_win_) {
+        // Terminal too small - create_windows() already showed message
+        // Just refresh so the "terminal too small" message stays visible
+        refresh();
+        return;
+    }
+
+    // Clear all windows
+    if (system_win_) werase(system_win_);
+    werase(process_win_);
+    werase(details_win_);
+    werase(status_win_);
+
+    // Render panels
+    if (view_model_.system_panel.is_visible && system_win_) {
+        render_system_panel();
+    }
+
+    render_process_tree();
+
+    render_details_panel();
+    render_status_bar();
+
+    // Refresh all windows
+    if (system_win_) wrefresh(system_win_);
+    wrefresh(process_win_);
+    wrefresh(details_win_);
+    wrefresh(status_win_);
+
+    // Render overlays AFTER main window refresh
+    if (view_model_.kill_dialog.is_visible) {
+        render_kill_dialog();
+    }
+
+    if (show_help_) {
+        render_help_overlay();
+    }
+
+    if (search_mode_) {
+        render_search_bar();
+    }
+}
+
+} // namespace pex
