@@ -83,19 +83,26 @@ std::string NameResolver::get_hostname(const std::string& ip) {
     }
 
     {
+        const auto now = std::chrono::steady_clock::now();
         std::lock_guard lock(dns_mutex_);
-        if (const auto it = dns_cache_.find(normalized); it != dns_cache_.end()) {
-            if (it->second == kResolving) {
-                return {};  // Still resolving
+        if (auto it = dns_cache_.find(normalized); it != dns_cache_.end()) {
+            if (it->second.expires <= now) {
+                dns_cache_.erase(it);
+            } else {
+                it->second.last_used = now;
+                if (it->second.value == kResolving) {
+                    return {};  // Still resolving
+                }
+                if (it->second.value == kNotFound) {
+                    return {};  // Resolution failed, return empty
+                }
+                return it->second.value;  // Return cached hostname
             }
-            if (it->second == kNotFound) {
-                return {};  // Resolution failed, return empty
-            }
-            return it->second;  // Return cached hostname
         }
 
         // Mark as resolving and queue for resolution
-        dns_cache_[normalized] = kResolving;
+        dns_cache_[normalized] = {kResolving, now, now + kResolvingTtl};
+        evict_if_needed();
     }
 
     {
@@ -105,6 +112,18 @@ std::string NameResolver::get_hostname(const std::string& ip) {
     queue_cv_.notify_one();
 
     return {};  // Will be resolved asynchronously
+}
+
+void NameResolver::evict_if_needed() {
+    while (dns_cache_.size() > kMaxCacheEntries) {
+        auto oldest_it = dns_cache_.begin();
+        for (auto it = dns_cache_.begin(); it != dns_cache_.end(); ++it) {
+            if (it->second.last_used < oldest_it->second.last_used) {
+                oldest_it = it;
+            }
+        }
+        dns_cache_.erase(oldest_it);
+    }
 }
 
 void NameResolver::resolver_thread() {
@@ -159,14 +178,20 @@ void NameResolver::resolver_thread() {
             }
         }
 
+        const auto now = std::chrono::steady_clock::now();
+
         // Update cache
         {
             std::lock_guard lock(dns_mutex_);
-            dns_cache_[ip] = hostname.empty() ? kNotFound : hostname;
+            if (hostname.empty()) {
+                dns_cache_[ip] = {kNotFound, now, now + kNotFoundTtl};
+            } else {
+                dns_cache_[ip] = {hostname, now, now + kResolveTtl};
+            }
+            evict_if_needed();
         }
 
         // Throttle notifications to reduce UI wakeups
-        auto now = std::chrono::steady_clock::now();
         if (on_resolved_) {
             if (now - last_notify_time_ >= kNotifyInterval) {
                 last_notify_time_ = now;

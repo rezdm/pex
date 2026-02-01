@@ -10,14 +10,15 @@
 #include <set>
 #include <thread>
 #include <charconv>
+#include <sstream>
 
 namespace fs = std::filesystem;
 
 namespace pex {
 
-int LinuxProcessKiller::get_ppid(int pid) {
+bool LinuxProcessKiller::read_proc_meta(const int pid, ProcMeta& out) {
     std::ifstream file("/proc/" + std::to_string(pid) + "/stat");
-    if (!file) return -1;
+    if (!file) return false;
 
     std::string content;
     std::getline(file, content);
@@ -25,21 +26,48 @@ int LinuxProcessKiller::get_ppid(int pid) {
     // Format: pid (comm) state ppid ...
     // comm can contain spaces/parens, so find last ')'
     size_t comm_end = content.rfind(')');
-    if (comm_end == std::string::npos) return -1;
+    if (comm_end == std::string::npos) return false;
 
     std::istringstream iss(content.substr(comm_end + 2));
     std::string state;
-    int ppid;
-    iss >> state >> ppid;
-    return ppid;
+    int ppid = 0, pgrp = 0, session = 0, tty_nr = 0, tpgid = 0;
+    unsigned int flags = 0;
+    uint64_t minflt = 0, cminflt = 0, majflt = 0, cmajflt = 0, utime = 0, stime = 0;
+    int64_t cutime = 0, cstime = 0, priority = 0, nice = 0;
+    int64_t num_threads = 0, itrealvalue = 0;
+    uint64_t starttime = 0;
+
+    iss >> state >> ppid >> pgrp >> session >> tty_nr >> tpgid >> flags
+        >> minflt >> cminflt >> majflt >> cmajflt >> utime >> stime
+        >> cutime >> cstime >> priority >> nice >> num_threads >> itrealvalue >> starttime;
+
+    if (iss.fail()) {
+        return false;
+    }
+
+    out.ppid = ppid;
+    out.starttime = starttime;
+    return true;
 }
 
-void LinuxProcessKiller::collect_descendants_from_proc(const int root_pid, std::vector<int>& result) {
-    // Build parent -> children map by scanning /proc
-    std::map<int, std::vector<int>> children_map;
+int LinuxProcessKiller::get_ppid(int pid) {
+    ProcMeta meta;
+    if (!read_proc_meta(pid, meta)) return -1;
+    return meta.ppid;
+}
 
+bool LinuxProcessKiller::is_same_process(const int pid, const uint64_t starttime) {
+    ProcMeta meta;
+    if (!read_proc_meta(pid, meta)) return false;
+    return meta.starttime == starttime;
+}
+
+void LinuxProcessKiller::collect_descendants_from_proc(const int root_pid,
+                                                       std::vector<int>& result,
+                                                       std::map<int, std::vector<int>>& children_map,
+                                                       std::map<int, uint64_t>& start_times) {
+    // Build parent -> children map by scanning /proc
     try {
-        std::set<int> all_pids;
         for (const auto& entry : fs::directory_iterator("/proc")) {
             try {
                 if (!entry.is_directory()) continue;
@@ -49,10 +77,12 @@ void LinuxProcessKiller::collect_descendants_from_proc(const int root_pid, std::
                 auto [ptr, ec] = std::from_chars(name.data(), name.data() + name.size(), pid);
                 if (ec != std::errc{} || ptr != name.data() + name.size()) continue;
 
-                all_pids.insert(pid);
-                int ppid = get_ppid(pid);
-                if (ppid > 0) {
-                    children_map[ppid].push_back(pid);
+                ProcMeta meta;
+                if (!read_proc_meta(pid, meta)) continue;
+
+                start_times[pid] = meta.starttime;
+                if (meta.ppid > 0) {
+                    children_map[meta.ppid].push_back(pid);
                 }
             } catch (...) {
                 // Process disappeared, skip it
@@ -142,23 +172,17 @@ KillResult LinuxProcessKiller::kill_process_tree(int pid, bool force) {
         return result;
     }
 
-    // Build fresh parent -> children map from /proc
+    // Build fresh parent -> children map and capture start times from /proc
     std::map<int, std::vector<int>> children_map;
-    std::set<int> descendant_set;
+    std::map<int, uint64_t> start_times;
 
     // First pass: collect all descendants
     std::vector<int> descendants;
-    collect_descendants_from_proc(pid, descendants);
-
-    for (int p : descendants) {
-        descendant_set.insert(p);
-    }
-
-    // Second pass: build children map only for descendants
-    for (int p : descendants) {
-        if (int ppid = get_ppid(p); ppid > 0 && descendant_set.contains(ppid)) {
-            children_map[ppid].push_back(p);
-        }
+    collect_descendants_from_proc(pid, descendants, children_map, start_times);
+    if (descendants.empty() || !start_times.contains(pid)) {
+        result.success = false;
+        result.error_message = "Process not found. It may have already terminated.";
+        return result;
     }
 
     // Post-order traversal to get kill order (children before parents)
@@ -181,32 +205,61 @@ KillResult LinuxProcessKiller::kill_process_tree(int pid, bool force) {
 
     // Kill in post-order (leaves first, root last)
     const int signal = force ? SIGKILL : SIGTERM;
+    int skipped = 0;
+    int failed = 0;
     for (const int p : kill_order) {
-        kill(p, signal);
+        auto it = start_times.find(p);
+        if (it == start_times.end()) {
+            skipped++;
+            continue;
+        }
+        if (!is_same_process(p, it->second)) {
+            skipped++;
+            continue;
+        }
+        if (kill(p, signal) == -1 && errno != ESRCH) {
+            failed++;
+        }
     }
 
     // Check if root process was killed successfully
-    if (kill(pid, 0) == 0) {
-        // Process still exists - if we used SIGTERM, offer force kill
-        if (!force) {
-            result.success = true;
+    bool root_same = false;
+    if (auto it = start_times.find(pid); it != start_times.end()) {
+        root_same = is_same_process(pid, it->second);
+    }
+
+    if (root_same) {
+        const int check = kill(pid, 0);
+        if (check == -1 && errno == EPERM) {
+            result.success = false;
             result.process_still_running = true;
-            result.error_message = "SIGTERM sent. Process may still be running. Use Force Kill (SIGKILL) if it doesn't terminate.";
+            result.error_message = get_kill_error_message(errno);
             return result;
         }
-        result.success = false;
-        result.process_still_running = true;
-        result.error_message = "Process tree kill failed - some processes may still be running";
-        return result;
-    } else if (errno == ESRCH) {
-        // Process gone - success
-        result.success = true;
-        result.process_still_running = false;
-        return result;
+        if (check == 0) {
+            // Process still exists - if we used SIGTERM, offer force kill
+            if (!force) {
+                result.success = true;
+                result.process_still_running = true;
+                result.error_message = "SIGTERM sent. Process may still be running. Use Force Kill (SIGKILL) if it doesn't terminate.";
+                return result;
+            }
+            result.success = false;
+            result.process_still_running = true;
+            result.error_message = "Process tree kill failed - some processes may still be running";
+            return result;
+        }
     }
 
     result.success = true;
     result.process_still_running = false;
+
+    if ((skipped > 0 || failed > 0) && result.error_message.empty()) {
+        result.error_message = std::format(
+            "Kill tree completed with warnings: skipped {} process(es), failed to signal {} process(es).",
+            skipped, failed);
+    }
+
     return result;
 }
 

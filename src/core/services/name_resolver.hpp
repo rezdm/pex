@@ -35,9 +35,16 @@ public:
 private:
     void resolver_thread();
     void load_services();
+    void evict_if_needed();
 
-    // DNS cache: IP -> hostname (empty string means "resolving", special value means "not found")
-    std::map<std::string, std::string> dns_cache_;
+    struct DnsEntry {
+        std::string value;
+        std::chrono::steady_clock::time_point last_used;
+        std::chrono::steady_clock::time_point expires;
+    };
+
+    // DNS cache: IP -> hostname (value == kResolving means "in progress", kNotFound means "not found")
+    std::map<std::string, DnsEntry> dns_cache_;
     std::mutex dns_mutex_;
 
     // Services cache: "port/protocol" -> service name
@@ -62,6 +69,10 @@ private:
 
     static constexpr const char* kResolving = "\x01";  // Sentinel for "in progress"
     static constexpr const char* kNotFound = "\x02";   // Sentinel for "resolution failed"
+    static constexpr auto kResolveTtl = std::chrono::minutes(5);
+    static constexpr auto kNotFoundTtl = std::chrono::minutes(1);
+    static constexpr auto kResolvingTtl = std::chrono::seconds(30);
+    static constexpr size_t kMaxCacheEntries = 2048;
 };
 
 } // namespace pex
