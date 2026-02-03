@@ -39,7 +39,6 @@ make -j$(nproc)
 ```bash
   -DPEX_PLATFORM=freebsd  # FreeBSD
   -DPEX_PLATFORM=solaris  # Solaris
-  -DPEX_PLATFORM=stub     # Stub (default on other platforms)
 ```
 
 #### FreeBSD

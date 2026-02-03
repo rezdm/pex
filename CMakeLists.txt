@@ -14,10 +14,10 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
 elseif(CMAKE_SYSTEM_NAME STREQUAL "SunOS")
     set(PEX_PLATFORM_DEFAULT "solaris")
 else()
-    set(PEX_PLATFORM_DEFAULT "stub")
+    message(FATAL_ERROR "Unsupported platform: ${CMAKE_SYSTEM_NAME}. Supported: Linux, FreeBSD, SunOS (Solaris).")
 endif()
-set(PEX_PLATFORM "${PEX_PLATFORM_DEFAULT}" CACHE STRING "Platform backend (linux, freebsd, solaris, stub)")
-set_property(CACHE PEX_PLATFORM PROPERTY STRINGS linux freebsd solaris stub)
+set(PEX_PLATFORM "${PEX_PLATFORM_DEFAULT}" CACHE STRING "Platform backend (linux, freebsd, solaris)")
+set_property(CACHE PEX_PLATFORM PROPERTY STRINGS linux freebsd solaris)
 
 message(STATUS "PEX platform: ${PEX_PLATFORM}")
 
@@ -153,15 +153,8 @@ elseif(PEX_PLATFORM STREQUAL "solaris")
     set(PEX_PLATFORM_LIBS kstat rt)
     # GLFW needs rt on Solaris
     target_link_libraries(glfw PUBLIC rt)
-elseif(PEX_PLATFORM STREQUAL "stub")
-    set(PEX_PLATFORM_SOURCES
-        src/platform/stub/stub_providers.cpp
-        src/platform/stub/platform_factory_stub.cpp
-    )
-    set(PEX_PLATFORM_DEFINE "PEX_PLATFORM_STUB")
-    set(PEX_PLATFORM_LIBS "")
 else()
-    message(FATAL_ERROR "Unknown PEX_PLATFORM: ${PEX_PLATFORM}. Use 'linux', 'freebsd', 'solaris', or 'stub'.")
+    message(FATAL_ERROR "Unknown PEX_PLATFORM: ${PEX_PLATFORM}. Use 'linux', 'freebsd', or 'solaris'.")
 endif()
 
 add_library(pex_platform STATIC ${PEX_PLATFORM_SOURCES})
