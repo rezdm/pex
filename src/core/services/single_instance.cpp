@@ -90,6 +90,7 @@ bool SingleInstance::try_become_primary() {
 }
 
 void SingleInstance::set_raise_callback(std::function<void()> callback) {
+    std::lock_guard lock(callback_mutex_);
     raise_callback_ = std::move(callback);
 }
 
@@ -111,8 +112,13 @@ void SingleInstance::listen_thread() const {
         if (n > 0) {
             buffer[n] = '\0';
             if (strncmp(buffer, "RAISE", 5) == 0) {
-                if (raise_callback_) {
-                    raise_callback_();
+                std::function<void()> cb;
+                {
+                    std::lock_guard lock(callback_mutex_);
+                    cb = raise_callback_;
+                }
+                if (cb) {
+                    cb();
                 }
             }
         }

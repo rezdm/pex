@@ -8,7 +8,11 @@
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
     // Ignore SIGCHLD to avoid zombies when killing processes
-    signal(SIGCHLD, SIG_IGN);
+    struct sigaction sa{};
+    sa.sa_handler = SIG_IGN;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_NOCLDWAIT;
+    sigaction(SIGCHLD, &sa, nullptr);
 
     try {
         // Create platform-specific providers (owned here in main)
@@ -26,12 +30,15 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
         return 0;
     } catch (const std::exception& e) {
         // Make sure we restore terminal state before printing error
-        // Disable mouse tracking
-        std::printf("\033[?1000l");
-        // Reset terminal title
-        std::printf("\033]0;\007");
-        std::fflush(stdout);
-        endwin();
+        // Only call endwin() if ncurses was initialized
+        if (stdscr != nullptr) {
+            // Disable mouse tracking
+            std::printf("\033[?1000l");
+            // Reset terminal title
+            std::printf("\033]0;\007");
+            std::fflush(stdout);
+            endwin();
+        }
         std::cerr << "Error: " << e.what() << std::endl;
         return 1;
     }

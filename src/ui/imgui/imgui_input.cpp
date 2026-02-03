@@ -105,12 +105,14 @@ std::vector<ProcessNode*> ImGuiApp::find_matching_processes() const {
     if (!current_data_ || pl.search_buffer[0] == '\0') return matches;
 
     std::string search_lower = pl.search_buffer;
-    std::ranges::transform(search_lower, search_lower.begin(), ::tolower);
+    std::ranges::transform(search_lower, search_lower.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
 
     const auto visible = get_visible_items();
     for (auto* node : visible) {
         std::string name_lower = node->info.name;
-        std::ranges::transform(name_lower, name_lower.begin(), ::tolower);
+        std::ranges::transform(name_lower, name_lower.begin(),
+                               [](unsigned char c) { return std::tolower(c); });
         if (name_lower.find(search_lower) != std::string::npos) {
             matches.push_back(node);
         }
@@ -126,7 +128,8 @@ bool ImGuiApp::current_selection_matches() const {
     if (it == current_data_->process_map.end()) return false;
 
     std::string search_lower = pl.search_buffer;
-    std::ranges::transform(search_lower, search_lower.begin(), ::tolower);
+    std::ranges::transform(search_lower, search_lower.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
 
     std::string name_lower = it->second->info.name;
     std::ranges::transform(name_lower, name_lower.begin(), ::tolower);

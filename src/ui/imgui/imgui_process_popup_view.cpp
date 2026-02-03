@@ -47,8 +47,9 @@ void ImGuiApp::update_popup_history() {
     }
 
     if (pp.prev_utime > 0) {
-        const uint64_t user_delta = total_utime - pp.prev_utime;
-        const uint64_t kernel_delta = total_stime - pp.prev_stime;
+        // Guard against PID reuse: if times decreased, treat delta as zero
+        const uint64_t user_delta = (total_utime >= pp.prev_utime) ? total_utime - pp.prev_utime : 0;
+        const uint64_t kernel_delta = (total_stime >= pp.prev_stime) ? total_stime - pp.prev_stime : 0;
 
         const long ticks_per_sec = system_provider_->get_clock_ticks_per_second();
         const unsigned int cpu_count = system_provider_->get_processor_count();

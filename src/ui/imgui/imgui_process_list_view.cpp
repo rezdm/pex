@@ -253,7 +253,7 @@ void ImGuiApp::render_process_list() {
                 int result = 0;
                 switch (column) {
                     case 0: result = a->info.name.compare(b->info.name); break;
-                    case 1: result = a->info.pid - b->info.pid; break;
+                    case 1: result = (a->info.pid < b->info.pid) ? -1 : (a->info.pid > b->info.pid) ? 1 : 0; break;
                     case 2: result = (a->info.cpu_percent < b->info.cpu_percent) ? -1 : (a->info.cpu_percent > b->info.cpu_percent) ? 1 : 0; break;
                     case 3: result = (a->info.total_cpu_percent < b->info.total_cpu_percent) ? -1 : (a->info.total_cpu_percent > b->info.total_cpu_percent) ? 1 : 0; break;
                     case 4: result = (a->info.resident_memory < b->info.resident_memory) ? -1 : (a->info.resident_memory > b->info.resident_memory) ? 1 : 0; break;
@@ -262,7 +262,7 @@ void ImGuiApp::render_process_list() {
                     case 7: result = (a->tree_total_cpu_percent < b->tree_total_cpu_percent) ? -1 : (a->tree_total_cpu_percent > b->tree_total_cpu_percent) ? 1 : 0; break;
                     case 8: result = (a->tree_working_set < b->tree_working_set) ? -1 : (a->tree_working_set > b->tree_working_set) ? 1 : 0; break;
                     case 9: result = (a->tree_memory_percent < b->tree_memory_percent) ? -1 : (a->tree_memory_percent > b->tree_memory_percent) ? 1 : 0; break;
-                    case 10: result = a->info.thread_count - b->info.thread_count; break;
+                    case 10: result = (a->info.thread_count < b->info.thread_count) ? -1 : (a->info.thread_count > b->info.thread_count) ? 1 : 0; break;
                     case 11: result = a->info.user_name.compare(b->info.user_name); break;
                     case 12: result = a->info.state_char - b->info.state_char; break;
                     case 13: result = a->info.executable_path.compare(b->info.executable_path); break;

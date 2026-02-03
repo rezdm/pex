@@ -235,7 +235,10 @@ PfilesParseResult parse_pfiles(int pid) {
     }
 
     flush_socket();
-    pclose(pipe);
+    int status = pclose(pipe);
+    if (status != 0 && result.handles.empty() && result.connections.empty()) {
+        // pfiles command failed - may not be available or insufficient privileges
+    }
     return result;
 }
 
@@ -434,6 +437,12 @@ std::vector<FileHandleInfo> SolarisProcessDataProvider::get_file_handles(int pid
     return handles;
 }
 
+// Solaris network connection detection limitations:
+// - Cannot determine TCP connection state (LISTEN, TIME_WAIT, etc.) via fd inspection;
+//   only ESTABLISHED vs unknown is reported based on getpeername() success.
+// - Falls back to parsing pfiles(1) output when /proc/PID/fd inspection yields no results,
+//   which is slower and may miss some connections.
+// - Unix domain sockets are not reported.
 std::vector<NetworkConnectionInfo> SolarisProcessDataProvider::get_network_connections([[maybe_unused]] int pid) {
     std::vector<NetworkConnectionInfo> connections;
     std::string fd_path = "/proc/" + std::to_string(pid) + "/fd";
@@ -610,7 +619,10 @@ std::vector<EnvironmentVariable> SolarisProcessDataProvider::get_environment_var
         env.push_back(std::move(ev));
     }
 
-    pclose(pipe);
+    int status = pclose(pipe);
+    if (status != 0 && env.empty()) {
+        add_error("get_environment_variables", "pargs command failed (exit status " + std::to_string(status) + ")");
+    }
     return env;
 }
 

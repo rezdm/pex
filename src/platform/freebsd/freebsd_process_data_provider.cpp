@@ -52,10 +52,13 @@ std::string FreeBSDProcessDataProvider::get_username(uid_t uid) {
         }
     }
 
-    // Lookup and cache
+    // Lookup using reentrant version and cache
     std::string name;
-    if (const passwd* pw = getpwuid(uid)) {
-        name = pw->pw_name;
+    struct passwd pwd_buf;
+    struct passwd* result = nullptr;
+    char buf[1024];
+    if (getpwuid_r(uid, &pwd_buf, buf, sizeof(buf), &result) == 0 && result) {
+        name = result->pw_name;
     } else {
         name = std::to_string(uid);
     }
@@ -135,9 +138,13 @@ std::vector<ProcessInfo> FreeBSDProcessDataProvider::get_all_processes(int64_t t
         auto start_sec = std::chrono::seconds(kp[i].ki_start.tv_sec);
         info.start_time = std::chrono::system_clock::time_point(start_sec);
 
-        // Try to get full command line using procstat
-        struct procstat* ps = procstat_open_sysctl();
-        if (ps) {
+        processes.push_back(std::move(info));
+    }
+
+    // Fetch command lines in bulk using a single procstat handle
+    struct procstat* ps = procstat_open_sysctl();
+    if (ps) {
+        for (auto& info : processes) {
             unsigned int cnt;
             kinfo_proc* kproc = procstat_getprocs(ps, KERN_PROC_PID, info.pid, &cnt);
             if (kproc && cnt > 0) {
@@ -156,14 +163,14 @@ std::vector<ProcessInfo> FreeBSDProcessDataProvider::get_all_processes(int64_t t
                 }
                 procstat_freeprocs(ps, kproc);
             }
-            procstat_close(ps);
         }
+        procstat_close(ps);
+    }
 
+    for (auto& info : processes) {
         if (info.command_line.empty()) {
             info.command_line = info.name;
         }
-
-        processes.push_back(std::move(info));
     }
 
     return processes;

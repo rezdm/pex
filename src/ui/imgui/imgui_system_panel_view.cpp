@@ -16,7 +16,7 @@ void ImGuiApp::render_system_panel() const {
     auto format_compact = [](int64_t bytes) -> std::string {
         if (bytes < 1024) return std::format("{}B", bytes);
         if (bytes < 1024 * 1024) return std::format("{:.0f}K", bytes / 1024.0);
-        if (bytes < 1024LL * 1024 * 1024) return std::format("{:.2f}G", bytes / (1024.0 * 1024 * 1024));
+        if (bytes < 1024LL * 1024 * 1024) return std::format("{:.1f}M", bytes / (1024.0 * 1024));
         return std::format("{:.2f}G", bytes / (1024.0 * 1024 * 1024));
     };
 
@@ -115,9 +115,11 @@ void ImGuiApp::render_system_panel() const {
             const uint64_t mins = secs / 60;
             secs %= 60;
             if (days > 0) {
-                ImGui::Text("Uptime: %lu day%s, %02lu:%02lu:%02lu", days, days > 1 ? "s" : "", hours, mins, secs);
+                const auto uptime_str = std::format("Uptime: {} day{}, {:02}:{:02}:{:02}", days, days > 1 ? "s" : "", hours, mins, secs);
+                ImGui::TextUnformatted(uptime_str.c_str());
             } else {
-                ImGui::Text("Uptime: %02lu:%02lu:%02lu", hours, mins, secs);
+                const auto uptime_str = std::format("Uptime: {:02}:{:02}:{:02}", hours, mins, secs);
+                ImGui::TextUnformatted(uptime_str.c_str());
             }
 
             ImGui::EndTable();

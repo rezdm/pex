@@ -4,6 +4,7 @@
 #include <functional>
 #include <thread>
 #include <atomic>
+#include <mutex>
 
 namespace pex {
 
@@ -26,6 +27,7 @@ private:
 
     int server_fd_ = -1;
     std::string socket_path_;
+    mutable std::mutex callback_mutex_;
     std::function<void()> raise_callback_;
     std::thread listener_;
     std::atomic<bool> running_{false};

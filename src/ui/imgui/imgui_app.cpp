@@ -2,6 +2,7 @@
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
+#include "../../core/format_utils.hpp"
 #include <GLFW/glfw3.h>
 #include <format>
 #include <ctime>
@@ -192,10 +193,7 @@ void ImGuiApp::post_empty_event_debounced() {
 }
 
 std::string ImGuiApp::format_bytes(int64_t bytes) {
-    if (bytes < 1024) return std::format("{} B", bytes);
-    if (bytes < 1024 * 1024) return std::format("{:.1f} KB", bytes / 1024.0);
-    if (bytes < 1024LL * 1024 * 1024) return std::format("{:.1f} MB", bytes / (1024.0 * 1024));
-    return std::format("{:.2f} GB", bytes / (1024.0 * 1024 * 1024));
+    return pex::format_bytes(bytes, false);  // readable format for GUI
 }
 
 std::string ImGuiApp::format_time(const std::chrono::system_clock::time_point tp) {

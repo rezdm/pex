@@ -259,14 +259,4 @@ void TuiApp::render_process_tree() {
     }
 }
 
-void TuiApp::render_process_tree_node(ProcessNode& node, int depth, int& row,
-                                      const std::vector<bool>& connector_state) {
-    // Not used - rendering is done inline in render_process_tree()
-    // Kept for interface compatibility
-    (void)node;
-    (void)depth;
-    (void)row;
-    (void)connector_state;
-}
-
 } // namespace pex

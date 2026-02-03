@@ -32,6 +32,7 @@ void NameResolver::stop() {
 }
 
 void NameResolver::set_on_resolved(std::function<void()> callback) {
+    std::lock_guard lock(callback_mutex_);
     on_resolved_ = std::move(callback);
 }
 
@@ -148,8 +149,13 @@ void NameResolver::resolver_thread() {
 
         // Check if we need to flush pending notification (even if no work)
         if (ip.empty()) {
-            if (pending_notify_.exchange(false) && on_resolved_) {
-                on_resolved_();
+            if (pending_notify_.exchange(false)) {
+                std::function<void()> cb;
+                {
+                    std::lock_guard lock(callback_mutex_);
+                    cb = on_resolved_;
+                }
+                if (cb) cb();
             }
             continue;
         }
@@ -192,14 +198,20 @@ void NameResolver::resolver_thread() {
         }
 
         // Throttle notifications to reduce UI wakeups
-        if (on_resolved_) {
-            if (now - last_notify_time_ >= kNotifyInterval) {
-                last_notify_time_ = now;
-                pending_notify_ = false;
-                on_resolved_();
-            } else {
-                // Mark pending, will be flushed on next timeout
-                pending_notify_ = true;
+        {
+            std::function<void()> cb;
+            {
+                std::lock_guard lock(callback_mutex_);
+                cb = on_resolved_;
+            }
+            if (cb) {
+                if (now - last_notify_time_ >= kNotifyInterval) {
+                    last_notify_time_ = now;
+                    pending_notify_ = false;
+                    cb();
+                } else {
+                    pending_notify_ = true;
+                }
             }
         }
     }

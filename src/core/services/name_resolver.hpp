@@ -59,7 +59,8 @@ private:
     std::thread resolver_thread_;
     std::atomic<bool> running_{false};
 
-    // Callback when resolution completes
+    // Callback when resolution completes (protected by callback_mutex_)
+    std::mutex callback_mutex_;
     std::function<void()> on_resolved_;
 
     // Throttle notifications to reduce UI wakeups

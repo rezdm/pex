@@ -62,8 +62,12 @@ void TuiApp::run() {
     printf("\033]0;%s\007", title.c_str());
     fflush(stdout);
 
-    // Set up resize handler
-    signal(SIGWINCH, handle_resize);
+    // Set up resize handler using sigaction for portable behavior
+    struct sigaction sa_resize{};
+    sa_resize.sa_handler = handle_resize;
+    sigemptyset(&sa_resize.sa_mask);
+    sa_resize.sa_flags = SA_RESTART;
+    sigaction(SIGWINCH, &sa_resize, nullptr);
 
     // Clear and refresh stdscr first to initialize the screen properly
     clear();

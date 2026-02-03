@@ -1,5 +1,6 @@
 #include "tui_app.hpp"
 #include "tui_colors.hpp"
+#include "../../core/format_utils.hpp"
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
@@ -82,26 +83,7 @@ void TuiApp::draw_cpu_bar(WINDOW* win, int y, int x, int width,
 }
 
 std::string TuiApp::format_bytes(int64_t bytes) {
-    const char* units[] = {"B", "K", "M", "G", "T", "P"};
-    int unit_idx = 0;
-    auto size = static_cast<double>(bytes);
-
-    while (size >= 1024.0 && unit_idx < 5) {
-        size /= 1024.0;
-        unit_idx++;
-    }
-
-    std::ostringstream oss;
-    if (unit_idx == 0) {
-        oss << bytes << units[unit_idx];
-    } else if (size >= 100.0) {
-        oss << std::fixed << std::setprecision(0) << size << units[unit_idx];
-    } else if (size >= 10.0) {
-        oss << std::fixed << std::setprecision(1) << size << units[unit_idx];
-    } else {
-        oss << std::fixed << std::setprecision(2) << size << units[unit_idx];
-    }
-    return oss.str();
+    return pex::format_bytes(bytes, true);  // compact format for TUI
 }
 
 std::string TuiApp::format_uptime(int64_t seconds) {
