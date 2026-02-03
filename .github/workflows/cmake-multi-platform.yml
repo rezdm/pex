@@ -79,7 +79,7 @@ jobs:
         prepare: |
           pkg install -y \
             cmake git pkgconf \
-            glfw mesa-libs \
+            glfw mesa-libs mesa-devel libglvnd \
             libX11 libXrandr libXinerama libXcursor libXi xorgproto \
             ncurses
         run: |
