@@ -25,8 +25,13 @@ jobs:
           libwayland-dev libxkbcommon-dev wayland-protocols libdecor-0-dev \
           libncurses-dev
 
+    - name: Set up ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: ubuntu-latest
+
     - name: Configure
-      run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
     - name: Build
       run: cmake --build build -j$(nproc)
@@ -35,6 +40,9 @@ jobs:
       run: |
         test -f build/pex && echo "pex: OK"
         test -f build/pexc && echo "pexc: OK"
+
+    - name: ccache stats
+      run: ccache --show-stats
 
   build-debian:
     name: Debian (latest)
@@ -48,14 +56,19 @@ jobs:
       run: |
         apt-get update
         apt-get install -y \
-          cmake g++ git pkg-config \
+          cmake g++ git pkg-config ccache \
           libgl-dev libglfw3-dev \
           libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
           libwayland-dev libxkbcommon-dev wayland-protocols libdecor-0-dev \
           libncurses-dev
 
+    - name: Set up ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: debian-latest
+
     - name: Configure
-      run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
     - name: Build
       run: cmake --build build -j$(nproc)
@@ -64,6 +77,9 @@ jobs:
       run: |
         test -f build/pex && echo "pex: OK"
         test -f build/pexc && echo "pexc: OK"
+
+    - name: ccache stats
+      run: ccache --show-stats
 
   build-freebsd:
     name: FreeBSD (latest)
@@ -78,15 +94,16 @@ jobs:
         usesh: true
         prepare: |
           pkg install -y \
-            cmake git pkgconf \
+            cmake git pkgconf ccache \
             glfw mesa-libs mesa-devel libglvnd \
             libX11 libXrandr libXinerama libXcursor libXi xorgproto \
             ncurses
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build -j$(sysctl -n hw.ncpu)
           test -f build/pex && echo "pex: OK"
           test -f build/pexc && echo "pexc: OK"
+          ccache --show-stats
 
   build-solaris:
     name: Solaris x86 (latest)
