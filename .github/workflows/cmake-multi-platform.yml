@@ -48,7 +48,7 @@ jobs:
       run: |
         apt-get update
         apt-get install -y \
-          cmake g++ git \
+          cmake g++ git pkg-config \
           libgl-dev libglfw3-dev \
           libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
           libwayland-dev libxkbcommon-dev wayland-protocols libdecor-0-dev \
@@ -78,7 +78,7 @@ jobs:
         usesh: true
         prepare: |
           pkg install -y \
-            cmake pkgconf \
+            cmake git pkgconf \
             glfw mesa-libs \
             libX11 libXrandr libXinerama libXcursor libXi xorgproto \
             ncurses
