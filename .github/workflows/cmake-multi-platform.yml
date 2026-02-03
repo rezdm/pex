@@ -1,0 +1,117 @@
+name: CMake Multi-Platform Build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-ubuntu:
+    name: Ubuntu (latest)
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake g++ \
+          libgl-dev libglfw3-dev \
+          libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+          libwayland-dev libxkbcommon-dev wayland-protocols libdecor-0-dev \
+          libncurses-dev
+
+    - name: Configure
+      run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build
+      run: cmake --build build -j$(nproc)
+
+    - name: Verify binaries
+      run: |
+        test -f build/pex && echo "pex: OK"
+        test -f build/pexc && echo "pexc: OK"
+
+  build-debian:
+    name: Debian (latest)
+    runs-on: ubuntu-latest
+    container: debian:latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        apt-get update
+        apt-get install -y \
+          cmake g++ git \
+          libgl-dev libglfw3-dev \
+          libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+          libwayland-dev libxkbcommon-dev wayland-protocols libdecor-0-dev \
+          libncurses-dev
+
+    - name: Configure
+      run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build
+      run: cmake --build build -j$(nproc)
+
+    - name: Verify binaries
+      run: |
+        test -f build/pex && echo "pex: OK"
+        test -f build/pexc && echo "pexc: OK"
+
+  build-freebsd:
+    name: FreeBSD (latest)
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build on FreeBSD
+      uses: vmactions/freebsd-vm@v1
+      with:
+        usesh: true
+        prepare: |
+          pkg install -y \
+            cmake pkgconf \
+            glfw mesa-libs \
+            libX11 libXrandr libXinerama libXcursor libXi xorgproto \
+            ncurses
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j$(sysctl -n hw.ncpu)
+          test -f build/pex && echo "pex: OK"
+          test -f build/pexc && echo "pexc: OK"
+
+  build-solaris:
+    name: Solaris x86 (latest)
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build on Solaris
+      uses: vmactions/solaris-vm@v1
+      with:
+        prepare: |
+          pkg install developer/gcc
+          pkg install developer/build/cmake
+          pkg install developer/build/gnu-make
+          pkg install system/header
+          pkg install x11/header
+          pkg install x11/library/libx11
+          pkg install x11/library/libxrandr
+          pkg install x11/library/libxinerama
+          pkg install x11/library/libxcursor
+          pkg install x11/library/libxi
+          pkg install library/mesa
+        run: |
+          export PATH="/usr/gcc/*/bin:$PATH"
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_NCURSES=ON
+          cmake --build build -j$(psrinfo -p)
+          test -f build/pex && echo "pex: OK"
+          test -f build/pexc && echo "pexc: OK"
