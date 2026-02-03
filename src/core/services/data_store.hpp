@@ -31,10 +31,14 @@ struct ProcessNode {
     [[nodiscard]] std::unique_ptr<ProcessNode> clone() const;
 };
 
-// Snapshot of all system data - returned to UI
+// Snapshot of all system data - returned to UI.
+// INVARIANT: process_map contains raw pointers into process_tree.
+// These pointers remain valid for the lifetime of this DataSnapshot,
+// because process_tree owns the nodes via unique_ptr and snapshots
+// are shared via shared_ptr (never modified after construction).
 struct DataSnapshot {
     std::vector<std::unique_ptr<ProcessNode>> process_tree;
-    std::map<int, ProcessNode*> process_map;  // Points into process_tree
+    std::map<int, ProcessNode*> process_map;  // Non-owning pointers into process_tree
 
     // System stats
     int process_count = 0;
@@ -87,7 +91,10 @@ public:
     void resume();
     [[nodiscard]] bool is_paused() const;
 
-    // Register callback for when new data is available
+    // Register callback for when new data is available.
+    // LIFETIME: The callback is invoked from the background collection thread.
+    // The callback (and any objects it captures) must remain valid for the
+    // lifetime of the DataStore, or until replaced by another call to this method.
     void set_on_data_updated(std::function<void()> callback);
 
     // Get recent parse errors for status bar display

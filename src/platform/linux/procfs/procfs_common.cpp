@@ -53,8 +53,15 @@ std::string ProcfsReader::get_username(const int uid) {
         return it->second;
     }
 
-    const passwd* pw = getpwuid(uid);
-    std::string name = pw ? pw->pw_name : std::to_string(uid);
+    struct passwd pwd_buf;
+    struct passwd* result = nullptr;
+    char buf[1024];
+    std::string name;
+    if (getpwuid_r(uid, &pwd_buf, buf, sizeof(buf), &result) == 0 && result) {
+        name = result->pw_name;
+    } else {
+        name = std::to_string(uid);
+    }
     uid_cache_[uid] = name;
     return name;
 }

@@ -107,6 +107,7 @@ add_library(pex_core STATIC
     src/core/model/system_info.cpp
 )
 target_include_directories(pex_core PUBLIC src)
+target_compile_options(pex_core PUBLIC -Wall -Wextra -Wpedantic)
 find_package(Threads REQUIRED)
 target_link_libraries(pex_core PUBLIC Threads::Threads)
 
@@ -165,7 +166,7 @@ endif()
 
 add_library(pex_platform STATIC ${PEX_PLATFORM_SOURCES})
 target_include_directories(pex_platform PUBLIC src)
-target_compile_definitions(pex_platform PUBLIC ${PEX_PLATFORM_DEFINE})
+target_compile_definitions(pex_core PUBLIC ${PEX_PLATFORM_DEFINE})
 target_link_libraries(pex_platform PUBLIC pex_core)
 if(PEX_PLATFORM_LIBS)
     target_link_libraries(pex_platform PUBLIC ${PEX_PLATFORM_LIBS})

@@ -48,11 +48,13 @@ std::string SolarisProcessDataProvider::get_username(uid_t uid) {
         }
     }
 
-    // Lookup and cache
+    // Lookup using reentrant version and cache
     std::string name;
-    struct passwd* pw = getpwuid(uid);
-    if (pw) {
-        name = pw->pw_name;
+    struct passwd pwd_buf;
+    struct passwd* result = nullptr;
+    char buf[1024];
+    if (getpwuid_r(uid, &pwd_buf, buf, sizeof(buf), &result) == 0 && result) {
+        name = result->pw_name;
     } else {
         name = std::to_string(uid);
     }

@@ -37,9 +37,6 @@ private:
     void render();
     void render_system_panel() const;
     void render_process_tree();
-
-    static void render_process_tree_node(ProcessNode& node, int depth, int& row,
-                                         const std::vector<bool>& connector_state);
     void render_details_panel();
     void render_status_bar() const;
     void render_kill_dialog() const;

@@ -97,6 +97,13 @@ void TuiApp::create_windows() {
 
     status_win_ = newwin(status_height, max_x, y, 0);
 
+    // If any critical window failed to allocate, treat as terminal too small
+    if (!process_win_ || !details_win_ || !status_win_) {
+        cleanup_windows();
+        terminal_too_small_ = true;
+        return;
+    }
+
     // Enable keypad for all windows
     if (system_win_) keypad(system_win_, TRUE);
     if (process_win_) keypad(process_win_, TRUE);

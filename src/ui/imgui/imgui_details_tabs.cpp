@@ -2,6 +2,7 @@
 #include "imgui.h"
 #include <charconv>
 #include <algorithm>
+#include <numeric>
 
 namespace pex {
 
@@ -120,39 +121,52 @@ void ImGuiApp::render_network_tab() {
         if (needs_sort && !dp.network_connections.empty()) {
             const int col = dp.network_sort.column;
             const bool asc = dp.network_sort.ascending;
-            std::ranges::sort(dp.network_connections, [col, asc, &get_port, &parse_endpoint, this](const NetworkConnectionInfo& a, const NetworkConnectionInfo& b) {
+
+            // Pre-resolve hostnames before sorting to avoid DNS lookups in comparator
+            std::vector<std::string> local_hosts, remote_hosts;
+            if (col == 2 || col == 5) {
+                local_hosts.reserve(dp.network_connections.size());
+                remote_hosts.reserve(dp.network_connections.size());
+                for (const auto& conn : dp.network_connections) {
+                    auto [lip, _lp] = parse_endpoint(conn.local_endpoint);
+                    auto [rip, _rp] = parse_endpoint(conn.remote_endpoint);
+                    std::string lh = name_resolver_.get_hostname(lip);
+                    std::string rh = name_resolver_.get_hostname(rip);
+                    local_hosts.push_back(lh.empty() ? conn.local_endpoint : lh);
+                    remote_hosts.push_back(rh.empty() ? conn.remote_endpoint : rh);
+                }
+            }
+
+            // Build index array and sort indices
+            std::vector<size_t> indices(dp.network_connections.size());
+            std::iota(indices.begin(), indices.end(), 0);
+
+            std::ranges::sort(indices, [&](size_t ai, size_t bi) {
+                const auto& a = dp.network_connections[ai];
+                const auto& b = dp.network_connections[bi];
                 int result = 0;
                 switch (col) {
                     case 0: result = a.protocol.compare(b.protocol); break;
                     case 1: result = a.local_endpoint.compare(b.local_endpoint); break;
-                    case 2: {
-                        auto [a_ip, _a_port] = parse_endpoint(a.local_endpoint);
-                        auto [b_ip, _b_port] = parse_endpoint(b.local_endpoint);
-                        std::string host_a = name_resolver_.get_hostname(a_ip);
-                        std::string host_b = name_resolver_.get_hostname(b_ip);
-                        if (host_a.empty()) host_a = a.local_endpoint;
-                        if (host_b.empty()) host_b = b.local_endpoint;
-                        result = host_a.compare(host_b);
-                        break;
-                    }
+                    case 2: result = local_hosts[ai].compare(local_hosts[bi]); break;
                     case 3: result = static_cast<int>(get_port(a.local_endpoint)) - static_cast<int>(get_port(b.local_endpoint)); break;
                     case 4: result = a.remote_endpoint.compare(b.remote_endpoint); break;
-                    case 5: {
-                        auto [a_ip, _a_port] = parse_endpoint(a.remote_endpoint);
-                        auto [b_ip, _b_port] = parse_endpoint(b.remote_endpoint);
-                        std::string host_a = name_resolver_.get_hostname(a_ip);
-                        std::string host_b = name_resolver_.get_hostname(b_ip);
-                        if (host_a.empty()) host_a = a.remote_endpoint;
-                        if (host_b.empty()) host_b = b.remote_endpoint;
-                        result = host_a.compare(host_b);
-                        break;
-                    }
+                    case 5: result = remote_hosts[ai].compare(remote_hosts[bi]); break;
                     case 6: result = static_cast<int>(get_port(a.remote_endpoint)) - static_cast<int>(get_port(b.remote_endpoint)); break;
                     case 7: result = a.state.compare(b.state); break;
                     default: result = 0;
                 }
                 return asc ? (result < 0) : (result > 0);
             });
+
+            // Reorder connections according to sorted indices
+            std::vector<NetworkConnectionInfo> sorted;
+            sorted.reserve(dp.network_connections.size());
+            for (size_t idx : indices) {
+                sorted.push_back(std::move(dp.network_connections[idx]));
+            }
+            dp.network_connections = std::move(sorted);
+
             dp.details_dirty = false;
         }
 

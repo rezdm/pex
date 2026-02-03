@@ -16,6 +16,8 @@ enum class DetailsTab {
     Libraries
 };
 
+constexpr int kTabCount = 6;
+
 struct TabSortState {
     int column = 0;
     bool ascending = true;

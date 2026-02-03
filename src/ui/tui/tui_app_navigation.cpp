@@ -81,7 +81,8 @@ bool TuiApp::matches_search(const ProcessInfo& info) const {
     // Case-insensitive search in name and command
     auto to_lower = [](const std::string& s) {
         std::string result = s;
-        std::transform(result.begin(), result.end(), result.begin(), ::tolower);
+        std::transform(result.begin(), result.end(), result.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
         return result;
     };
 
@@ -155,14 +156,14 @@ void TuiApp::search_previous() {
 
 void TuiApp::next_tab() {
     int tab = static_cast<int>(view_model_.details_panel.active_tab);
-    tab = (tab + 1) % 6;
+    tab = (tab + 1) % kTabCount;
     view_model_.details_panel.active_tab = static_cast<DetailsTab>(tab);
     details_scroll_offset_ = 0;
 }
 
 void TuiApp::prev_tab() {
     int tab = static_cast<int>(view_model_.details_panel.active_tab);
-    tab = (tab + 5) % 6;  // +5 is same as -1 mod 6
+    tab = (tab + kTabCount - 1) % kTabCount;
     view_model_.details_panel.active_tab = static_cast<DetailsTab>(tab);
     details_scroll_offset_ = 0;
 }

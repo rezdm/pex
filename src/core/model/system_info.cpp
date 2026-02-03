@@ -1,4 +1,7 @@
 #include "system_info.hpp"
+
+#ifdef PEX_PLATFORM_LINUX
+
 #include <fstream>
 #include <sstream>
 #include <unistd.h>
@@ -174,3 +177,5 @@ uint64_t SystemInfo::get_boot_time_ticks() const {
 }
 
 } // namespace pex
+
+#endif // PEX_PLATFORM_LINUX

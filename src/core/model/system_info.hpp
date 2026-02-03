@@ -49,6 +49,9 @@ struct UptimeInfo {
     uint64_t idle_seconds = 0;
 };
 
+// SystemInfo reads from Linux-specific /proc files and should only be used
+// on Linux. Other platforms use their own ISystemDataProvider implementations.
+#ifdef PEX_PLATFORM_LINUX
 class SystemInfo {
 public:
     static SystemInfo& instance();
@@ -71,5 +74,6 @@ private:
     long clock_ticks_ = 100;
     uint64_t boot_time_ticks_ = 0;
 };
+#endif // PEX_PLATFORM_LINUX
 
 } // namespace pex

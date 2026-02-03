@@ -8,7 +8,11 @@
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
     // Ignore SIGCHLD to avoid zombies when killing processes
-    signal(SIGCHLD, SIG_IGN);
+    struct sigaction sa{};
+    sa.sa_handler = SIG_IGN;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_NOCLDWAIT;
+    sigaction(SIGCHLD, &sa, nullptr);
 
     pex::SingleInstance instance;
     if (!instance.try_become_primary()) {
