@@ -64,7 +64,10 @@ struct DataSnapshot {
 
 class DataStore {
 public:
-    // Constructor with dependency injection for platform abstraction
+    // Constructor with dependency injection for platform abstraction.
+    // LIFETIME: The provided pointers must remain valid for the lifetime of
+    // this DataStore. The destructor calls stop() which joins the background
+    // thread, so callers must ensure providers outlive this object.
     DataStore(IProcessDataProvider* process_provider, ISystemDataProvider* system_provider);
     ~DataStore();
 
