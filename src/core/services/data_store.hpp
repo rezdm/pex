@@ -6,7 +6,7 @@
 #include "../model/errors.hpp"
 #include "../model/system_info.hpp"
 #include <vector>
-#include <map>
+#include <unordered_map>
 #include <memory>
 #include <thread>
 #include <mutex>
@@ -38,7 +38,7 @@ struct ProcessNode {
 // are shared via shared_ptr (never modified after construction).
 struct DataSnapshot {
     std::vector<std::unique_ptr<ProcessNode>> process_tree;
-    std::map<int, ProcessNode*> process_map;  // Non-owning pointers into process_tree
+    std::unordered_map<int, ProcessNode*> process_map;  // Non-owning pointers into process_tree
 
     // System stats
     int process_count = 0;
@@ -104,7 +104,7 @@ private:
     void collection_thread_func();
     void collect_data();
     static void calculate_tree_totals(ProcessNode& node);
-    static void build_process_map(ProcessNode* node, std::map<int, ProcessNode*>& map);
+    static void build_process_map(ProcessNode* node, std::unordered_map<int, ProcessNode*>& map);
 
     // Injected providers (owned externally)
     IProcessDataProvider* process_provider_;
@@ -131,7 +131,7 @@ private:
     std::vector<double> per_cpu_usage_buffer_;     // Reused buffer
     std::vector<double> per_cpu_user_buffer_;      // Reused buffer
     std::vector<double> per_cpu_system_buffer_;    // Reused buffer
-    std::map<int, std::pair<uint64_t, uint64_t>> previous_cpu_times_;
+    std::unordered_map<int, std::pair<uint64_t, uint64_t>> previous_cpu_times_;
 
     // Callback
     std::function<void()> on_data_updated_;

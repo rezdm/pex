@@ -3,13 +3,13 @@
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
-#include <map>
+#include <unordered_map>
 #include <set>
 
 namespace pex {
 
 // Helper to check if a node is the last child of its parent
-static bool is_last_child(ProcessNode* node, const std::map<int, ProcessNode*>& process_map) {
+static bool is_last_child(ProcessNode* node, const std::unordered_map<int, ProcessNode*>& process_map) {
     if (!process_map.contains(node->info.parent_pid)) return true;
 
     const ProcessNode* parent = process_map.at(node->info.parent_pid);
@@ -19,12 +19,12 @@ static bool is_last_child(ProcessNode* node, const std::map<int, ProcessNode*>& 
 }
 
 // Check if node has a visible parent in the tree
-static bool has_visible_parent(ProcessNode* node, const std::map<int, ProcessNode*>& process_map) {
+static bool has_visible_parent(ProcessNode* node, const std::unordered_map<int, ProcessNode*>& process_map) {
     return process_map.contains(node->info.parent_pid);
 }
 
 // Build list of ancestors from node to root (excluding node itself)
-static std::vector<ProcessNode*> get_ancestors(ProcessNode* node, const std::map<int, ProcessNode*>& process_map) {
+static std::vector<ProcessNode*> get_ancestors(ProcessNode* node, const std::unordered_map<int, ProcessNode*>& process_map) {
     std::vector<ProcessNode*> ancestors;
     int pid = node->info.parent_pid;
     int prev_pid = node->info.pid;
@@ -48,7 +48,7 @@ static std::vector<ProcessNode*> get_ancestors(ProcessNode* node, const std::map
 
 // Build the tree connector prefix for a node
 // Returns a vector where each entry indicates whether to draw │ (true) or space (false)
-static std::vector<bool> get_tree_path(ProcessNode* node, const std::map<int, ProcessNode*>& process_map) {
+static std::vector<bool> get_tree_path(ProcessNode* node, const std::unordered_map<int, ProcessNode*>& process_map) {
     std::vector<bool> path;
 
     // Get all ancestors (oldest first)
