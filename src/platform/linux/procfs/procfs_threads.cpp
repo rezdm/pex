@@ -57,9 +57,13 @@ std::vector<ThreadInfo> ProcfsReader::get_threads(int pid) {
     }
 
     auto find_library = [&](const uint64_t addr) -> std::string {
-        for (const auto& range : address_map) {
-            if (addr >= range.start && addr < range.end) {
-                return range.library;
+        // address_map is sorted by start address (from /proc/pid/maps)
+        auto it = std::upper_bound(address_map.begin(), address_map.end(), addr,
+            [](uint64_t a, const AddressRange& r) { return a < r.start; });
+        if (it != address_map.begin()) {
+            --it;
+            if (addr >= it->start && addr < it->end) {
+                return it->library;
             }
         }
         return {};
