@@ -30,10 +30,16 @@ SingleInstance::~SingleInstance() {
 }
 
 std::string SingleInstance::get_socket_path() {
+    constexpr size_t max_path = sizeof(sockaddr_un{}.sun_path) - 1;
+
     if (const char* runtime_dir = std::getenv("XDG_RUNTIME_DIR")) {
-        return std::string(runtime_dir) + "/pex.sock";
+        std::string path = std::string(runtime_dir) + "/pex.sock";
+        if (path.size() <= max_path) {
+            return path;
+        }
+        // XDG_RUNTIME_DIR path too long, fall through to /tmp
     }
-    // Fallback: use /tmp with UID
+    // Fallback: use /tmp with UID (always fits)
     return "/tmp/pex-" + std::to_string(getuid()) + ".sock";
 }
 
