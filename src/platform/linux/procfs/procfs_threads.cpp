@@ -145,11 +145,11 @@ std::vector<ThreadInfo> ProcfsReader::get_threads(int pid) {
                 }
 
                 threads.push_back(std::move(thread));
-            } catch (...) {
+            } catch (const std::exception&) {
                 continue;
             }
         }
-    } catch (...) {
+    } catch (const std::exception&) {
     }
 
     return threads;

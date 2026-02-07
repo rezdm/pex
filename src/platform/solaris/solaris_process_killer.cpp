@@ -80,7 +80,7 @@ KillResult SolarisProcessKiller::kill_process_tree(int pid, bool force) {
             int proc_pid = 0;
             try {
                 proc_pid = std::stoi(name);
-            } catch (...) {
+            } catch (const std::exception&) {
                 continue;
             }
 
@@ -97,7 +97,7 @@ KillResult SolarisProcessKiller::kill_process_tree(int pid, bool force) {
                 all_procs.emplace_back(proc_pid, psinfo.pr_ppid);
             }
         }
-    } catch (...) {
+    } catch (const std::exception&) {
         // Directory iteration failed
     }
 
