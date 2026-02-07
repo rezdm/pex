@@ -1,5 +1,6 @@
 #include "imgui_app.hpp"
 #include "imgui.h"
+#include "../../core/format_utils.hpp"
 #include <format>
 #include <algorithm>
 
@@ -11,14 +12,6 @@ void ImGuiApp::render_system_panel() const {
     if (!view_model_.system_panel.is_visible) {
         return;
     }
-
-    // Compact bytes format like htop
-    auto format_compact = [](int64_t bytes) -> std::string {
-        if (bytes < 1024) return std::format("{}B", bytes);
-        if (bytes < 1024 * 1024) return std::format("{:.0f}K", bytes / 1024.0);
-        if (bytes < 1024LL * 1024 * 1024) return std::format("{:.1f}M", bytes / (1024.0 * 1024));
-        return std::format("{:.2f}G", bytes / (1024.0 * 1024 * 1024));
-    };
 
     const auto& mem_info_used = current_data_->memory_used;
     const auto& mem_info_total = current_data_->memory_total;
@@ -90,7 +83,7 @@ void ImGuiApp::render_system_panel() const {
                 ImGui::SameLine(0, 0);
                 draw_bar(mem_ratio, 120, ImVec4(0.0f, 0.6f, 0.0f, 1.0f));
                 ImGui::SameLine(0, 0);
-                ImGui::Text("] %s/%s", format_compact(mem_info_used).c_str(), format_compact(mem_info_total).c_str());
+                ImGui::Text("] %s/%s", pex::format_bytes(mem_info_used).c_str(), pex::format_bytes(mem_info_total).c_str());
             }
 
             {
@@ -99,7 +92,7 @@ void ImGuiApp::render_system_panel() const {
                 ImGui::SameLine(0, 0);
                 draw_bar(swap_ratio, 120, ImVec4(0.6f, 0.0f, 0.0f, 1.0f));
                 ImGui::SameLine(0, 0);
-                ImGui::Text("] %s/%s", format_compact(swap_info.used).c_str(), format_compact(swap_info.total).c_str());
+                ImGui::Text("] %s/%s", pex::format_bytes(swap_info.used).c_str(), pex::format_bytes(swap_info.total).c_str());
             }
 
             ImGui::Text("Tasks: %d, %d thr; %d running",
@@ -131,7 +124,7 @@ void ImGuiApp::render_system_panel() const {
             ImGui::SameLine(0, 0);
             draw_bar(mem_ratio, 80, ImVec4(0.0f, 0.6f, 0.0f, 1.0f));
             ImGui::SameLine(0, 0);
-            ImGui::Text("]%s/%s", format_compact(mem_info_used).c_str(), format_compact(mem_info_total).c_str());
+            ImGui::Text("]%s/%s", pex::format_bytes(mem_info_used).c_str(), pex::format_bytes(mem_info_total).c_str());
             ImGui::SameLine();
             ImGui::Text("Tasks:%d Load:%.1f", current_data_->process_count, load.one_min);
         }
