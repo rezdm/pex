@@ -122,7 +122,7 @@ std::optional<ProcessInfo> SolarisProcessDataProvider::read_process_info(int pid
     std::string exe_path = proc_path + "/path/a.out";
     try {
         info.executable_path = fs::read_symlink(exe_path).string();
-    } catch (...) {
+    } catch (const std::exception&) {
         info.executable_path = info.name;
     }
 
@@ -145,7 +145,7 @@ std::vector<ProcessInfo> SolarisProcessDataProvider::get_all_processes(int64_t t
             int pid = 0;
             try {
                 pid = std::stoi(name);
-            } catch (...) {
+            } catch (const std::exception&) {
                 continue;  // Not a PID directory
             }
 

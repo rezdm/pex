@@ -291,7 +291,7 @@ std::vector<ThreadInfo> SolarisProcessDataProvider::get_threads(int pid) {
             int lwpid = 0;
             try {
                 lwpid = std::stoi(lwpid_str);
-            } catch (...) {
+            } catch (const std::exception&) {
                 continue;
             }
 
@@ -343,7 +343,7 @@ std::vector<FileHandleInfo> SolarisProcessDataProvider::get_file_handles(int pid
             int fd_num = 0;
             try {
                 fd_num = std::stoi(fd_str);
-            } catch (...) {
+            } catch (const std::exception&) {
                 continue;
             }
 
@@ -355,12 +355,12 @@ std::vector<FileHandleInfo> SolarisProcessDataProvider::get_file_handles(int pid
             try {
                 std::string target = fs::read_symlink(link_path).string();
                 fh.path = target;
-            } catch (...) {
+            } catch (const std::exception&) {
                 // Fallback: try /proc/<pid>/fd/<fd>
                 try {
                     std::string target = fs::read_symlink(entry.path()).string();
                     fh.path = target;
-                } catch (...) {
+                } catch (const std::exception&) {
                     fh.path = "[unknown]";
                 }
             }
@@ -453,7 +453,7 @@ std::vector<NetworkConnectionInfo> SolarisProcessDataProvider::get_network_conne
             try {
                 int fd_num = 0;
                 fd_num = std::stoi(fd_str);
-            } catch (...) {
+            } catch (const std::exception&) {
                 continue;
             }
 

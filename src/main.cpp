@@ -21,17 +21,20 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
     }
 
     try {
-        // Create platform-specific providers (owned here in main)
+        // Create platform-specific providers (owned here in main).
+        // IMPORTANT: Declaration order matters for destruction safety.
+        // C++ destroys locals in reverse declaration order, so:
+        //   1. app is destroyed first (stops UI loop)
+        //   2. data_store is destroyed next (joins background thread)
+        //   3. providers are destroyed last (safe, no longer referenced)
+        // Do NOT reorder these declarations without verifying destruction safety.
         const auto process_provider = pex::make_process_data_provider();
         const auto details_provider = pex::make_details_data_provider();
         const auto system_provider = pex::make_system_data_provider();
         const auto killer = pex::make_process_killer();
 
-        // Create DataStore - the data layer that can be shared across UIs
         pex::DataStore data_store(process_provider.get(), system_provider.get());
 
-        // Create and run the ImGui application (UI layer)
-        // ImGuiApp does not own these resources - they're managed here
         pex::ImGuiApp app(&data_store, system_provider.get(), details_provider.get(), killer.get());
 
         instance.set_raise_callback([&app]() {

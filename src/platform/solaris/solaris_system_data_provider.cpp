@@ -16,17 +16,41 @@
 
 namespace pex {
 
+SolarisSystemDataProvider::SolarisSystemDataProvider() {
+    kc_ = kstat_open();
+}
+
+SolarisSystemDataProvider::~SolarisSystemDataProvider() {
+    if (kc_) {
+        kstat_close(kc_);
+        kc_ = nullptr;
+    }
+}
+
+void SolarisSystemDataProvider::ensure_kstat() const {
+    if (!kc_) {
+        kc_ = kstat_open();
+        return;
+    }
+    // Update the kstat chain to pick up new/removed kstats
+    if (kstat_chain_update(kc_) == -1) {
+        // Chain update failed, reopen
+        kstat_close(kc_);
+        kc_ = kstat_open();
+    }
+}
+
 CpuTimes SolarisSystemDataProvider::get_cpu_times() {
     CpuTimes times;
 
-    kstat_ctl_t* kc = kstat_open();
-    if (!kc) return times;
+    ensure_kstat();
+    if (!kc_) return times;
 
     // Aggregate CPU times from all cpu_stat instances
-    for (kstat_t* ksp = kc->kc_chain; ksp != nullptr; ksp = ksp->ks_next) {
+    for (kstat_t* ksp = kc_->kc_chain; ksp != nullptr; ksp = ksp->ks_next) {
         if (strcmp(ksp->ks_module, "cpu_stat") != 0) continue;
 
-        if (kstat_read(kc, ksp, nullptr) < 0) continue;
+        if (kstat_read(kc_, ksp, nullptr) < 0) continue;
 
         cpu_stat_t* cs = reinterpret_cast<cpu_stat_t*>(ksp->ks_data);
         if (!cs) continue;
@@ -38,7 +62,6 @@ CpuTimes SolarisSystemDataProvider::get_cpu_times() {
         // Solaris doesn't have nice, irq, softirq, steal in cpu_stat
     }
 
-    kstat_close(kc);
     return times;
 }
 
@@ -53,16 +76,16 @@ void SolarisSystemDataProvider::get_per_cpu_times(std::vector<CpuTimes>& out) {
     out.clear();
     out.resize(ncpu);
 
-    kstat_ctl_t* kc = kstat_open();
-    if (!kc) return;
+    ensure_kstat();
+    if (!kc_) return;
 
-    for (kstat_t* ksp = kc->kc_chain; ksp != nullptr; ksp = ksp->ks_next) {
+    for (kstat_t* ksp = kc_->kc_chain; ksp != nullptr; ksp = ksp->ks_next) {
         if (strcmp(ksp->ks_module, "cpu_stat") != 0) continue;
 
         int cpu_id = ksp->ks_instance;
         if (cpu_id < 0 || cpu_id >= ncpu) continue;
 
-        if (kstat_read(kc, ksp, nullptr) < 0) continue;
+        if (kstat_read(kc_, ksp, nullptr) < 0) continue;
 
         cpu_stat_t* cs = reinterpret_cast<cpu_stat_t*>(ksp->ks_data);
         if (!cs) continue;
@@ -72,8 +95,6 @@ void SolarisSystemDataProvider::get_per_cpu_times(std::vector<CpuTimes>& out) {
         out[cpu_id].idle = cs->cpu_sysinfo.cpu[CPU_IDLE];
         out[cpu_id].iowait = cs->cpu_sysinfo.cpu[CPU_WAIT];
     }
-
-    kstat_close(kc);
 }
 
 MemoryInfo SolarisSystemDataProvider::get_memory_info() {
@@ -86,10 +107,10 @@ MemoryInfo SolarisSystemDataProvider::get_memory_info() {
 
     // Available memory - use kstat for freemem
     // Note: kstat API uses char* not const char*, but doesn't modify the strings
-    kstat_ctl_t* kc = kstat_open();
-    if (kc) {
-        kstat_t* ksp = kstat_lookup(kc, const_cast<char*>("unix"), 0, const_cast<char*>("system_pages"));
-        if (ksp && kstat_read(kc, ksp, nullptr) >= 0) {
+    ensure_kstat();
+    if (kc_) {
+        kstat_t* ksp = kstat_lookup(kc_, const_cast<char*>("unix"), 0, const_cast<char*>("system_pages"));
+        if (ksp && kstat_read(kc_, ksp, nullptr) >= 0) {
             kstat_named_t* kn;
 
             // Free memory
@@ -100,7 +121,6 @@ MemoryInfo SolarisSystemDataProvider::get_memory_info() {
 
             // Could also check availrmem, lotsfree, etc. for better estimation
         }
-        kstat_close(kc);
     }
 
     info.used = info.total - info.available;
@@ -189,10 +209,10 @@ UptimeInfo SolarisSystemDataProvider::get_uptime() {
     UptimeInfo info;
 
     // Use kstat to get boot time
-    kstat_ctl_t* kc = kstat_open();
-    if (kc) {
-        kstat_t* ksp = kstat_lookup(kc, const_cast<char*>("unix"), 0, const_cast<char*>("system_misc"));
-        if (ksp && kstat_read(kc, ksp, nullptr) >= 0) {
+    ensure_kstat();
+    if (kc_) {
+        kstat_t* ksp = kstat_lookup(kc_, const_cast<char*>("unix"), 0, const_cast<char*>("system_misc"));
+        if (ksp && kstat_read(kc_, ksp, nullptr) >= 0) {
             kstat_named_t* kn = reinterpret_cast<kstat_named_t*>(
                 kstat_data_lookup(ksp, const_cast<char*>("boot_time")));
             if (kn) {
@@ -201,7 +221,6 @@ UptimeInfo SolarisSystemDataProvider::get_uptime() {
                 info.uptime_seconds = now - boot_time;
             }
         }
-        kstat_close(kc);
     }
 
     // Idle time would need to be calculated from CPU idle percentage
@@ -221,17 +240,16 @@ long SolarisSystemDataProvider::get_clock_ticks_per_second() const {
 uint64_t SolarisSystemDataProvider::get_boot_time_ticks() const {
     uint64_t boot_time = 0;
 
-    kstat_ctl_t* kc = kstat_open();
-    if (kc) {
-        kstat_t* ksp = kstat_lookup(kc, const_cast<char*>("unix"), 0, const_cast<char*>("system_misc"));
-        if (ksp && kstat_read(kc, ksp, nullptr) >= 0) {
+    ensure_kstat();
+    if (kc_) {
+        kstat_t* ksp = kstat_lookup(kc_, const_cast<char*>("unix"), 0, const_cast<char*>("system_misc"));
+        if (ksp && kstat_read(kc_, ksp, nullptr) >= 0) {
             kstat_named_t* kn = reinterpret_cast<kstat_named_t*>(
                 kstat_data_lookup(ksp, const_cast<char*>("boot_time")));
             if (kn) {
                 boot_time = kn->value.ul * sysconf(_SC_CLK_TCK);
             }
         }
-        kstat_close(kc);
     }
 
     return boot_time;
