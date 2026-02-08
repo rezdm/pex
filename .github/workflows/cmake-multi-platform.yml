@@ -117,6 +117,7 @@ jobs:
       with:
         prepare: |
           pkg install developer/gcc || true
+          pkg install developer/versioning/git || true
           pkg install developer/build/cmake || true
           pkg install developer/build/gnu-make || true
           pkg install system/header || true
