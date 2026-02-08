@@ -240,8 +240,8 @@ if(NOT NCURSES_FOUND AND BUILD_TUI AND BUILD_NCURSES)
             --without-ada
             --enable-widec
             --disable-stripping
-        BUILD_COMMAND make
-        INSTALL_COMMAND make install
+        BUILD_COMMAND ${CMAKE_MAKE_PROGRAM}
+        INSTALL_COMMAND ${CMAKE_MAKE_PROGRAM} install
         BUILD_IN_SOURCE 1
     )
 
