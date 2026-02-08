@@ -116,17 +116,17 @@ jobs:
       uses: vmactions/solaris-vm@v1
       with:
         prepare: |
-          pkg install developer/gcc
-          pkg install developer/build/cmake
-          pkg install developer/build/gnu-make
-          pkg install system/header
-          pkg install x11/header
-          pkg install x11/library/libx11
-          pkg install x11/library/libxrandr
-          pkg install x11/library/libxinerama
-          pkg install x11/library/libxcursor
-          pkg install x11/library/libxi
-          pkg install library/mesa
+          pkg install developer/gcc || true
+          pkg install developer/build/cmake || true
+          pkg install developer/build/gnu-make || true
+          pkg install system/header || true
+          pkg install x11/header || true
+          pkg install x11/library/libx11 || true
+          pkg install x11/library/libxrandr || true
+          pkg install x11/library/libxinerama || true
+          pkg install x11/library/libxcursor || true
+          pkg install x11/library/libxi || true
+          pkg install library/mesa || true
         run: |
           export PATH="/usr/gcc/*/bin:$PATH"
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_NCURSES=ON
