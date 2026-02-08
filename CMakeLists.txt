@@ -23,79 +23,87 @@ message(STATUS "PEX platform: ${PEX_PLATFORM}")
 
 # Include custom CMake modules
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
-include(EmbedResource)
 
-# Embed the icon as a C array
-embed_resource(
-    ${CMAKE_SOURCE_DIR}/src/pex.png
-    ${CMAKE_BINARY_DIR}/generated/pex_icon.hpp
-    pex_icon
-)
-
-# Fetch dependencies
-include(FetchContent)
+# Build options
+option(BUILD_GUI "Build GUI version (pex) - requires OpenGL and X11/Wayland" ON)
 
 # Solaris needs feature test macros for clock_gettime prototype
 if(CMAKE_SYSTEM_NAME STREQUAL "SunOS")
     add_compile_definitions(_POSIX_C_SOURCE=199309L __EXTENSIONS__)
 endif()
 
-# GLFW
-FetchContent_Declare(
-    glfw
-    GIT_REPOSITORY https://github.com/glfw/glfw.git
-    GIT_TAG 3.4
-)
-set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+# =============================================================================
+# GUI dependencies (GLFW, ImGui, stb, OpenGL) - only when building GUI
+# =============================================================================
+if(BUILD_GUI)
+    include(EmbedResource)
 
-# Wayland is only available on Linux; other platforms use X11 only
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    set(GLFW_BUILD_WAYLAND ON CACHE BOOL "" FORCE)
-    set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
-else()
-    # FreeBSD/Solaris typically don't have Linux headers for Wayland
-    set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
-    set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
+    # Embed the icon as a C array
+    embed_resource(
+        ${CMAKE_SOURCE_DIR}/src/pex.png
+        ${CMAKE_BINARY_DIR}/generated/pex_icon.hpp
+        pex_icon
+    )
+
+    include(FetchContent)
+
+    # GLFW
+    FetchContent_Declare(
+        glfw
+        GIT_REPOSITORY https://github.com/glfw/glfw.git
+        GIT_TAG 3.4
+    )
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+
+    # Wayland is only available on Linux; other platforms use X11 only
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(GLFW_BUILD_WAYLAND ON CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
+    else()
+        # FreeBSD/Solaris typically don't have Linux headers for Wayland
+        set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
+    endif()
+
+    FetchContent_MakeAvailable(glfw)
+
+    # Dear ImGui
+    FetchContent_Declare(
+        imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG v1.91.6
+    )
+    FetchContent_MakeAvailable(imgui)
+
+    # stb (for image loading)
+    FetchContent_Declare(
+        stb
+        GIT_REPOSITORY https://github.com/nothings/stb.git
+        GIT_TAG f1c79c02822848a9bed4315b12c8c8f3761e1296
+    )
+    FetchContent_MakeAvailable(stb)
+
+    # Find OpenGL
+    find_package(OpenGL REQUIRED)
+
+    # ImGui library
+    add_library(imgui STATIC
+        ${imgui_SOURCE_DIR}/imgui.cpp
+        ${imgui_SOURCE_DIR}/imgui_demo.cpp
+        ${imgui_SOURCE_DIR}/imgui_draw.cpp
+        ${imgui_SOURCE_DIR}/imgui_tables.cpp
+        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+    )
+    target_include_directories(imgui PUBLIC
+        ${imgui_SOURCE_DIR}
+        ${imgui_SOURCE_DIR}/backends
+    )
+    target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
 endif()
-
-FetchContent_MakeAvailable(glfw)
-
-# Dear ImGui
-FetchContent_Declare(
-    imgui
-    GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG v1.91.6
-)
-FetchContent_MakeAvailable(imgui)
-
-# stb (for image loading)
-FetchContent_Declare(
-    stb
-    GIT_REPOSITORY https://github.com/nothings/stb.git
-    GIT_TAG f1c79c02822848a9bed4315b12c8c8f3761e1296
-)
-FetchContent_MakeAvailable(stb)
-
-# Find OpenGL
-find_package(OpenGL REQUIRED)
-
-# ImGui library
-add_library(imgui STATIC
-    ${imgui_SOURCE_DIR}/imgui.cpp
-    ${imgui_SOURCE_DIR}/imgui_demo.cpp
-    ${imgui_SOURCE_DIR}/imgui_draw.cpp
-    ${imgui_SOURCE_DIR}/imgui_tables.cpp
-    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-    ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
-    ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
-)
-target_include_directories(imgui PUBLIC
-    ${imgui_SOURCE_DIR}
-    ${imgui_SOURCE_DIR}/backends
-)
-target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
 
 # =============================================================================
 # pex_core - Core library (model + services)
@@ -151,8 +159,10 @@ elseif(PEX_PLATFORM STREQUAL "solaris")
     )
     set(PEX_PLATFORM_DEFINE "PEX_PLATFORM_SOLARIS")
     set(PEX_PLATFORM_LIBS kstat rt)
-    # GLFW needs rt on Solaris
-    target_link_libraries(glfw PUBLIC rt)
+    if(BUILD_GUI)
+        # GLFW needs rt on Solaris
+        target_link_libraries(glfw PUBLIC rt)
+    endif()
 else()
     message(FATAL_ERROR "Unknown PEX_PLATFORM: ${PEX_PLATFORM}. Use 'linux', 'freebsd', or 'solaris'.")
 endif()
@@ -166,31 +176,33 @@ if(PEX_PLATFORM_LIBS)
 endif()
 
 # =============================================================================
-# pex_ui_imgui - ImGui UI library
+# pex_ui_imgui - ImGui UI library (only when building GUI)
 # =============================================================================
-add_library(pex_ui_imgui STATIC
-    src/ui/imgui/imgui_app.cpp
-    src/ui/imgui/imgui_app_menus.cpp
-    src/ui/imgui/imgui_system_panel_view.cpp
-    src/ui/imgui/imgui_process_list_view.cpp
-    src/ui/imgui/imgui_details_panel_view.cpp
-    src/ui/imgui/imgui_details_tabs.cpp
-    src/ui/imgui/imgui_process_popup_view.cpp
-    src/ui/imgui/imgui_kill_dialog_view.cpp
-    src/ui/imgui/imgui_input.cpp
-)
-target_include_directories(pex_ui_imgui PUBLIC src PRIVATE ${stb_SOURCE_DIR} ${CMAKE_BINARY_DIR}/generated)
-target_link_libraries(pex_ui_imgui PUBLIC pex_core pex_platform imgui)
+if(BUILD_GUI)
+    add_library(pex_ui_imgui STATIC
+        src/ui/imgui/imgui_app.cpp
+        src/ui/imgui/imgui_app_menus.cpp
+        src/ui/imgui/imgui_system_panel_view.cpp
+        src/ui/imgui/imgui_process_list_view.cpp
+        src/ui/imgui/imgui_details_panel_view.cpp
+        src/ui/imgui/imgui_details_tabs.cpp
+        src/ui/imgui/imgui_process_popup_view.cpp
+        src/ui/imgui/imgui_kill_dialog_view.cpp
+        src/ui/imgui/imgui_input.cpp
+    )
+    target_include_directories(pex_ui_imgui PUBLIC src PRIVATE ${stb_SOURCE_DIR} ${CMAKE_BINARY_DIR}/generated)
+    target_link_libraries(pex_ui_imgui PUBLIC pex_core pex_platform imgui)
 
-# =============================================================================
-# Main GUI executable (pex)
-# =============================================================================
-add_executable(pex
-    src/main.cpp
-    src/stb_impl.cpp
-)
-target_include_directories(pex PRIVATE ${stb_SOURCE_DIR} ${CMAKE_BINARY_DIR}/generated)
-target_link_libraries(pex PRIVATE pex_ui_imgui OpenGL::GL)
+    # =============================================================================
+    # Main GUI executable (pex)
+    # =============================================================================
+    add_executable(pex
+        src/main.cpp
+        src/stb_impl.cpp
+    )
+    target_include_directories(pex PRIVATE ${stb_SOURCE_DIR} ${CMAKE_BINARY_DIR}/generated)
+    target_link_libraries(pex PRIVATE pex_ui_imgui OpenGL::GL)
+endif()
 
 # =============================================================================
 # TUI executable (pexc) - optional, requires ncurses
@@ -209,9 +221,9 @@ else()
     find_package(Curses)
     # Check if we actually have ncurses (not just old SVR4 curses like on Solaris)
     if(CURSES_FOUND)
-        include(CheckIncludeFile)
+        include(CheckIncludeFileCXX)
         set(CMAKE_REQUIRED_INCLUDES ${CURSES_INCLUDE_DIR})
-        check_include_file("ncurses.h" HAVE_NCURSES_H)
+        check_include_file_cxx("ncurses.h" HAVE_NCURSES_H)
         if(HAVE_NCURSES_H)
             set(NCURSES_FOUND TRUE)
             message(STATUS "Found ncurses: ${CURSES_LIBRARIES}")
