@@ -8,10 +8,27 @@
 #include <cstring>
 #include <vector>
 #include <set>
+#include <unordered_map>
 #include <thread>
 #include <chrono>
 
 namespace pex {
+
+namespace {
+
+// Verify a PID still refers to the same process by comparing start times
+bool is_same_process(int pid, const struct timeval& expected_start) {
+    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
+    struct kinfo_proc kp;
+    size_t len = sizeof(kp);
+    if (sysctl(mib, 4, &kp, &len, nullptr, 0) < 0 || len != sizeof(kp)) {
+        return false;
+    }
+    return kp.ki_start.tv_sec == expected_start.tv_sec &&
+           kp.ki_start.tv_usec == expected_start.tv_usec;
+}
+
+} // anonymous namespace
 
 KillResult FreeBSDProcessKiller::kill_process(int pid, bool force) {
     KillResult result;
@@ -90,6 +107,12 @@ KillResult FreeBSDProcessKiller::kill_process_tree(int pid, bool force) {
     size_t count = len / sizeof(struct kinfo_proc);
     struct kinfo_proc* kp = reinterpret_cast<struct kinfo_proc*>(buf.data());
 
+    // Capture start times for PID-reuse verification
+    std::unordered_map<int, struct timeval> start_times;
+    for (size_t i = 0; i < count; ++i) {
+        start_times[kp[i].ki_pid] = kp[i].ki_start;
+    }
+
     // Find all children iteratively
     bool found_new = true;
     while (found_new) {
@@ -106,10 +129,18 @@ KillResult FreeBSDProcessKiller::kill_process_tree(int pid, bool force) {
     int sig = force ? SIGKILL : SIGTERM;
     bool any_success = false;
     bool any_permission_denied = false;
+    int skipped = 0;
 
     // Kill children first (reverse order to kill deepest first)
     std::vector<int> sorted_pids(pids_to_kill.begin(), pids_to_kill.end());
     for (auto it = sorted_pids.rbegin(); it != sorted_pids.rend(); ++it) {
+        // Verify PID hasn't been reused before killing
+        if (auto st = start_times.find(*it); st != start_times.end()) {
+            if (!is_same_process(*it, st->second)) {
+                skipped++;
+                continue;
+            }
+        }
         if (::kill(*it, sig) == 0) {
             any_success = true;
         } else if (errno == EPERM) {

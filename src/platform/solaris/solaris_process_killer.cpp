@@ -10,6 +10,7 @@
 #include <cstring>
 #include <vector>
 #include <set>
+#include <unordered_map>
 #include <filesystem>
 #include <thread>
 #include <chrono>
@@ -17,6 +18,25 @@
 namespace fs = std::filesystem;
 
 namespace pex {
+
+namespace {
+
+// Verify a PID still refers to the same process by comparing start times
+bool is_same_process(int pid, const timestruc_t& expected_start) {
+    std::string path = "/proc/" + std::to_string(pid) + "/psinfo";
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) return false;
+
+    psinfo_t psinfo;
+    ssize_t n = read(fd, &psinfo, sizeof(psinfo));
+    close(fd);
+
+    if (n != static_cast<ssize_t>(sizeof(psinfo))) return false;
+    return psinfo.pr_start.tv_sec == expected_start.tv_sec &&
+           psinfo.pr_start.tv_nsec == expected_start.tv_nsec;
+}
+
+} // anonymous namespace
 
 KillResult SolarisProcessKiller::kill_process(int pid, bool force) {
     KillResult result;
@@ -69,8 +89,9 @@ KillResult SolarisProcessKiller::kill_process_tree(int pid, bool force) {
     std::set<int> pids_to_kill;
     pids_to_kill.insert(pid);
 
-    // Build map of pid -> ppid
+    // Build map of pid -> ppid, capturing start times for PID-reuse verification
     std::vector<std::pair<int, int>> all_procs;  // (pid, ppid)
+    std::unordered_map<int, timestruc_t> start_times;
 
     try {
         for (const auto& entry : fs::directory_iterator("/proc")) {
@@ -80,11 +101,11 @@ KillResult SolarisProcessKiller::kill_process_tree(int pid, bool force) {
             int proc_pid = 0;
             try {
                 proc_pid = std::stoi(name);
-            } catch (...) {
+            } catch (const std::exception&) {
                 continue;
             }
 
-            // Read psinfo to get parent PID
+            // Read psinfo to get parent PID and start time
             std::string psinfo_path = entry.path().string() + "/psinfo";
             int fd = open(psinfo_path.c_str(), O_RDONLY);
             if (fd < 0) continue;
@@ -93,11 +114,12 @@ KillResult SolarisProcessKiller::kill_process_tree(int pid, bool force) {
             ssize_t n = read(fd, &psinfo, sizeof(psinfo));
             close(fd);
 
-            if (n == sizeof(psinfo)) {
+            if (n == static_cast<ssize_t>(sizeof(psinfo))) {
                 all_procs.emplace_back(proc_pid, psinfo.pr_ppid);
+                start_times[proc_pid] = psinfo.pr_start;
             }
         }
-    } catch (...) {
+    } catch (const std::exception&) {
         // Directory iteration failed
     }
 
@@ -117,10 +139,18 @@ KillResult SolarisProcessKiller::kill_process_tree(int pid, bool force) {
     int sig = force ? SIGKILL : SIGTERM;
     bool any_success = false;
     bool any_permission_denied = false;
+    int skipped = 0;
 
     // Kill children first (reverse order)
     std::vector<int> sorted_pids(pids_to_kill.begin(), pids_to_kill.end());
     for (auto it = sorted_pids.rbegin(); it != sorted_pids.rend(); ++it) {
+        // Verify PID hasn't been reused before killing
+        if (auto st = start_times.find(*it); st != start_times.end()) {
+            if (!is_same_process(*it, st->second)) {
+                skipped++;
+                continue;
+            }
+        }
         if (::kill(*it, sig) == 0) {
             any_success = true;
         } else if (errno == EPERM) {

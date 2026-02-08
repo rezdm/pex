@@ -116,11 +116,11 @@ std::vector<NetworkConnectionInfo> ProcfsReader::get_network_connections(const i
                     std::from_chars(start, end, inode);
                     if (inode > 0) socket_inodes.insert(inode);
                 }
-            } catch (...) {
+            } catch (const std::exception&) {
                 continue;
             }
         }
-    } catch (...) {
+    } catch (const std::exception&) {
         return result;
     }
 

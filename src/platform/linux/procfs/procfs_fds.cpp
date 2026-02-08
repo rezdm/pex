@@ -46,11 +46,11 @@ std::vector<FileHandleInfo> ProcfsReader::get_file_handles(const int pid) {
                 }
 
                 handles.push_back(std::move(handle));
-            } catch (...) {
+            } catch (const std::exception&) {
                 continue;
             }
         }
-    } catch (...) {
+    } catch (const std::exception&) {
     }
 
     std::ranges::sort(handles, [](const auto& a, const auto& b) {

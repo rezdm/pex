@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <ranges>
 #include <set>
+#include <unordered_map>
 
 namespace pex {
 
@@ -166,7 +167,7 @@ void DataStore::collect_data() {
     });
 
     // Build process tree
-    std::map<int, std::unique_ptr<ProcessNode>> nodes;
+    std::unordered_map<int, std::unique_ptr<ProcessNode>> nodes;
     for (auto& proc : processes) {
         auto node = std::make_unique<ProcessNode>();
         node->info = std::move(proc);
@@ -183,7 +184,7 @@ void DataStore::collect_data() {
     }
 
     // Build children map
-    std::map<int, std::vector<int>> children_map;
+    std::unordered_map<int, std::vector<int>> children_map;
     for (auto& [pid, node] : nodes) {
         if (int ppid = node->info.parent_pid; ppid != pid && nodes.contains(ppid)) {
             children_map[ppid].push_back(pid);
@@ -191,8 +192,8 @@ void DataStore::collect_data() {
     }
 
     // Recursive function to attach children
-    std::function<void(ProcessNode*, std::map<int, std::unique_ptr<ProcessNode>>&)> attach_children;
-    attach_children = [&](ProcessNode* parent, std::map<int, std::unique_ptr<ProcessNode>>& all_nodes) {
+    std::function<void(ProcessNode*, std::unordered_map<int, std::unique_ptr<ProcessNode>>&)> attach_children;
+    attach_children = [&](ProcessNode* parent, std::unordered_map<int, std::unique_ptr<ProcessNode>>& all_nodes) {
         if (const auto it = children_map.find(parent->info.pid); it != children_map.end()) {
             for (int child_pid : it->second) {
                 if (auto child_it = all_nodes.find(child_pid); child_it != all_nodes.end()) {
@@ -324,7 +325,7 @@ void DataStore::calculate_tree_totals(ProcessNode& node) {
     }
 }
 
-void DataStore::build_process_map(ProcessNode* node, std::map<int, ProcessNode*>& map) {
+void DataStore::build_process_map(ProcessNode* node, std::unordered_map<int, ProcessNode*>& map) {
     map[node->info.pid] = node;
     for (auto& child : node->children) {
         build_process_map(child.get(), map);

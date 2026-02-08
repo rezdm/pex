@@ -34,7 +34,7 @@ std::vector<ProcessInfo> ProcfsReader::get_all_processes(const int64_t total_mem
                 if (auto info = get_process_info(pid, total_memory)) {
                     processes.push_back(std::move(*info));
                 }
-            } catch (...) {
+            } catch (const std::exception&) {
                 continue;
             }
         }

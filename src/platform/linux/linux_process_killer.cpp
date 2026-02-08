@@ -84,12 +84,12 @@ void LinuxProcessKiller::collect_descendants_from_proc(const int root_pid,
                 if (meta.ppid > 0) {
                     children_map[meta.ppid].push_back(pid);
                 }
-            } catch (...) {
+            } catch (const std::exception&) {
                 // Process disappeared, skip it
                 continue;
             }
         }
-    } catch (...) {
+    } catch (const std::exception&) {
         // Directory iteration failed
         return;
     }

@@ -1,8 +1,7 @@
 #pragma once
 
 #include <cstdint>
-#include <sstream>
-#include <iomanip>
+#include <format>
 #include <string>
 
 namespace pex {
@@ -26,17 +25,15 @@ inline std::string format_bytes(int64_t bytes, bool compact = true) {
         unit_idx++;
     }
 
-    std::ostringstream oss;
     if (unit_idx == 0) {
-        oss << bytes << sep << units[unit_idx];
+        return std::format("{}{}{}", bytes, sep, units[unit_idx]);
     } else if (size >= 100.0) {
-        oss << std::fixed << std::setprecision(0) << size << sep << units[unit_idx];
+        return std::format("{:.0f}{}{}", size, sep, units[unit_idx]);
     } else if (size >= 10.0) {
-        oss << std::fixed << std::setprecision(1) << size << sep << units[unit_idx];
+        return std::format("{:.1f}{}{}", size, sep, units[unit_idx]);
     } else {
-        oss << std::fixed << std::setprecision(2) << size << sep << units[unit_idx];
+        return std::format("{:.2f}{}{}", size, sep, units[unit_idx]);
     }
-    return oss.str();
 }
 
 } // namespace pex
