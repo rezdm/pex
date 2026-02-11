@@ -1,6 +1,9 @@
 #include "data_store.hpp"
 #include <algorithm>
+#ifdef __VMS
+#else
 #include <ranges>
+#endif
 #include <set>
 #include <unordered_map>
 
@@ -162,9 +165,19 @@ void DataStore::collect_data() {
     }
 
     // Prune stale entries for processes that no longer exist
+#ifdef __VMS
+    // C++17 fallback: std::erase_if and set::contains() are C++20
+    for (auto it = previous_cpu_times_.begin(); it != previous_cpu_times_.end(); ) {
+        if (current_pids.find(it->first) == current_pids.end())
+            it = previous_cpu_times_.erase(it);
+        else
+            ++it;
+    }
+#else
     std::erase_if(previous_cpu_times_, [&current_pids](const auto& entry) {
         return !current_pids.contains(entry.first);
     });
+#endif
 
     // Build process tree
     std::unordered_map<int, std::unique_ptr<ProcessNode>> nodes;
@@ -178,7 +191,7 @@ void DataStore::collect_data() {
     // Find root nodes
     std::set<int> root_pids;
     for (auto& [pid, node] : nodes) {
-        if (int ppid = node->info.parent_pid; ppid == pid || !nodes.contains(ppid)) {
+        if (int ppid = node->info.parent_pid; ppid == pid || nodes.find(ppid) == nodes.end()) {
             root_pids.insert(pid);
         }
     }
@@ -186,7 +199,7 @@ void DataStore::collect_data() {
     // Build children map
     std::unordered_map<int, std::vector<int>> children_map;
     for (auto& [pid, node] : nodes) {
-        if (int ppid = node->info.parent_pid; ppid != pid && nodes.contains(ppid)) {
+        if (int ppid = node->info.parent_pid; ppid != pid && nodes.find(ppid) != nodes.end()) {
             children_map[ppid].push_back(pid);
         }
     }
@@ -215,7 +228,11 @@ void DataStore::collect_data() {
     }
 
     // Sort tree by PID
+#ifdef __VMS
+    std::sort(new_snapshot->process_tree.begin(), new_snapshot->process_tree.end(),
+#else
     std::ranges::sort(new_snapshot->process_tree,
+#endif
                       [](const auto& a, const auto& b) { return a->info.pid < b->info.pid; });
 
     // Build process map and calculate tree totals
@@ -227,7 +244,7 @@ void DataStore::collect_data() {
     // Count threads and running processes
     new_snapshot->thread_count = 0;
     new_snapshot->running_count = 0;
-    for (const auto &node: new_snapshot->process_map | std::views::values) {
+    for (const auto& [_, node] : new_snapshot->process_map) {
         new_snapshot->thread_count += node->info.thread_count;
         if (node->info.state_char == 'R') {
             new_snapshot->running_count++;
@@ -275,9 +292,15 @@ void DataStore::collect_data() {
             }
         }
     } else {
+#ifdef __VMS
+        std::fill(per_cpu_usage_buffer_.begin(), per_cpu_usage_buffer_.end(), 0.0);
+        std::fill(per_cpu_user_buffer_.begin(), per_cpu_user_buffer_.end(), 0.0);
+        std::fill(per_cpu_system_buffer_.begin(), per_cpu_system_buffer_.end(), 0.0);
+#else
         std::ranges::fill(per_cpu_usage_buffer_, 0.0);
         std::ranges::fill(per_cpu_user_buffer_, 0.0);
         std::ranges::fill(per_cpu_system_buffer_, 0.0);
+#endif
     }
 
     // Copy to snapshot (snapshot needs its own copy for thread safety)

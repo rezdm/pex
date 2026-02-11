@@ -9,9 +9,15 @@
 #include <unordered_map>
 #include <memory>
 #include <thread>
-#include <mutex>
 #include <atomic>
+#ifdef __VMS
+#include "../../platform/openvms/vms_mutex.hpp"
+#else
+#include <mutex>
 #include <condition_variable>
+#define PEX_MUTEX std::mutex
+#define PEX_CONDITION_VARIABLE std::condition_variable
+#endif
 #include <functional>
 
 namespace pex {
@@ -120,11 +126,11 @@ private:
     std::atomic<bool> force_refresh_{false};  // For refresh_now() to wake thread
     std::atomic<bool> refresh_pending_{false};  // Queue refresh while paused
     std::atomic<int> refresh_interval_ms_{1000};
-    std::condition_variable cv_;
-    std::mutex cv_mutex_;
+    PEX_CONDITION_VARIABLE cv_;
+    PEX_MUTEX cv_mutex_;
 
     // Data storage with mutex protection
-    mutable std::mutex data_mutex_;
+    mutable PEX_MUTEX data_mutex_;
     std::shared_ptr<DataSnapshot> current_snapshot_;
 
     // For CPU delta calculations (pre-allocated, reused each tick)
