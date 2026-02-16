@@ -17,21 +17,24 @@ int main(int argc, char* argv[]) {
     (void)argv;
 
     try {
-        // Create platform-specific providers (owned here in main).
-        // IMPORTANT: Declaration order matters for destruction safety.
-        // C++ destroys locals in reverse declaration order, so:
-        //   1. app is destroyed first (stops UI loop, restores terminal)
-        //   2. data_store is destroyed next (joins background thread)
-        //   3. providers are destroyed last (safe, no longer referenced)
+        std::cerr << "[M1] Creating providers..." << std::endl;
         const auto process_provider = pex::make_process_data_provider();
         const auto details_provider = pex::make_details_data_provider();
         const auto system_provider = pex::make_system_data_provider();
         const auto killer = pex::make_process_killer();
+        std::cerr << "[M2] Providers created" << std::endl;
 
+        std::cerr << "[M3] Creating DataStore..." << std::endl;
         pex::DataStore data_store(process_provider.get(), system_provider.get());
+        std::cerr << "[M4] DataStore created" << std::endl;
 
+        std::cerr << "[M5] Creating SmgApp..." << std::endl;
         pex::SmgApp app(&data_store, system_provider.get(), details_provider.get(), killer.get());
+        std::cerr << "[M6] SmgApp created" << std::endl;
+
+        std::cerr << "[M7] Calling app.run()..." << std::endl;
         app.run();
+        std::cerr << "[M8] app.run() returned" << std::endl;
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;

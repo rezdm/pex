@@ -1,6 +1,7 @@
 #include "data_store.hpp"
 #include <algorithm>
 #ifdef __VMS
+#include <iostream>
 #else
 #include <ranges>
 #endif
@@ -28,12 +29,21 @@ std::unique_ptr<ProcessNode> ProcessNode::clone() const {
 DataStore::DataStore(IProcessDataProvider* process_provider, ISystemDataProvider* system_provider)
     : process_provider_(process_provider)
     , system_provider_(system_provider) {
+#ifdef __VMS
+    std::cerr << "[DS] ctor: calling get_cpu_times" << std::endl;
+#endif
     previous_system_cpu_times_ = system_provider_->get_cpu_times();
+#ifdef __VMS
+    std::cerr << "[DS] ctor: calling get_per_cpu_times" << std::endl;
+#endif
     previous_per_cpu_times_ = system_provider_->get_per_cpu_times();
 
     // Create initial empty snapshot
     current_snapshot_ = std::make_shared<DataSnapshot>();
     current_snapshot_->timestamp = std::chrono::steady_clock::now();
+#ifdef __VMS
+    std::cerr << "[DS] ctor: done" << std::endl;
+#endif
 }
 
 DataStore::~DataStore() {
@@ -43,8 +53,17 @@ DataStore::~DataStore() {
 void DataStore::start() {
     if (running_) return;
 
+#ifdef __VMS
+    std::cerr << "[DS] start: setting running=true" << std::endl;
+#endif
     running_ = true;
+#ifdef __VMS
+    std::cerr << "[DS] start: creating thread" << std::endl;
+#endif
     collection_thread_ = std::thread(&DataStore::collection_thread_func, this);
+#ifdef __VMS
+    std::cerr << "[DS] start: thread created" << std::endl;
+#endif
 }
 
 void DataStore::stop() {
@@ -107,14 +126,37 @@ std::vector<ParseError> DataStore::get_recent_errors() const {
 }
 
 void DataStore::collection_thread_func() {
+#ifdef __VMS
+    std::cerr << "[DS] collection_thread_func: entered" << std::endl;
+#endif
+
     // Initial collection
     collect_data();
 
+#ifdef __VMS
+    std::cerr << "[DS] collection_thread_func: initial collect_data done" << std::endl;
+#endif
+
     while (running_) {
+#ifdef __VMS
+        // VMS: Polling approach avoids pthread_cond_timedwait issues.
+        // On VMS, std::chrono::system_clock may use VMS epoch (1858) while
+        // pthread_cond_timedwait expects POSIX epoch (1970), causing ACCVIO.
+        // Instead, poll atomics every 50ms using std::this_thread::sleep_for.
+        {
+            int ms_left = refresh_interval_ms_.load();
+            while (ms_left > 0 && running_.load() && !force_refresh_.load()) {
+                int chunk = (ms_left < 50) ? ms_left : 50;
+                std::this_thread::sleep_for(std::chrono::milliseconds(chunk));
+                ms_left -= chunk;
+            }
+        }
+#else
         std::unique_lock lock(cv_mutex_);
         cv_.wait_for(lock, std::chrono::milliseconds(refresh_interval_ms_), [this] {
             return !running_ || force_refresh_.load();
         });
+#endif
 
         // Handle force_refresh_ - if paused, retain as pending
         if (force_refresh_.exchange(false) && paused_) {
@@ -125,22 +167,41 @@ void DataStore::collection_thread_func() {
             collect_data();
         }
     }
+
+#ifdef __VMS
+    std::cerr << "[DS] collection_thread_func: exiting" << std::endl;
+#endif
 }
 
 void DataStore::collect_data() {
+#ifdef __VMS
+    std::cerr << "[DS] collect_data: start" << std::endl;
+#endif
     auto new_snapshot = std::make_shared<DataSnapshot>();
     new_snapshot->timestamp = std::chrono::steady_clock::now();
 
+#ifdef __VMS
+    std::cerr << "[DS] collect_data: calling get_cpu_times" << std::endl;
+#endif
     // Get CPU times for delta calculation
     auto current_cpu_times = system_provider_->get_cpu_times();
     uint64_t total_cpu_delta = current_cpu_times.total() - previous_system_cpu_times_.total();
 
+#ifdef __VMS
+    std::cerr << "[DS] collect_data: calling get_memory_info" << std::endl;
+#endif
     // Read memory info once and reuse for processes and system stats
     const auto mem_info = system_provider_->get_memory_info();
 
+#ifdef __VMS
+    std::cerr << "[DS] collect_data: calling get_all_processes" << std::endl;
+#endif
     // Get all processes
     auto processes = process_provider_->get_all_processes(mem_info.total);
 
+#ifdef __VMS
+    std::cerr << "[DS] collect_data: got " << processes.size() << " processes" << std::endl;
+#endif
     // Calculate CPU percentages and collect current PIDs
     std::set<int> current_pids;
     unsigned int proc_count = system_provider_->get_processor_count();
@@ -320,6 +381,9 @@ void DataStore::collect_data() {
     previous_system_cpu_times_ = current_cpu_times;
 
     // Atomically swap the snapshot
+#ifdef __VMS
+    std::cerr << "[DS] collect_data: swapping snapshot" << std::endl;
+#endif
     std::function<void()> callback;
     {
         std::lock_guard lock(data_mutex_);
@@ -331,6 +395,9 @@ void DataStore::collect_data() {
     if (callback) {
         callback();
     }
+#ifdef __VMS
+    std::cerr << "[DS] collect_data: done (procs=" << new_snapshot->process_count << ")" << std::endl;
+#endif
 }
 
 void DataStore::calculate_tree_totals(ProcessNode& node) {

@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <cstdio>
+#include <iostream>
 
 #ifdef __VMS
 #define __NEW_STARLET 1
@@ -90,27 +91,37 @@ void SmgApp::run() {
 #ifdef __VMS
     unsigned int status;
 
+    std::cerr << "[SMG] run: creating pasteboard" << std::endl;
     // Create the pasteboard (screen)
     status = smg$create_pasteboard(&pasteboard_id_, 0, &term_rows_, &term_cols_);
     if (!(status & 1)) {
-        // SMG init failed
+        std::cerr << "[SMG] run: pasteboard failed, status=" << status << std::endl;
         return;
     }
+    std::cerr << "[SMG] run: pasteboard ok (" << term_cols_ << "x" << term_rows_ << ")" << std::endl;
 
     // Create the virtual keyboard for input
+    std::cerr << "[SMG] run: creating keyboard" << std::endl;
     status = smg$create_virtual_keyboard(&keyboard_id_);
     if (!(status & 1)) {
+        std::cerr << "[SMG] run: keyboard failed, status=" << status << std::endl;
         smg$delete_pasteboard(&pasteboard_id_, 0);
         return;
     }
+    std::cerr << "[SMG] run: keyboard ok" << std::endl;
 
     // Create virtual displays (panels)
+    std::cerr << "[SMG] run: creating displays" << std::endl;
     create_displays();
+    std::cerr << "[SMG] run: displays created" << std::endl;
 
     // Start background services
+    std::cerr << "[SMG] run: calling data_store_->start()" << std::endl;
     data_store_->start();
+    std::cerr << "[SMG] run: data_store started" << std::endl;
 
     // Get initial data - wait for actual data
+    std::cerr << "[SMG] run: waiting for initial data..." << std::endl;
     int retries = 50;
     current_data_ = data_store_->get_snapshot();
     while (retries-- > 0 && (!current_data_ || current_data_->process_count == 0)) {
@@ -119,13 +130,16 @@ void SmgApp::run() {
     }
 
     if (!current_data_ || current_data_->process_count == 0) {
+        std::cerr << "[SMG] run: no initial data after retries, exiting" << std::endl;
         cleanup_displays();
         smg$delete_virtual_keyboard(&keyboard_id_);
         smg$delete_pasteboard(&pasteboard_id_, 0);
         return;
     }
 
+    std::cerr << "[SMG] run: got data (" << current_data_->process_count << " procs)" << std::endl;
     view_model_.update_from_snapshot(current_data_);
+    std::cerr << "[SMG] run: entering main loop" << std::endl;
 
     running_ = true;
     auto last_update = std::chrono::steady_clock::now();
