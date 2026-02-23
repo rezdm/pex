@@ -1,13 +1,6 @@
 #include "smg_app.hpp"
 #include "smg_colors.hpp"
 #include <sstream>
-#include <cstdio>
-
-#ifdef __VMS
-#define __NEW_STARLET 1
-#include <smgdef.h>
-#include <smg$routines.h>
-#endif
 
 namespace pex {
 
@@ -15,36 +8,36 @@ void SmgApp::render_kill_dialog() {
     const auto& kd = view_model_.kill_dialog;
     if (!kd.is_visible) return;
 
-#ifdef __VMS
-    // Create a temporary overlay display for the dialog
-    if (dialog_display_) {
-        smg$unpaste_virtual_display(&dialog_display_, &pasteboard_id_);
-        smg$delete_virtual_display(&dialog_display_);
-        dialog_display_ = 0;
-    }
+    // Calculate dialog dimensions
+    int dialog_inner_width = 48;
+    int dialog_inner_height = kd.show_force_option ? 8 : 6;
+    if (!kd.error_message.empty()) dialog_inner_height += 2;
 
-    int dialog_width = 48;  // Inner width (border adds 2)
-    int dialog_height = kd.show_force_option ? 8 : 6;
-    if (!kd.error_message.empty()) dialog_height += 2;
+    // Set up the DISP_DIALOG region, centered on screen
+    int total_height = dialog_inner_height + 2;  // +2 for border
+    int total_width = dialog_inner_width + 2;
 
-    unsigned int border_flag = SMG$M_BORDER;
-    unsigned int status = smg$create_virtual_display(&dialog_height, &dialog_width,
-                                                     &dialog_display_, &border_flag);
-    if (!(status & 1)) return;
-
-    // Center the dialog on the pasteboard
-    int paste_row = (term_rows_ - dialog_height - 2) / 2 + 1;
-    int paste_col = (term_cols_ - dialog_width - 2) / 2 + 1;
+    int paste_row = (term_rows_ - total_height) / 2 + 1;
+    int paste_col = (term_cols_ - total_width) / 2 + 1;
     if (paste_row < 1) paste_row = 1;
     if (paste_col < 1) paste_col = 1;
 
-    smg$paste_virtual_display(&dialog_display_, &pasteboard_id_, &paste_row, &paste_col);
-#endif
+    auto& rgn = regions_[DISP_DIALOG];
+    rgn.row = paste_row + 1;       // Inner area starts after top border
+    rgn.col = paste_col + 1;       // Inner area starts after left border
+    rgn.inner_rows = dialog_inner_height;
+    rgn.inner_cols = dialog_inner_width;
+    rgn.has_border = true;
+    rgn.active = true;
+    dialog_display_ = DISP_DIALOG;
 
-    // Title on border
-    std::string title = kd.is_tree_kill ? " Kill Process Tree " : " Kill Process ";
-    smg_put_chars(dialog_display_, 1, (48 - static_cast<int>(title.length())) / 2,
-                  title, SMG_REND_BOLD);
+    // Draw border and clear interior
+    draw_border(rgn);
+    smg_erase_display(DISP_DIALOG);
+
+    // Title on border line
+    smg_draw_box_title(DISP_DIALOG,
+                       kd.is_tree_kill ? "Kill Process Tree" : "Kill Process");
 
     // Process info
     std::string msg;
@@ -53,58 +46,63 @@ void SmgApp::render_kill_dialog() {
     } else {
         msg = "Kill process:";
     }
-    smg_put_chars(dialog_display_, 2, 2, msg, SMG_REND_DIALOG);
+    smg_put_chars(DISP_DIALOG, 2, 2, msg, SMG_REND_DIALOG);
 
     std::ostringstream proc_info;
     proc_info << kd.target_name << " (PID " << kd.target_pid << ")";
-    smg_put_chars(dialog_display_, 3, 4, proc_info.str(), SMG_REND_DIALOG | SMG_REND_BOLD);
+    smg_put_chars(DISP_DIALOG, 3, 4, proc_info.str(), SMG_REND_DIALOG | SMG_REND_BOLD);
 
     int row = 5;
 
     // Error message
     if (!kd.error_message.empty()) {
-        smg_put_chars(dialog_display_, row, 2, kd.error_message, SMG_REND_ERROR);
+        smg_put_chars(DISP_DIALOG, row, 2, kd.error_message, SMG_REND_ERROR);
         row += 2;
     }
 
-    // Buttons - VMS uses $FORCEX/$DELPRC instead of SIGTERM/SIGKILL
+    // Buttons — VMS uses $FORCEX/$DELPRC instead of SIGTERM/SIGKILL
     if (kd.show_force_option) {
-        smg_put_chars(dialog_display_, row, 2, "Process did not terminate. Force kill?", SMG_REND_DIALOG);
+        smg_put_chars(DISP_DIALOG, row, 2,
+                      "Process did not terminate. Force kill?", SMG_REND_DIALOG);
         row++;
-        smg_put_chars(dialog_display_, row, 6, " [Y] Force Kill ($DELPRC) ", SMG_REND_DIALOG_BTN);
-        smg_put_chars(dialog_display_, row, 35, " [N] Cancel ", SMG_REND_DIALOG);
+        smg_put_chars(DISP_DIALOG, row, 6,
+                      " [Y] Force Kill ($DELPRC) ", SMG_REND_DIALOG_BTN);
+        smg_put_chars(DISP_DIALOG, row, 35, " [N] Cancel ", SMG_REND_DIALOG);
     } else {
-        smg_put_chars(dialog_display_, row, 6, " [Y] Kill ($FORCEX) ", SMG_REND_DIALOG_BTN);
-        smg_put_chars(dialog_display_, row, 30, " [N] Cancel ", SMG_REND_DIALOG);
+        smg_put_chars(DISP_DIALOG, row, 6,
+                      " [Y] Kill ($FORCEX) ", SMG_REND_DIALOG_BTN);
+        smg_put_chars(DISP_DIALOG, row, 30, " [N] Cancel ", SMG_REND_DIALOG);
     }
 }
 
 void SmgApp::render_help_overlay() {
-#ifdef __VMS
-    // Create a temporary overlay display for help
-    if (dialog_display_) {
-        smg$unpaste_virtual_display(&dialog_display_, &pasteboard_id_);
-        smg$delete_virtual_display(&dialog_display_);
-        dialog_display_ = 0;
-    }
+    int help_inner_width = 58;
+    int help_inner_height = 29;
 
-    int help_width = 58;   // Inner width
-    int help_height = 29;  // Inner height
-    unsigned int border_flag = SMG$M_BORDER;
-    unsigned int status = smg$create_virtual_display(&help_height, &help_width,
-                                                     &dialog_display_, &border_flag);
-    if (!(status & 1)) return;
+    // Set up the DISP_DIALOG region, centered on screen
+    int total_height = help_inner_height + 2;
+    int total_width = help_inner_width + 2;
 
-    int paste_row = (term_rows_ - help_height - 2) / 2 + 1;
-    int paste_col = (term_cols_ - help_width - 2) / 2 + 1;
+    int paste_row = (term_rows_ - total_height) / 2 + 1;
+    int paste_col = (term_cols_ - total_width) / 2 + 1;
     if (paste_row < 1) paste_row = 1;
     if (paste_col < 1) paste_col = 1;
 
-    smg$paste_virtual_display(&dialog_display_, &pasteboard_id_, &paste_row, &paste_col);
-#endif
+    auto& rgn = regions_[DISP_DIALOG];
+    rgn.row = paste_row + 1;
+    rgn.col = paste_col + 1;
+    rgn.inner_rows = help_inner_height;
+    rgn.inner_cols = help_inner_width;
+    rgn.has_border = true;
+    rgn.active = true;
+    dialog_display_ = DISP_DIALOG;
 
-    // Title
-    smg_put_chars(dialog_display_, 1, 25, " Help ", SMG_REND_BOLD);
+    // Draw border and clear interior
+    draw_border(rgn);
+    smg_erase_display(DISP_DIALOG);
+
+    // Title on border line
+    smg_draw_box_title(DISP_DIALOG, "Help");
 
     // Help content
     struct HelpLine {
@@ -150,23 +148,26 @@ void SmgApp::render_help_overlay() {
         }
 
         if (line.is_heading) {
-            smg_put_chars(dialog_display_, row, 2, line.text, SMG_REND_BOLD);
+            smg_put_chars(DISP_DIALOG, row, 2, line.text, SMG_REND_BOLD);
         } else {
             // Key part (first 18 chars) in highlight
             std::string key_part(line.text, 2, 16);
             std::string desc_part(line.text + 18);
-            smg_put_chars(dialog_display_, row, 2, key_part, SMG_REND_HELP_KEY);
-            smg_put_chars(dialog_display_, row, 18, desc_part, SMG_REND_NORMAL);
+            smg_put_chars(DISP_DIALOG, row, 2, key_part, SMG_REND_HELP_KEY);
+            smg_put_chars(DISP_DIALOG, row, 18, desc_part, SMG_REND_NORMAL);
         }
         row++;
     }
 
     // Close instruction
-    smg_put_chars(dialog_display_, help_height, 17, " Press any key to close ", SMG_REND_DIALOG_BTN);
+    smg_put_chars(DISP_DIALOG, help_inner_height, 17,
+                  " Press any key to close ", SMG_REND_DIALOG_BTN);
 }
 
 void SmgApp::render_status_bar() {
     if (!status_display_) return;
+
+    smg_erase_display(status_display_);
 
     // Status bar uses reverse video
     const char* hints = "q:Quit  /:Search  s:System  c:CPUs  Tab:Panel  x:Kill  ?:Help";
@@ -186,35 +187,37 @@ void SmgApp::render_status_bar() {
 }
 
 void SmgApp::render_search_bar() {
-#ifdef __VMS
-    // Create a temporary overlay for search bar
-    if (dialog_display_) {
-        smg$unpaste_virtual_display(&dialog_display_, &pasteboard_id_);
-        smg$delete_virtual_display(&dialog_display_);
-        dialog_display_ = 0;
-    }
+    int search_inner_width = 48;
+    int search_inner_height = 1;
 
-    int search_width = 48;
-    int search_height = 1;
-    unsigned int border_flag = SMG$M_BORDER;
-    unsigned int status = smg$create_virtual_display(&search_height, &search_width,
-                                                     &dialog_display_, &border_flag);
-    if (!(status & 1)) return;
+    // Set up the DISP_DIALOG region near the bottom of the screen
+    int total_height = search_inner_height + 2;
+    int total_width = search_inner_width + 2;
 
     int paste_row = term_rows_ - 3;
-    int paste_col = (term_cols_ - search_width - 2) / 2 + 1;
+    int paste_col = (term_cols_ - total_width) / 2 + 1;
     if (paste_row < 1) paste_row = 1;
     if (paste_col < 1) paste_col = 1;
 
-    smg$paste_virtual_display(&dialog_display_, &pasteboard_id_, &paste_row, &paste_col);
-#endif
+    auto& rgn = regions_[DISP_DIALOG];
+    rgn.row = paste_row + 1;
+    rgn.col = paste_col + 1;
+    rgn.inner_rows = search_inner_height;
+    rgn.inner_cols = search_inner_width;
+    rgn.has_border = true;
+    rgn.active = true;
+    dialog_display_ = DISP_DIALOG;
 
-    // Title
-    smg_put_chars(dialog_display_, 1, 2, " Search ", SMG_REND_BOLD);
+    // Draw border and clear interior
+    draw_border(rgn);
+    smg_erase_display(DISP_DIALOG);
+
+    // Title on border line
+    smg_draw_box_title(DISP_DIALOG, "Search");
 
     // Search input
     std::string prompt = "/ " + search_input_;
-    smg_put_chars(dialog_display_, 1, 2, prompt, SMG_REND_NORMAL);
+    smg_put_chars(DISP_DIALOG, 1, 2, prompt, SMG_REND_NORMAL);
 }
 
 } // namespace pex

@@ -20,7 +20,7 @@
 !   - Uses /CLANG=("-std=c++17") for C++17 language features
 !   - Defines __NEW_STARLET=1 for modern typed VMS system service APIs
 !   - Defines __VMS=1 for conditional compilation in platform-neutral code
-!   - Links against SYS$SHARE:SMGSHR.EXE for SMG$ screen management
+!   - Links against SMGSHR for SMG$ keyboard input, SYS$SSISHR for SYS$QIOW
 !   - name_resolver.cpp and single_instance.cpp are excluded (Unix-specific)
 !   - format_utils.hpp requires std::format (C++20) -- needs VMS-specific shim
 !
@@ -134,6 +134,7 @@ PEXC.EXE : $(ALL_OBJS)
 	@ WRITE OPTF "[.OBJ]SMG_INPUT.OBJ"
 	@ WRITE OPTF "[.OBJ]SMG_KILL_DIALOG.OBJ"
 	@ WRITE OPTF "SYS$SHARE:SMGSHR/SHAREABLE"
+	@ WRITE OPTF "SYS$SHARE:SYS$SSISHR/SHAREABLE"
 	@ WRITE OPTF "SYS$SHARE:PTHREAD$RTL/SHAREABLE"
 	@ WRITE OPTF "SYS$SHARE:CMA$TIS_SHR/SHAREABLE"
 	@ CLOSE OPTF

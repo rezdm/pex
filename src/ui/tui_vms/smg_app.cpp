@@ -7,7 +7,6 @@
 #include <iomanip>
 #include <algorithm>
 #include <cstdio>
-#include <iostream>
 
 #ifdef __VMS
 #define __NEW_STARLET 1
@@ -15,6 +14,16 @@
 #include <smgdef.h>
 #include <smg$routines.h>
 #include <ssdef.h>
+#include <lib$routines.h>
+
+// System services for direct terminal I/O
+// Use <starlet.h> for correct prototypes and symbol names on x86_64.
+// Manual extern "C" declarations don't work because the Clang-based compiler
+// lowercases symbols, yet SYS$SSISHR alone doesn't resolve them on x86_64 —
+// we also need SYS$STUBS.OLB (added in DESCRIP.MMS link options).
+#include <starlet.h>
+#include <iodef.h>
+#include <iosbdef.h>
 #endif
 
 namespace pex {
@@ -38,153 +47,435 @@ SmgApp::~SmgApp() {
     cleanup_displays();
 }
 
-// Helper to create a VMS descriptor from a std::string
-#ifdef __VMS
-static struct dsc$descriptor_s make_descriptor(const std::string& str) {
-    struct dsc$descriptor_s desc;
-    desc.dsc$w_length = str.length();
-    desc.dsc$b_dtype = DSC$K_DTYPE_T;
-    desc.dsc$b_class = DSC$K_CLASS_S;
-    desc.dsc$a_pointer = const_cast<char*>(str.c_str());
-    return desc;
+// ---- Frame buffer operations ----
+
+void SmgApp::buf_move_to(int row, int col) {
+    char seq[32];
+    std::snprintf(seq, sizeof(seq), "\033[%d;%dH", row, col);
+    frame_buf_ += seq;
 }
+
+void SmgApp::buf_set_rendition(unsigned int rend) {
+    if (rend == 0) {
+        frame_buf_ += "\033[0m";
+        return;
+    }
+
+    frame_buf_ += "\033[0";  // Always reset first
+
+    if (rend & ANSI_BOLD)      frame_buf_ += ";1";
+    if (rend & ANSI_REVERSE)   frame_buf_ += ";7";
+    if (rend & ANSI_UNDERLINE) frame_buf_ += ";4";
+    if (rend & ANSI_BLINK)     frame_buf_ += ";5";
+
+    unsigned int fg = (rend & ANSI_FG_MASK) >> ANSI_FG_SHIFT;
+    if (fg > 0 && fg <= 7) {
+        char code[8];
+        std::snprintf(code, sizeof(code), ";%d", 30 + fg);
+        frame_buf_ += code;
+    }
+
+    unsigned int bg = (rend & ANSI_BG_MASK) >> ANSI_BG_SHIFT;
+    if (bg > 0 && bg <= 7) {
+        char code[8];
+        std::snprintf(code, sizeof(code), ";%d", 40 + bg);
+        frame_buf_ += code;
+    }
+
+    frame_buf_ += 'm';
+}
+
+void SmgApp::buf_reset_rendition() {
+    frame_buf_ += "\033[0m";
+}
+
+void SmgApp::buf_write(const std::string& text) {
+    frame_buf_ += text;
+}
+
+void SmgApp::buf_clear_screen() {
+    frame_buf_ += "\033[2J\033[H";
+}
+
+void SmgApp::buf_hide_cursor() {
+    frame_buf_ += "\033[?25l";
+}
+
+void SmgApp::buf_show_cursor() {
+    frame_buf_ += "\033[?25h";
+}
+
+void SmgApp::flush_frame_buffer() {
+#ifdef __VMS
+    if (frame_buf_.empty()) return;
+
+    // Write ANSI frame buffer to stdout using C library I/O.
+    // SYS$QIOW with IO$_WRITEVBLK returns SS$_NOPRIV on SSH pseudo-terminals,
+    // and IO$_WRITELBLK returns SS$_BADPARAM.  The C RTL's write() handles
+    // the terminal driver correctly without requiring special privilege.
+    std::fwrite(frame_buf_.c_str(), 1, frame_buf_.size(), stdout);
+    std::fflush(stdout);
+    frame_buf_.clear();
 #endif
+}
+
+// ---- ANSI rendering helpers (called by all render functions) ----
 
 void SmgApp::smg_put_chars(unsigned int display_id, int row, int col,
                            const std::string& text, unsigned int rendition) {
-#ifdef __VMS
-    struct dsc$descriptor_s text_desc = make_descriptor(text);
-    int vms_row = row;  // SMG$ uses 1-based rows
-    int vms_col = col;  // SMG$ uses 1-based columns
-    smg$put_chars(&display_id, &text_desc, &vms_row, &vms_col, 0, &rendition);
-#else
-    (void)display_id; (void)row; (void)col; (void)text; (void)rendition;
-#endif
+    if (display_id == 0 || display_id >= DISP_COUNT) return;
+    const auto& rgn = regions_[display_id];
+    if (!rgn.active) return;
+
+    // Clamp to region bounds
+    if (row < 1 || row > rgn.inner_rows) return;
+    if (col < 1 || col > rgn.inner_cols) return;
+
+    // Map display-relative coords to screen coords
+    int screen_row = rgn.row + row - 1;
+    int screen_col = rgn.col + col - 1;
+
+    // Truncate text to fit within region
+    int max_chars = rgn.inner_cols - col + 1;
+    if (max_chars <= 0) return;
+
+    int len = std::min(static_cast<int>(text.size()), max_chars);
+    for (int i = 0; i < len; i++) {
+        cell_put(screen_row, screen_col + i, text[i], rendition);
+    }
 }
 
 void SmgApp::smg_erase_display(unsigned int display_id) {
-#ifdef __VMS
-    smg$erase_display(&display_id);
-#else
-    (void)display_id;
-#endif
+    if (display_id == 0 || display_id >= DISP_COUNT) return;
+    const auto& rgn = regions_[display_id];
+    if (!rgn.active) return;
+
+    for (int r = 0; r < rgn.inner_rows; r++) {
+        for (int c = 0; c < rgn.inner_cols; c++) {
+            cell_put(rgn.row + r, rgn.col + c, ' ', 0);
+        }
+    }
+}
+
+void SmgApp::draw_border(const DisplayRegion& rgn) {
+    if (!rgn.has_border || !rgn.active) return;
+
+    int top = rgn.row - 1;
+    int left = rgn.col - 1;
+    int bottom = rgn.row + rgn.inner_rows;
+    int right = rgn.col + rgn.inner_cols;
+
+    unsigned int rend = SMG_REND_BLUE;
+
+    // Top border: +---...---+
+    cell_put(top, left, '+', rend);
+    for (int c = left + 1; c < right; c++) cell_put(top, c, '-', rend);
+    cell_put(top, right, '+', rend);
+
+    // Bottom border
+    cell_put(bottom, left, '+', rend);
+    for (int c = left + 1; c < right; c++) cell_put(bottom, c, '-', rend);
+    cell_put(bottom, right, '+', rend);
+
+    // Side borders
+    for (int r = rgn.row; r < rgn.row + rgn.inner_rows; r++) {
+        cell_put(r, left, '|', rend);
+        cell_put(r, right, '|', rend);
+    }
 }
 
 void SmgApp::smg_draw_border(unsigned int display_id) {
-#ifdef __VMS
-    smg$draw_rectangle(&display_id, nullptr, nullptr, nullptr, nullptr);
-#else
-    (void)display_id;
-#endif
+    if (display_id == 0 || display_id >= DISP_COUNT) return;
+    draw_border(regions_[display_id]);
 }
 
 void SmgApp::smg_draw_box_title(unsigned int display_id, const std::string& title) {
-    // SMG$CREATE_VIRTUAL_DISPLAY with SMG$M_BORDER handles the border.
-    // We just put the title text at row 1, col 3 with bold+cyan rendition.
+    if (display_id == 0 || display_id >= DISP_COUNT) return;
+    const auto& rgn = regions_[display_id];
+    if (!rgn.active || !rgn.has_border) return;
+
     if (!title.empty()) {
         std::string padded = " " + title + " ";
-        smg_put_chars(display_id, 1, 3, padded, SMG_REND_TITLE);
+        int top = rgn.row - 1;
+        int title_col = rgn.col + 1;  // 2 chars into the top border
+        for (size_t i = 0; i < padded.size(); i++) {
+            int c = title_col + static_cast<int>(i);
+            if (c > term_cols_) break;
+            cell_put(top, c, padded[i], SMG_REND_TITLE);
+        }
     }
 }
+
+// ---- Cell-buffer differential rendering ----
+
+void SmgApp::init_cell_buffers() {
+    size_t total = static_cast<size_t>(term_rows_) * term_cols_;
+    front_buf_.assign(total, ScreenCell{' ', 0});
+    back_buf_.assign(total, ScreenCell{' ', 0});
+    force_full_redraw_ = true;
+}
+
+void SmgApp::cell_put(int row, int col, char ch, unsigned int rendition) {
+    if (row < 1 || row > term_rows_ || col < 1 || col > term_cols_) return;
+    size_t idx = static_cast<size_t>(row - 1) * term_cols_ + (col - 1);
+    back_buf_[idx].ch = ch;
+    back_buf_[idx].rendition = rendition;
+}
+
+void SmgApp::flush_cell_diff() {
+#ifdef __VMS
+    frame_buf_.clear();
+
+    unsigned int cur_rend = UINT_MAX;  // force first SGR emission
+    int cur_row = -1, cur_col = -1;    // cursor position tracker (1-based)
+
+    const size_t total = static_cast<size_t>(term_rows_) * term_cols_;
+    for (size_t idx = 0; idx < total; idx++) {
+        const auto& back = back_buf_[idx];
+        const auto& front = front_buf_[idx];
+
+        // Skip unchanged cells (unless forcing full redraw)
+        if (!force_full_redraw_ &&
+            back.ch == front.ch && back.rendition == front.rendition) {
+            continue;
+        }
+
+        int r = static_cast<int>(idx / term_cols_);
+        int c = static_cast<int>(idx % term_cols_);
+        int sr = r + 1;  // 1-based screen row
+        int sc = c + 1;  // 1-based screen col
+
+        // Emit cursor positioning only if cursor isn't already there
+        if (sr != cur_row || sc != cur_col) {
+            char seq[32];
+            std::snprintf(seq, sizeof(seq), "\033[%d;%dH", sr, sc);
+            frame_buf_ += seq;
+        }
+
+        // Emit SGR only when rendition changes
+        if (back.rendition != cur_rend) {
+            buf_set_rendition(back.rendition);
+            cur_rend = back.rendition;
+        }
+
+        frame_buf_ += back.ch;
+        cur_row = sr;
+        cur_col = sc + 1;  // cursor auto-advances after character
+    }
+
+    // Reset rendition at end of frame
+    if (cur_rend != 0 && cur_rend != UINT_MAX) {
+        frame_buf_ += "\033[0m";
+    }
+
+    if (!frame_buf_.empty()) {
+        std::fwrite(frame_buf_.c_str(), 1, frame_buf_.size(), stdout);
+        std::fflush(stdout);
+    }
+
+    // Swap: front now reflects what's on screen
+    front_buf_ = back_buf_;
+    force_full_redraw_ = false;
+#endif
+}
+
+// ---- Main application loop ----
 
 void SmgApp::run() {
 #ifdef __VMS
     unsigned int status;
 
-    std::cerr << "[SMG] run: creating pasteboard" << std::endl;
-    // Create the pasteboard (screen)
-    status = smg$create_pasteboard(&pasteboard_id_, 0, &term_rows_, &term_cols_);
-    if (!(status & 1)) {
-        std::cerr << "[SMG] run: pasteboard failed, status=" << status << std::endl;
-        return;
-    }
-    std::cerr << "[SMG] run: pasteboard ok (" << term_cols_ << "x" << term_rows_ << ")" << std::endl;
+    // File-based diagnostic log (helps debug issues on VMS)
+    FILE* diag = std::fopen("SYS$SYSROOT:[REZDM.PEX]PEXC_DIAG.LOG", "w");
+    auto diag_log = [&diag](const char* msg) {
+        if (diag) { std::fprintf(diag, "%s\n", msg); std::fflush(diag); }
+    };
+    auto diag_logf = [&diag](const char* fmt, auto... args) {
+        if (diag) { std::fprintf(diag, fmt, args...); std::fprintf(diag, "\n"); std::fflush(diag); }
+    };
 
-    // Create the virtual keyboard for input
-    std::cerr << "[SMG] run: creating keyboard" << std::endl;
-    status = smg$create_virtual_keyboard(&keyboard_id_);
-    if (!(status & 1)) {
-        std::cerr << "[SMG] run: keyboard failed, status=" << status << std::endl;
-        smg$delete_pasteboard(&pasteboard_id_, 0);
-        return;
-    }
-    std::cerr << "[SMG] run: keyboard ok" << std::endl;
+    diag_log("=== PEXC diagnostic start ===");
 
-    // Create virtual displays (panels)
-    std::cerr << "[SMG] run: creating displays" << std::endl;
+    // Configure terminal for ANSI escape sequence support.
+    {
+        char set_term_cmd[] = "SET TERMINAL/ANSI_CRT/DEC_CRT";
+        struct dsc$descriptor_s cmd_dsc = {
+            static_cast<unsigned short>(sizeof(set_term_cmd) - 1),
+            DSC$K_DTYPE_T, DSC$K_CLASS_S, set_term_cmd
+        };
+        lib$spawn(&cmd_dsc, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    }
+
+    // Assign a channel to TT: for direct ANSI output via sys$qiow
+    {
+        char tt_name[] = "TT:";
+        struct dsc$descriptor_s tt_dsc = {3, DSC$K_DTYPE_T, DSC$K_CLASS_S, tt_name};
+        status = sys$assign(&tt_dsc, &tt_chan_, 0, 0, 0);
+        diag_logf("sys$assign TT: status=%%X%08X chan=%u", status, (unsigned)tt_chan_);
+        if (!(status & 1)) {
+            if (diag) std::fclose(diag);
+            return;
+        }
+    }
+
+    // Create SMG$ virtual keyboard for input (SMG$ keyboard works fine on SSH)
+    {
+        char kb_dev[] = "TT:";
+        struct dsc$descriptor_s kb_dsc = {
+            static_cast<unsigned short>(sizeof(kb_dev) - 1),
+            DSC$K_DTYPE_T, DSC$K_CLASS_S, kb_dev
+        };
+        status = smg$create_virtual_keyboard(&keyboard_id_, &kb_dsc);
+        diag_logf("smg$create_virtual_keyboard: status=%%X%08X id=%u", status, keyboard_id_);
+        if (!(status & 1)) {
+            sys$dassgn(tt_chan_);
+            tt_chan_ = 0;
+            if (diag) std::fclose(diag);
+            return;
+        }
+    }
+
+    // Query terminal size via IO$_SENSEMODE
+    {
+        unsigned char tt_chars[12] = {0};
+        _iosb iosb = {};
+        status = sys$qiow(0, tt_chan_, IO$_SENSEMODE, &iosb, 0, 0,
+                           tt_chars, 12, 0, 0, 0, 0);
+        if ((status & 1) && (iosb.iosb$w_status & 1)) {
+            unsigned short width  = static_cast<unsigned short>(tt_chars[2] | (tt_chars[3] << 8));
+            unsigned short length = static_cast<unsigned short>(tt_chars[8] | (tt_chars[9] << 8));
+            if (width > 0)  term_cols_ = width;
+            if (length > 0) term_rows_ = length;
+        }
+        diag_logf("IO$_SENSEMODE: %dx%d (raw)", term_cols_, term_rows_);
+    }
+
+    // VMS SSH pseudo-terminals report "page length" as the scrollback buffer
+    // size (e.g., 4096) rather than the actual visible window height.
+    // Cap to a reasonable maximum.  The SSH client window is typically 24-80 rows.
+    if (term_rows_ > 100) {
+        diag_logf("Capping page length from %d to 50", term_rows_);
+        term_rows_ = 50;
+    }
+    diag_logf("Terminal size: %dx%d", term_cols_, term_rows_);
+
+    // Calculate panel layout and assign display regions
     create_displays();
-    std::cerr << "[SMG] run: displays created" << std::endl;
+    diag_logf("create_displays: terminal_too_small_=%d", (int)terminal_too_small_);
+    for (unsigned int i = 1; i < DISP_COUNT; i++) {
+        diag_logf("  region[%u]: active=%d row=%d col=%d rows=%d cols=%d border=%d",
+                  i, (int)regions_[i].active, regions_[i].row, regions_[i].col,
+                  regions_[i].inner_rows, regions_[i].inner_cols,
+                  (int)regions_[i].has_border);
+    }
 
-    // Start background services
-    std::cerr << "[SMG] run: calling data_store_->start()" << std::endl;
+    // Start background data collection
+    diag_log("Starting data_store...");
     data_store_->start();
-    std::cerr << "[SMG] run: data_store started" << std::endl;
 
-    // Get initial data - wait for actual data
-    std::cerr << "[SMG] run: waiting for initial data..." << std::endl;
-    int retries = 50;
-    current_data_ = data_store_->get_snapshot();
-    while (retries-- > 0 && (!current_data_ || current_data_->process_count == 0)) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // Wait for initial data
+    {
+        int retries = 50;
         current_data_ = data_store_->get_snapshot();
+        while (retries-- > 0 && (!current_data_ || current_data_->process_count == 0)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            current_data_ = data_store_->get_snapshot();
+        }
+        diag_logf("Data wait done: data=%s process_count=%d",
+                  current_data_ ? "yes" : "null",
+                  current_data_ ? (int)current_data_->process_count : -1);
+
+        if (!current_data_ || current_data_->process_count == 0) {
+            diag_log("FATAL: No process data after 5 seconds");
+            // Show error on screen before exiting
+            {
+                const char msg[] = "\033[2J\033[HError: No process data available. Exiting.\r\n";
+                std::fwrite(msg, 1, sizeof(msg) - 1, stdout);
+                std::fflush(stdout);
+            }
+            smg$delete_virtual_keyboard(&keyboard_id_);
+            sys$dassgn(tt_chan_);
+            tt_chan_ = 0;
+            if (diag) std::fclose(diag);
+            return;
+        }
     }
 
-    if (!current_data_ || current_data_->process_count == 0) {
-        std::cerr << "[SMG] run: no initial data after retries, exiting" << std::endl;
-        cleanup_displays();
-        smg$delete_virtual_keyboard(&keyboard_id_);
-        smg$delete_pasteboard(&pasteboard_id_, 0);
-        return;
-    }
-
-    std::cerr << "[SMG] run: got data (" << current_data_->process_count << " procs)" << std::endl;
     view_model_.update_from_snapshot(current_data_);
-    std::cerr << "[SMG] run: entering main loop" << std::endl;
+    diag_logf("ViewModel updated: %zu tree roots, selected_pid=%d",
+              current_data_->process_tree.size(),
+              view_model_.process_list.selected_pid);
 
     running_ = true;
-    auto last_update = std::chrono::steady_clock::now();
-    constexpr auto update_interval = std::chrono::milliseconds(100);
 
-    while (running_) {
-        // Handle input (non-blocking with 16ms timeout)
-        unsigned int key_code = 0;
-        unsigned short term_code = 0;
-        unsigned int timeout_val = 0;  // 0 = no wait (non-blocking)
-        status = smg$read_keystroke(&keyboard_id_, &term_code, 0, &timeout_val);
+    // Initialize cell buffers for differential rendering
+    frame_buf_.reserve(32768);
+    init_cell_buffers();
 
-        if (status == SS$_NORMAL && term_code != 0) {
-            key_code = term_code;
-            handle_input(key_code);
-        }
-
-        // Update data periodically
-        auto now = std::chrono::steady_clock::now();
-        if (now - last_update >= update_interval) {
-            const auto new_data = data_store_->get_snapshot();
-            if (new_data && (!current_data_ || new_data->timestamp != current_data_->timestamp)) {
-                current_data_ = new_data;
-                view_model_.update_from_snapshot(current_data_);
-            }
-            last_update = now;
-        }
-
-        // Render with batched pasteboard updates
-        smg$begin_pasteboard_update(&pasteboard_id_);
-        render();
-        smg$end_pasteboard_update(&pasteboard_id_);
-
-        // Small sleep to reduce CPU usage
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    // Hide cursor and clear screen
+    {
+        const char seq[] = "\033[?25l\033[2J\033[H";
+        std::fwrite(seq, 1, sizeof(seq) - 1, stdout);
+        std::fflush(stdout);
     }
 
-    // Cleanup
+    // Render initial frame to cell buffer
+    std::fill(back_buf_.begin(), back_buf_.end(), ScreenCell{' ', 0});
+    for (unsigned int i = 1; i < DISP_COUNT; i++) {
+        if (regions_[i].active && regions_[i].has_border) draw_border(regions_[i]);
+    }
+    render();
+    flush_cell_diff();
+
+    // Close diagnostic log before main loop (file stays available for inspection)
+    if (diag) { std::fclose(diag); diag = nullptr; }
+
+    // Main loop
+    while (running_) {
+        // Read keystroke with timeout (100 centiseconds = 1 second).
+        // SMG$READ_KEYSTROKE expects unsigned short* for key_code with __NEW_STARLET.
+        unsigned short key_code = 0;
+        int timeout_cs = 100;
+        status = smg$read_keystroke(&keyboard_id_, &key_code, 0, &timeout_cs, 0);
+
+        if (status & 1) {
+            // Key received — widen to unsigned int for handle_input
+            handle_input(static_cast<unsigned int>(key_code));
+        }
+        // On timeout (SS$_TIMEOUT) or key, refresh display
+
+        // Update data
+        current_data_ = data_store_->get_snapshot();
+        if (current_data_) {
+            view_model_.update_from_snapshot(current_data_);
+        }
+
+        // Render frame to cell buffer (only changed cells get output)
+        std::fill(back_buf_.begin(), back_buf_.end(), ScreenCell{' ', 0});
+        for (unsigned int i = 1; i < DISP_COUNT; i++) {
+            if (regions_[i].active && regions_[i].has_border) {
+                draw_border(regions_[i]);
+            }
+        }
+
+        render();
+        flush_cell_diff();
+    }
+
+    // Cleanup: restore terminal
+    {
+        const char seq[] = "\033[?25h\033[0m\033[2J\033[1;1H";
+        std::fwrite(seq, 1, sizeof(seq) - 1, stdout);
+        std::fflush(stdout);
+    }
+
     data_store_->stop();
-    cleanup_displays();
     smg$delete_virtual_keyboard(&keyboard_id_);
-    smg$delete_pasteboard(&pasteboard_id_, 0);
+    sys$dassgn(tt_chan_);
+    tt_chan_ = 0;
 
 #else
-    // Non-VMS stub: cannot run SMG$ TUI
+    // Non-VMS stub
     (void)this;
 #endif
 }
@@ -192,13 +483,15 @@ void SmgApp::run() {
 void SmgApp::render() {
     if (terminal_too_small_) return;
 
-    // Erase all displays
+    // Clear all panel regions before rendering to prevent stale text artifacts.
+    // With direct ANSI output (unlike SMG$ virtual displays), any text from the
+    // previous frame that isn't overwritten will persist on screen.
     if (system_display_) smg_erase_display(system_display_);
-    smg_erase_display(process_display_);
-    smg_erase_display(details_display_);
-    smg_erase_display(status_display_);
+    if (process_display_) smg_erase_display(process_display_);
+    if (details_display_) smg_erase_display(details_display_);
+    // Status bar and dialog are erased by their own render functions.
 
-    // Render panels
+    // Render panels (each writes to frame_buf_ via smg_put_chars)
     if (view_model_.system_panel.is_visible && system_display_) {
         render_system_panel();
     }
@@ -221,7 +514,7 @@ void SmgApp::render() {
     }
 }
 
-// --- Navigation helpers (same logic as ncurses TUI) ---
+// --- Navigation helpers (unchanged from SMG$ version) ---
 
 std::vector<ProcessNode*> SmgApp::get_visible_items() const {
     std::vector<ProcessNode*> items;
@@ -416,7 +709,6 @@ void SmgApp::collect_tree_pids(const ProcessNode* node, std::vector<int>& pids) 
 }
 
 std::string SmgApp::format_bytes(int64_t bytes) {
-    // C++17-compatible implementation (no std::format)
     static const char* units[] = {"B", "K", "M", "G", "T", "P"};
     constexpr int max_unit = 5;
 
@@ -465,22 +757,13 @@ void SmgApp::draw_progress_bar(unsigned int display_id, int row, int col, int wi
     const int bar_width = width - 2;
     const int filled = static_cast<int>(bar_width * std::clamp(percent, 0.0, 100.0) / 100.0);
 
-    // Build the bar string: [####    ]
-    std::string bar = "[";
-    for (int i = 0; i < filled; ++i) bar += '#';
-    for (int i = filled; i < bar_width; ++i) bar += ' ';
-    bar += ']';
-
-    // Put the bracket parts with normal rendition
     smg_put_chars(display_id, row, col, "[", SMG_REND_NORMAL);
 
-    // Put filled portion with color rendition
     if (filled > 0) {
         std::string filled_str(filled, '#');
         smg_put_chars(display_id, row, col + 1, filled_str, rendition);
     }
 
-    // Put empty portion
     if (filled < bar_width) {
         std::string empty_str(bar_width - filled, ' ');
         smg_put_chars(display_id, row, col + 1 + filled, empty_str, SMG_REND_NORMAL);
@@ -507,19 +790,16 @@ void SmgApp::draw_cpu_bar(unsigned int display_id, int row, int col, int width,
 
     smg_put_chars(display_id, row, col, "[", SMG_REND_NORMAL);
 
-    // User portion (green)
     if (user_chars > 0) {
         std::string user_str(user_chars, '#');
         smg_put_chars(display_id, row, col + 1, user_str, SMG_REND_CPU_USER);
     }
 
-    // System portion (red)
     if (system_chars > 0) {
         std::string sys_str(system_chars, '#');
         smg_put_chars(display_id, row, col + 1 + user_chars, sys_str, SMG_REND_CPU_SYSTEM);
     }
 
-    // Empty portion
     const int empty = bar_width - user_chars - system_chars;
     if (empty > 0) {
         std::string empty_str(empty, ' ');

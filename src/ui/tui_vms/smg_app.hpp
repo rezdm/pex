@@ -1,9 +1,11 @@
 #pragma once
 
-// OpenVMS TUI application using SMG$ (Screen Management Facility)
-// This is the VMS-native equivalent of tui_app.hpp which uses ncurses.
-// SMG$ uses pasteboard/virtual display/virtual keyboard abstractions
-// instead of WINDOW* / initscr() / getch().
+// OpenVMS TUI application using direct ANSI escape sequences via SYS$QIOW.
+//
+// SMG$ display output doesn't work on VMS x86_64 SSH pseudo-terminals
+// (text content invisible despite success return codes), so we bypass SMG$
+// for rendering and write ANSI escape sequences directly to TT: via SYS$QIOW.
+// SMG$ is still used for keyboard input (smg$read_keystroke works fine).
 //
 // C++17 only (VSI C++ on OpenVMS x86-64 is Clang 10.0.1, no C++20).
 
@@ -12,12 +14,6 @@
 #include <descrip.h>
 #include <smgdef.h>
 #include <smg$routines.h>
-#else
-// Stub types for cross-compilation / IDE support on non-VMS platforms.
-// These allow the code to be parsed and analyzed but not executed.
-typedef unsigned int smg$_display_id;
-typedef unsigned int smg$_pasteboard_id;
-typedef unsigned int smg$_keyboard_id;
 #endif
 
 #include "../../platform/interfaces/i_process_data_provider.hpp"
@@ -38,6 +34,27 @@ enum class SmgPanelFocus {
     ProcessList,
     DetailsPanel
 };
+
+// A rectangular region on the screen. Coordinates refer to the INNER area
+// (content area), excluding any border. Borders, if present, are drawn
+// one row/col outside the inner area.
+struct DisplayRegion {
+    int row = 0;          // 1-based screen row of inner area top-left
+    int col = 0;          // 1-based screen col of inner area top-left
+    int inner_rows = 0;   // number of usable content rows
+    int inner_cols = 0;   // number of usable content columns
+    bool has_border = false;
+    bool active = false;
+};
+
+// Display region indices (used as display_id in rendering functions)
+constexpr unsigned int DISP_NONE    = 0;
+constexpr unsigned int DISP_SYSTEM  = 1;
+constexpr unsigned int DISP_PROCESS = 2;
+constexpr unsigned int DISP_DETAILS = 3;
+constexpr unsigned int DISP_STATUS  = 4;
+constexpr unsigned int DISP_DIALOG  = 5;
+constexpr unsigned int DISP_COUNT   = 6;
 
 class SmgApp {
 public:
@@ -102,18 +119,34 @@ private:
     void execute_kill(bool force);
     static void collect_tree_pids(const ProcessNode* node, std::vector<int>& pids);
 
-    // SMG display management
+    // Display management (region-based layout)
     void create_displays();
     void resize_displays();
     void cleanup_displays();
     [[nodiscard]] int calc_system_panel_height() const;
 
-    // SMG helpers
+    // ANSI rendering helpers
     void smg_put_chars(unsigned int display_id, int row, int col,
                        const std::string& text, unsigned int rendition = 0);
     void smg_erase_display(unsigned int display_id);
     void smg_draw_border(unsigned int display_id);
     void smg_draw_box_title(unsigned int display_id, const std::string& title);
+    void draw_border(const DisplayRegion& region);
+
+    // Frame buffer operations
+    void buf_move_to(int row, int col);
+    void buf_set_rendition(unsigned int rendition);
+    void buf_reset_rendition();
+    void buf_write(const std::string& text);
+    void buf_clear_screen();
+    void buf_hide_cursor();
+    void buf_show_cursor();
+    void flush_frame_buffer();
+
+    // Cell-buffer differential rendering
+    void init_cell_buffers();
+    void cell_put(int screen_row, int screen_col, char ch, unsigned int rendition);
+    void flush_cell_diff();
 
     // Utility
     static std::string format_bytes(int64_t bytes);
@@ -135,16 +168,38 @@ private:
     // ViewModel (holds all UI state)
     AppViewModel view_model_;
 
-    // SMG IDs (unsigned int on VMS)
-    unsigned int pasteboard_id_ = 0;
-    unsigned int keyboard_id_ = 0;
+    // Display regions (indexed by DISP_* constants)
+    DisplayRegion regions_[DISP_COUNT];
+
+    // Display IDs for compatibility with render functions
+    // These hold DISP_* index values (0 = inactive)
     unsigned int system_display_ = 0;
     unsigned int process_display_ = 0;
     unsigned int details_display_ = 0;
     unsigned int status_display_ = 0;
-    unsigned int dialog_display_ = 0;  // Temporary overlay for dialogs
+    unsigned int dialog_display_ = 0;
 
-    // Terminal dimensions (from pasteboard)
+    // SMG$ keyboard (used for input only)
+    unsigned int keyboard_id_ = 0;
+
+    // Terminal I/O channel (SYS$ASSIGN to TT:)
+    unsigned short tt_chan_ = 0;
+
+    // ANSI frame buffer — used by flush_cell_diff to build output
+    std::string frame_buf_;
+
+    // Cell-based double buffer for differential rendering.
+    // Only cells that changed between frames are output, reducing
+    // ANSI output from ~40KB to ~500 bytes per typical refresh.
+    struct ScreenCell {
+        char ch = ' ';
+        unsigned int rendition = 0;
+    };
+    std::vector<ScreenCell> front_buf_;  // what's currently on screen
+    std::vector<ScreenCell> back_buf_;   // being built this frame
+    bool force_full_redraw_ = true;
+
+    // Terminal dimensions
     int term_rows_ = 24;
     int term_cols_ = 80;
 
