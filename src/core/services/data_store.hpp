@@ -126,6 +126,7 @@ private:
     std::atomic<bool> force_refresh_{false};  // For refresh_now() to wake thread
     std::atomic<bool> refresh_pending_{false};  // Queue refresh while paused
     std::atomic<int> refresh_interval_ms_{1000};
+    std::atomic<bool> thread_exited_{false};
     PEX_CONDITION_VARIABLE cv_;
     PEX_MUTEX cv_mutex_;
 

@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 
 #ifdef __VMS
 #define __NEW_STARLET 1
@@ -462,17 +463,38 @@ void SmgApp::run() {
         flush_cell_diff();
     }
 
-    // Cleanup: restore terminal
+    // Cleanup: restore terminal state.
+    // SMG$DELETE_VIRTUAL_KEYBOARD restores the terminal characteristics
+    // (echo, line editing) that SMG$ changed for keystroke reading.
+    // Without this, the terminal stays in noecho/pasthru mode and the
+    // DCL prompt becomes invisible after exit.
+    smg$delete_virtual_keyboard(&keyboard_id_);
+
+    // Restore terminal to normal mode explicitly
+    {
+        char set_term_cmd[] = "SET TERMINAL/ECHO/LINE_EDITING";
+        struct dsc$descriptor_s cmd_dsc = {
+            static_cast<unsigned short>(sizeof(set_term_cmd) - 1),
+            DSC$K_DTYPE_T, DSC$K_CLASS_S, set_term_cmd
+        };
+        lib$spawn(&cmd_dsc, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    }
+
+    // Show cursor, reset attributes, clear screen, home cursor
     {
         const char seq[] = "\033[?25h\033[0m\033[2J\033[1;1H";
         std::fwrite(seq, 1, sizeof(seq) - 1, stdout);
         std::fflush(stdout);
     }
 
-    data_store_->stop();
-    smg$delete_virtual_keyboard(&keyboard_id_);
+    // Deassign terminal channel
     sys$dassgn(tt_chan_);
     tt_chan_ = 0;
+
+    // Exit immediately — skip data_store_->stop() which can hang
+    // when the collection thread is blocked in VMS system services.
+    // Process rundown handles thread termination and resource cleanup.
+    _exit(0);
 
 #else
     // Non-VMS stub

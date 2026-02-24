@@ -54,7 +54,21 @@ void DataStore::stop() {
     cv_.notify_all();
 
     if (collection_thread_.joinable()) {
+#ifdef __VMS
+        // On VMS, the collection thread may be blocked in sys$getjpiw
+        // system service calls that don't respond to signals.
+        // Wait up to 3 seconds, then detach — process exit will clean up.
+        for (int i = 0; i < 30 && !thread_exited_.load(); i++) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        if (thread_exited_.load()) {
+            collection_thread_.join();
+        } else {
+            collection_thread_.detach();
+        }
+#else
         collection_thread_.join();
+#endif
     }
 }
 
@@ -140,6 +154,7 @@ void DataStore::collection_thread_func() {
             collect_data();
         }
     }
+    thread_exited_ = true;
 }
 
 void DataStore::collect_data() {
