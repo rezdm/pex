@@ -139,7 +139,14 @@ automatically. Until then, the CI build-only check is a reasonable floor.
   (GUI) and `pexc` (TUI) succeeded with zero warnings (`-Wall -Wextra -Wpedantic`).
 - `pexc` smoke-tested in a pseudo-terminal: starts, collects data (66 tasks / 24
   CPUs reported), renders the system panel and process list, exits cleanly.
-- FreeBSD and Solaris backends could not be compiled on this machine (no
-  cross-toolchain); changes there were kept minimal-diff and reviewed against the
-  documented kernel/procfs APIs. Watch the cross-platform CI workflow on the first
-  push.
+- Solaris 11.4 (real hardware, GCC 14.2, system ncurses 6.4 via
+  `-DCURSES_INCLUDE_DIR=/usr/include/ncurses -DCURSES_LIBRARY=/usr/lib/64/libncursesw.so.6`,
+  `-DBUILD_GUI=OFF`): `pexc` builds with zero warnings and was smoke-tested live —
+  system panel, process tree, thread counts and details panel all render; clean
+  quit. One pre-existing portability bug surfaced and was fixed: `BUTTON5_PRESSED`
+  (wheel-down) only exists with ncurses mouse protocol v2, now feature-guarded
+  (`tui_input_panels.cpp`). The GUI was not built there (GLFW requires Xinerama
+  headers, not installed on that box).
+- FreeBSD backend could not be compiled (no FreeBSD machine available); changes
+  there were kept minimal-diff and reviewed against the documented APIs. Watch CI /
+  the VirtualBox FreeBSD setup on first build.
