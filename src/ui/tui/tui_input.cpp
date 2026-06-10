@@ -55,6 +55,16 @@ void TuiApp::handle_input(int ch) {
         return;
     }
 
+    // Find-open-file query input / results overlay (issue #7)
+    if (find_file_mode_) {
+        handle_find_file_input(ch);
+        return;
+    }
+    if (find_results_visible_) {
+        handle_find_results_input(ch);
+        return;
+    }
+
     // Global keys
     switch (ch) {
         case 'q':
@@ -72,6 +82,15 @@ void TuiApp::handle_input(int ch) {
         case '/':
             search_mode_ = true;
             search_input_.clear();
+            return;
+
+        case 'o':  // Find open file/handle (issue #7)
+            find_file_mode_ = true;
+            find_file_input_.clear();
+            return;
+
+        case 'd':  // Dump (export) recorded history to CSV (issue #9)
+            export_history();
             return;
 
         case 'n':  // Next search match

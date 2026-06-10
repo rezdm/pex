@@ -280,6 +280,7 @@ if(BUILD_TUI AND NCURSES_FOUND)
         src/ui/tui/tui_details_panel.cpp
         src/ui/tui/tui_details_tabs.cpp
         src/ui/tui/tui_kill_dialog.cpp
+        src/ui/tui/tui_find_file.cpp
         src/ui/tui/tui_input.cpp
         src/ui/tui/tui_input_panels.cpp
         src/ui/tui/tui_colors.cpp

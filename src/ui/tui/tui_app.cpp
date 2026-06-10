@@ -19,11 +19,13 @@ static void handle_resize([[maybe_unused]] int sig) {
 TuiApp::TuiApp(DataStore* data_store,
                ISystemDataProvider* system_provider,
                IProcessDataProvider* details_provider,
-               IProcessKiller* killer)
+               IProcessKiller* killer,
+               HistoryStore* history)
     : data_store_(data_store)
     , system_provider_(system_provider)
     , details_provider_(details_provider)
     , killer_(killer)
+    , history_(history)
 {
     assert(data_store_ != nullptr);
     assert(system_provider_ != nullptr);
@@ -32,6 +34,7 @@ TuiApp::TuiApp(DataStore* data_store,
 }
 
 TuiApp::~TuiApp() {
+    stop_find_scan();
     cleanup_windows();
 }
 
@@ -136,6 +139,11 @@ void TuiApp::run() {
             last_update = now;
         }
 
+        // Find-open-file worker progressed (issue #7)
+        if (find_dirty_.exchange(false)) {
+            needs_render = true;
+        }
+
         // Render only when something changed
         if (needs_render) {
             render();
@@ -144,6 +152,7 @@ void TuiApp::run() {
     }
 
     // Cleanup
+    stop_find_scan();
     data_store_->stop();
     name_resolver_.stop();
     cleanup_windows();
@@ -201,6 +210,14 @@ void TuiApp::render() {
 
     if (search_mode_) {
         render_search_bar();
+    }
+
+    if (find_file_mode_) {
+        render_find_file_bar();
+    }
+
+    if (find_results_visible_) {
+        render_find_results_overlay();
     }
 }
 
