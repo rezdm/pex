@@ -147,6 +147,7 @@ automatically. Until then, the CI build-only check is a reasonable floor.
   (wheel-down) only exists with ncurses mouse protocol v2, now feature-guarded
   (`tui_input_panels.cpp`). The GUI was not built there (GLFW requires Xinerama
   headers, not installed on that box).
-- FreeBSD backend could not be compiled (no FreeBSD machine available); changes
-  there were kept minimal-diff and reviewed against the documented APIs. Watch CI /
-  the VirtualBox FreeBSD setup on first build.
+- GitHub Actions multi-platform workflow (`cmake-multi-platform.yml`), manually
+  dispatched against this branch (run 27295539101): all four jobs green —
+  Ubuntu, Debian, **FreeBSD** (verifies the FreeBSD backend changes) and
+  **Solaris x86** (full GUI + TUI build with `-DBUILD_NCURSES=ON`).
