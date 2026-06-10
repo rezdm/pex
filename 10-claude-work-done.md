@@ -111,9 +111,22 @@ VMS-only `thread_exited_` detach logic are gone. Core is plain C++23 again.
 - **Solaris `pfiles`/`pargs` popen on the UI thread**: `pfiles` briefly stops the
   target and can be slow, but it is the documented fallback path only; making the
   details fetch async is a larger refactor, noted as a known limitation in the code.
+  Tracked as [#31](https://github.com/rezdm/pex/issues/31).
 - **FreeBSD TCP state inference** ("has peer ⇒ ESTABLISHED"): exact state needs the
   `net.inet.tcp.pcblist` sysctl walk; left as-is with the existing comment.
+  Tracked as [#26](https://github.com/rezdm/pex/issues/26).
 - **GUI list view re-sorting every frame**: negligible at desktop process counts.
+
+## Related open GitHub issues (not addressed here)
+
+- [#28 — Solaris: user/kernel time split](https://github.com/rezdm/pex/issues/28):
+  Solaris still reports combined CPU time in `user_time` with `kernel_time = 0`;
+  `/proc/<pid>/usage` microstate accounting would split it.
+- [#29 — Solaris: processor binding](https://github.com/rezdm/pex/issues/29):
+  the threads tab shows the last CPU (`pr_onpro`); the binding (`pr_bindpro`) is
+  not read.
+- [#7 — Search by open file/socket](https://github.com/rezdm/pex/issues/7):
+  the search improvements in this change cover process name + command line only.
 
 ## Tests — recommendation (finding 14, per owner question)
 

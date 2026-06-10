@@ -88,7 +88,7 @@ already exists in `collapsed_pids`. Related: `ProcessNode::clone()`
 hitch on every SIGTERM. On Solaris the details panel shells out to `pfiles`/`pargs`
 via `popen` (`solaris_process_details.cpp:96, 588`); `pfiles` briefly *stops the
 target process* and can take seconds on processes with many fds — all on the render
-thread.
+thread. (Tracked as [#31](https://github.com/rezdm/pex/issues/31).)
 
 ---
 
@@ -139,3 +139,20 @@ abandoned in commit b1bdd95. Every core change has to keep a dead platform compi
   valid in practice, cosmetic only.
 - `MemoryInfo`/`SwapInfo` parsing reads into an uninitialized `int64_t value` if a
   `/proc/meminfo` line is malformed (`system_info.cpp:96-98`) — harmless in practice.
+
+---
+
+## Related open GitHub issues
+
+Pre-existing issues that overlap with findings in this review:
+
+- [#31 — Solaris: avoid command spawning (pfiles/pargs)](https://github.com/rezdm/pex/issues/31)
+  — finding 11.
+- [#26 — FreeBSD: accurate TCP state via net.inet.tcp.pcblist](https://github.com/rezdm/pex/issues/26)
+  — the "has peer ⇒ ESTABLISHED" inference noted under finding 6's platform gaps.
+- [#28 — Solaris: user/kernel time split](https://github.com/rezdm/pex/issues/28)
+  — Solaris reports combined CPU time in `user_time` with `kernel_time = 0`.
+- [#29 — Solaris: processor binding](https://github.com/rezdm/pex/issues/29)
+  — threads tab shows last CPU (`pr_onpro`), not the binding (`pr_bindpro`).
+- [#7 — Search by open file/socket](https://github.com/rezdm/pex/issues/7)
+  — the search improvements in this review cover name + command line only.
