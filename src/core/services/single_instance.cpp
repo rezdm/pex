@@ -13,15 +13,21 @@ SingleInstance::SingleInstance() = default;
 SingleInstance::~SingleInstance() {
     running_ = false;
 
+    // Wake the listener out of accept() with shutdown(), but do NOT close the
+    // fd yet: closing while the listener thread may still be using it races
+    // with fd reuse (another thread could be handed the same fd number).
+    // Only close after the thread has been joined.
     if (server_fd_ >= 0) {
-        // Close the server socket to unblock accept()
         shutdown(server_fd_, SHUT_RDWR);
-        close(server_fd_);
-        server_fd_ = -1;
     }
 
     if (listener_.joinable()) {
         listener_.join();
+    }
+
+    if (server_fd_ >= 0) {
+        close(server_fd_);
+        server_fd_ = -1;
     }
 
     if (!socket_path_.empty()) {
@@ -66,8 +72,11 @@ bool SingleInstance::try_become_primary() {
     }
     close(client_fd);
 
-    // No existing instance - become the server
-    // First, remove any stale socket file
+    // No existing instance - become the server.
+    // First, remove any stale socket file. NOTE: there is an inherent TOCTOU
+    // here — two instances started at the exact same moment can both fail the
+    // connect, both unlink+bind, and both become primary. Acceptable for a
+    // desktop tool; fixing it would require an flock-based lock file.
     unlink(socket_path_.c_str());
 
     server_fd_ = socket(AF_UNIX, SOCK_STREAM, 0);

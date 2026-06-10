@@ -13,13 +13,17 @@ namespace fs = std::filesystem;
 
 namespace pex {
 
-SolarisProcessDataProvider::SolarisProcessDataProvider() = default;
+SolarisProcessDataProvider::SolarisProcessDataProvider() {
+    // Cache clock ticks per second for CPU time calculations
+    clock_ticks_ = sysconf(_SC_CLK_TCK);
+}
+
 SolarisProcessDataProvider::~SolarisProcessDataProvider() = default;
 
 void SolarisProcessDataProvider::add_error(const std::string& context, const std::string& message) {
     std::lock_guard lock(errors_mutex_);
     recent_errors_.push_back({std::chrono::steady_clock::now(), context + ": " + message});
-    if (recent_errors_.size() > 100) {
+    if (recent_errors_.size() > 10) {
         recent_errors_.erase(recent_errors_.begin());
     }
 }
@@ -90,7 +94,7 @@ std::optional<ProcessInfo> SolarisProcessDataProvider::read_process_info(int pid
     info.name = psinfo.pr_fname;
     info.state_char = map_state(psinfo.pr_lwp.pr_sname);
     info.user_name = get_username(psinfo.pr_uid);
-    info.priority = psinfo.pr_lwp.pr_nice;
+    info.priority = psinfo.pr_lwp.pr_pri;  // Dynamic priority, consistent with other platforms
     info.thread_count = psinfo.pr_nlwp;
 
     // Memory info
@@ -101,9 +105,8 @@ std::optional<ProcessInfo> SolarisProcessDataProvider::read_process_info(int pid
     }
 
     // CPU times (in clock ticks)
-    long ticks = sysconf(_SC_CLK_TCK);
-    info.user_time = psinfo.pr_time.tv_sec * ticks +
-                     psinfo.pr_time.tv_nsec * ticks / 1000000000;
+    info.user_time = psinfo.pr_time.tv_sec * clock_ticks_ +
+                     psinfo.pr_time.tv_nsec * clock_ticks_ / 1000000000;
     // Solaris pr_time includes both user and system time
     // We'll split it based on pr_pctcpu later or just use combined
     info.kernel_time = 0;

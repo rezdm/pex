@@ -46,7 +46,7 @@ void TuiApp::run() {
     noecho();
     keypad(stdscr, TRUE);
     curs_set(0);  // Hide cursor
-    nodelay(stdscr, TRUE);  // Non-blocking input
+    timeout(50);  // Blocking input with 50 ms timeout (paces the main loop)
     mouseinterval(200);  // Double-click timeout in milliseconds
 
     // Enable mouse support (button presses and scroll wheel, not movement tracking)
@@ -106,6 +106,8 @@ void TuiApp::run() {
     auto last_update = std::chrono::steady_clock::now();
     constexpr auto update_interval = std::chrono::milliseconds(100);
 
+    bool needs_render = true;  // Initial paint
+
     while (running_) {
         // Handle terminal resize
         if (g_resize_requested) {
@@ -113,11 +115,13 @@ void TuiApp::run() {
             endwin();
             refresh();
             resize_windows();
+            needs_render = true;
         }
 
-        // Handle input (non-blocking)
+        // Handle input (blocks up to 50 ms, which paces the loop)
         if (const int ch = getch(); ch != ERR) {
             handle_input(ch);
+            needs_render = true;
         }
 
         // Update data periodically
@@ -127,15 +131,16 @@ void TuiApp::run() {
             if (new_data && (!current_data_ || new_data->timestamp != current_data_->timestamp)) {
                 current_data_ = new_data;
                 view_model_.update_from_snapshot(current_data_);
+                needs_render = true;
             }
             last_update = now;
         }
 
-        // Render
-        render();
-
-        // Small sleep to reduce CPU usage
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        // Render only when something changed
+        if (needs_render) {
+            render();
+            needs_render = false;
+        }
     }
 
     // Cleanup

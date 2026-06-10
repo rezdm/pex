@@ -10,14 +10,8 @@
 #include <memory>
 #include <thread>
 #include <atomic>
-#ifdef __VMS
-#include "../../platform/openvms/vms_mutex.hpp"
-#else
 #include <mutex>
 #include <condition_variable>
-#define PEX_MUTEX std::mutex
-#define PEX_CONDITION_VARIABLE std::condition_variable
-#endif
 #include <functional>
 
 namespace pex {
@@ -32,16 +26,16 @@ struct ProcessNode {
     double tree_memory_percent = 0.0;
     double tree_cpu_percent = 0.0;
     double tree_total_cpu_percent = 0.0;
-
-    // Deep copy for thread-safe snapshot
-    [[nodiscard]] std::unique_ptr<ProcessNode> clone() const;
 };
 
 // Snapshot of all system data - returned to UI.
 // INVARIANT: process_map contains raw pointers into process_tree.
 // These pointers remain valid for the lifetime of this DataSnapshot,
 // because process_tree owns the nodes via unique_ptr and snapshots
-// are shared via shared_ptr (never modified after construction).
+// are shared via shared_ptr. The collection thread never touches a
+// snapshot after publishing it. Exception to immutability: the UI thread
+// (sole consumer after publication) syncs ProcessNode::is_expanded from
+// its own view state each frame; no other field may be mutated.
 struct DataSnapshot {
     std::vector<std::unique_ptr<ProcessNode>> process_tree;
     std::unordered_map<int, ProcessNode*> process_map;  // Non-owning pointers into process_tree
@@ -126,12 +120,11 @@ private:
     std::atomic<bool> force_refresh_{false};  // For refresh_now() to wake thread
     std::atomic<bool> refresh_pending_{false};  // Queue refresh while paused
     std::atomic<int> refresh_interval_ms_{1000};
-    std::atomic<bool> thread_exited_{false};
-    PEX_CONDITION_VARIABLE cv_;
-    PEX_MUTEX cv_mutex_;
+    std::condition_variable cv_;
+    std::mutex cv_mutex_;
 
     // Data storage with mutex protection
-    mutable PEX_MUTEX data_mutex_;
+    mutable std::mutex data_mutex_;
     std::shared_ptr<DataSnapshot> current_snapshot_;
 
     // For CPU delta calculations (pre-allocated, reused each tick)

@@ -60,6 +60,7 @@ private:
     void search_select_first();
     void search_next();
     void search_previous();
+    void expand_ancestors(int pid);
     [[nodiscard]] bool current_selection_matches() const;
     [[nodiscard]] std::vector<ProcessNode*> find_matching_processes() const;
 

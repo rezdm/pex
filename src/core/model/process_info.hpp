@@ -2,6 +2,7 @@
 
 #include <string>
 #include <chrono>
+#include <cstdint>
 #include <optional>
 
 namespace pex {
@@ -66,12 +67,13 @@ struct NetworkConnectionInfo {
     std::string local_endpoint;     // "ip:port" format
     std::string remote_endpoint;    // "ip:port" format (may be "*:*" for listening)
     std::string state;              // "LISTEN", "ESTABLISHED", "TIME_WAIT", etc.
-    std::optional<int> inode;       // Socket inode (Linux-specific, optional)
+    std::optional<uint64_t> inode;  // Socket inode (Linux-specific, optional)
 };
 
 struct MemoryMapInfo {
     std::string address;            // Address range (platform-specific format)
-    std::string size;               // Human-readable size
+    uint64_t size_bytes = 0;        // Region size in bytes (authoritative value)
+    std::string size;               // Human-readable size (for display only)
     std::string permissions;        // "rwxp" style or equivalent
     std::string pathname;           // Mapped file path or "[heap]", "[stack]", etc.
 };
@@ -84,9 +86,10 @@ struct EnvironmentVariable {
 struct LibraryInfo {
     std::string path;               // Full path to the library
     std::string name;               // Just the filename
-    std::string base_address;       // First mapped address (hex string)
+    uint64_t base_addr = 0;         // First mapped address (numeric, for sorting)
+    std::string base_address;       // First mapped address (hex string, for display)
     int64_t total_size = 0;         // Sum of all mapped regions (bytes)
-    int64_t resident_size = 0;      // RSS if available (bytes)
+    int64_t resident_size = 0;      // RSS if available (bytes, 0 = unknown)
     bool is_executable = false;     // Main executable vs shared library
 };
 

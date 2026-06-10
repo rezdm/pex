@@ -74,6 +74,7 @@ private:
     void search_select_first();
     void search_next();
     void search_previous();
+    void expand_ancestors(int pid);  // Defined in tui_app_navigation.cpp
     [[nodiscard]] bool matches_search(const ProcessInfo& info) const;
     [[nodiscard]] std::vector<ProcessNode*> find_matching_processes() const;
 

@@ -86,7 +86,7 @@ std::optional<ProcessInfo> ProcfsReader::get_process_info(int pid, int64_t total
         >> minflt >> cminflt >> majflt >> cmajflt >> utime >> stime
         >> cutime >> cstime >> priority >> nice >> num_threads >> itrealvalue >> starttime;
 
-    if (iss.fail() && state.empty()) {
+    if (iss.fail()) {
         add_error(std::format("PID {}: failed to parse stat fields", pid));
         return std::nullopt;
     }
@@ -111,7 +111,7 @@ std::optional<ProcessInfo> ProcfsReader::get_process_info(int pid, int64_t total
         uint64_t size = 0, resident = 0;
         statm_iss >> size >> resident;
         if (!statm_iss.fail()) {
-            long page_size = sysconf(_SC_PAGESIZE);
+            static const long page_size = sysconf(_SC_PAGESIZE);
             info.virtual_memory = static_cast<int64_t>(size * page_size);
             info.resident_memory = static_cast<int64_t>(resident * page_size);
 

@@ -12,8 +12,8 @@ namespace fs = std::filesystem;
 
 namespace pex {
 
-std::map<int, NetworkConnectionInfo> ProcfsReader::parse_net_file(const std::string& path, const std::string& protocol) {
-    std::map<int, NetworkConnectionInfo> connections;
+std::map<uint64_t, NetworkConnectionInfo> ProcfsReader::parse_net_file(const std::string& path, const std::string& protocol) {
+    std::map<uint64_t, NetworkConnectionInfo> connections;
 
     std::ifstream file(path);
     if (!file) return connections;
@@ -71,7 +71,7 @@ std::map<int, NetworkConnectionInfo> ProcfsReader::parse_net_file(const std::str
         std::string tx_rx, tr_tm, retrnsmt;
         int uid = 0;
         int timeout = 0;
-        int inode = 0;
+        uint64_t inode = 0;  // Socket inodes are unsigned long; can exceed INT_MAX
 
         iss >> sl_str >> local_addr >> remote_addr >> state_hex
             >> tx_rx >> tr_tm >> retrnsmt >> uid >> timeout >> inode;
@@ -102,15 +102,16 @@ std::map<int, NetworkConnectionInfo> ProcfsReader::parse_net_file(const std::str
 std::vector<NetworkConnectionInfo> ProcfsReader::get_network_connections(const int pid) {
     std::vector<NetworkConnectionInfo> result;
 
-    std::set<int> socket_inodes;
-    const std::string fd_path = "/proc/" + std::to_string(pid) + "/fd";
+    std::set<uint64_t> socket_inodes;
+    const std::string proc_path = "/proc/" + std::to_string(pid);
+    const std::string fd_path = proc_path + "/fd";
 
     try {
         for (const auto& entry : fs::directory_iterator(fd_path)) {
             try {
                 std::string link = read_symlink(entry.path().string());
                 if (link.starts_with("socket:[")) {
-                    int inode = 0;
+                    uint64_t inode = 0;
                     const auto start = link.data() + 8;
                     const auto end = link.data() + link.size() - 1;
                     std::from_chars(start, end, inode);
@@ -126,12 +127,15 @@ std::vector<NetworkConnectionInfo> ProcfsReader::get_network_connections(const i
 
     if (socket_inodes.empty()) return result;
 
-    auto tcp = parse_net_file("/proc/net/tcp", "tcp");
-    auto tcp6 = parse_net_file("/proc/net/tcp6", "tcp6");
-    auto udp = parse_net_file("/proc/net/udp", "udp");
-    auto udp6 = parse_net_file("/proc/net/udp6", "udp6");
+    // Read the net tables through /proc/<pid>/net/ so we see the *target
+    // process's* network namespace (containers, systemd PrivateNetwork, ...).
+    // /proc/net/ would only show pex's own namespace.
+    auto tcp = parse_net_file(proc_path + "/net/tcp", "tcp");
+    auto tcp6 = parse_net_file(proc_path + "/net/tcp6", "tcp6");
+    auto udp = parse_net_file(proc_path + "/net/udp", "udp");
+    auto udp6 = parse_net_file(proc_path + "/net/udp6", "udp6");
 
-    for (int inode : socket_inodes) {
+    for (uint64_t inode : socket_inodes) {
         if (auto itTcp4 = tcp.find(inode); itTcp4 != tcp.end()) {
             result.push_back(itTcp4->second);
         } else if (auto itTcp6 = tcp6.find(inode); itTcp6 != tcp6.end()) {

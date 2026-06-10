@@ -1,5 +1,6 @@
 #include "tui_app.hpp"
 #include <algorithm>
+#include <functional>
 
 namespace pex {
 
@@ -99,19 +100,45 @@ bool TuiApp::matches_search(const ProcessInfo& info) const {
 
 std::vector<ProcessNode*> TuiApp::find_matching_processes() const {
     std::vector<ProcessNode*> matches;
+    if (!current_data_) return matches;
 
-    for (const auto visible = get_visible_items(); auto* node : visible) {
+    // Search ALL processes (depth-first), regardless of collapsed state,
+    // so matches under collapsed parents can still be found.
+    std::function<void(ProcessNode*)> visit = [&](ProcessNode* node) {
         if (matches_search(node->info)) {
             matches.push_back(node);
         }
+        for (const auto& child : node->children) {
+            visit(child.get());
+        }
+    };
+    for (const auto& root : current_data_->process_tree) {
+        visit(root.get());
     }
     return matches;
+}
+
+void TuiApp::expand_ancestors(int pid) {
+    if (!current_data_) return;
+    auto& collapsed = view_model_.process_list.collapsed_pids;
+
+    int current = pid;
+    for (int hops = 0; hops < 128; ++hops) {  // Guard against parent_pid cycles
+        const auto it = current_data_->process_map.find(current);
+        if (it == current_data_->process_map.end()) break;
+        const int parent = it->second->info.parent_pid;
+        if (parent == current) break;
+        if (!current_data_->process_map.contains(parent)) break;
+        collapsed.erase(parent);
+        current = parent;
+    }
 }
 
 void TuiApp::search_select_first() {
     const auto matches = find_matching_processes();
     if (!matches.empty()) {
         view_model_.process_list.selected_pid = matches[0]->info.pid;
+        expand_ancestors(view_model_.process_list.selected_pid);
         scroll_to_selection();
     }
 }
@@ -126,6 +153,7 @@ void TuiApp::search_next() {
             // Select next match (wrap around)
             const size_t next = (i + 1) % matches.size();
             view_model_.process_list.selected_pid = matches[next]->info.pid;
+            expand_ancestors(view_model_.process_list.selected_pid);
             scroll_to_selection();
             return;
         }
@@ -133,6 +161,7 @@ void TuiApp::search_next() {
 
     // If current selection isn't a match, select first match
     view_model_.process_list.selected_pid = matches[0]->info.pid;
+    expand_ancestors(view_model_.process_list.selected_pid);
     scroll_to_selection();
 }
 
@@ -145,12 +174,14 @@ void TuiApp::search_previous() {
             // Select previous match (wrap around)
             const size_t prev = (i == 0) ? matches.size() - 1 : i - 1;
             view_model_.process_list.selected_pid = matches[prev]->info.pid;
+            expand_ancestors(view_model_.process_list.selected_pid);
             scroll_to_selection();
             return;
         }
     }
 
     view_model_.process_list.selected_pid = matches[0]->info.pid;
+    expand_ancestors(view_model_.process_list.selected_pid);
     scroll_to_selection();
 }
 

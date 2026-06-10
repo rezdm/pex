@@ -1,4 +1,5 @@
 #include "../procfs_reader.hpp"
+#include "../../../core/format_utils.hpp"
 #include <fstream>
 #include <sstream>
 #include <charconv>
@@ -40,16 +41,8 @@ std::vector<MemoryMapInfo> ProcfsReader::get_memory_maps(int pid) {
         map.address = address;
         map.permissions = perms;
         map.pathname = pathname;
-
-        if (size < 1024) {
-            map.size = std::to_string(size) + " B";
-        } else if (size < 1024 * 1024) {
-            map.size = std::format("{:.1f} KB", size / 1024.0);
-        } else if (size < 1024 * 1024 * 1024) {
-            map.size = std::format("{:.1f} MB", size / (1024.0 * 1024));
-        } else {
-            map.size = std::format("{:.2f} GB", size / (1024.0 * 1024 * 1024));
-        }
+        map.size_bytes = size;
+        map.size = format_bytes(static_cast<int64_t>(size), false);
 
         maps.push_back(std::move(map));
     }
