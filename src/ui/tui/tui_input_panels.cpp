@@ -297,6 +297,9 @@ void TuiApp::handle_mouse_event() {
         return;
     }
 
+    // BUTTON5_PRESSED (wheel down) only exists with ncurses mouse protocol v2
+    // (NCURSES_MOUSE_VERSION >= 2); Solaris system ncurses headers are v1.
+#ifdef BUTTON5_PRESSED
     if (event.bstate & BUTTON5_PRESSED) {
         // Scroll down (wheel down)
         if (current_focus_ == PanelFocus::ProcessList) {
@@ -306,6 +309,7 @@ void TuiApp::handle_mouse_event() {
         }
         return;
     }
+#endif
 
     // Handle clicks
     if (event.bstate & (BUTTON1_CLICKED | BUTTON1_PRESSED | BUTTON1_RELEASED)) {
