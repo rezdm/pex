@@ -27,10 +27,12 @@ public:
 private:
     char map_state(int state);
     std::string get_username(uid_t uid);
+    std::string get_executable_path(int pid);
     void add_error(const std::string& context, const std::string& message);
 
     std::mutex errors_mutex_;
     std::vector<ParseError> recent_errors_;
+    static constexpr size_t kMaxErrors = 10;
 
     // Username cache to avoid repeated getpwuid calls
     mutable std::mutex username_cache_mutex_;

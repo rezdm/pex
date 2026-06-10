@@ -1,4 +1,5 @@
 #include "freebsd_process_data_provider.hpp"
+#include "../../core/format_utils.hpp"
 
 #include <sys/types.h>
 #include <sys/sysctl.h>
@@ -238,15 +239,8 @@ std::vector<MemoryMapInfo> FreeBSDProcessDataProvider::get_memory_maps(int pid) 
                 vmaps[i].kve_start, vmaps[i].kve_end);
 
             uint64_t size = vmaps[i].kve_end - vmaps[i].kve_start;
-            if (size >= 1024 * 1024 * 1024) {
-                mm.size = std::format("{:.1f} GB", size / (1024.0 * 1024.0 * 1024.0));
-            } else if (size >= 1024 * 1024) {
-                mm.size = std::format("{:.1f} MB", size / (1024.0 * 1024.0));
-            } else if (size >= 1024) {
-                mm.size = std::format("{:.1f} KB", size / 1024.0);
-            } else {
-                mm.size = std::format("{} B", size);
-            }
+            mm.size_bytes = size;
+            mm.size = format_bytes(static_cast<int64_t>(size), false);
 
             // Permissions
             std::string perms;
@@ -353,6 +347,9 @@ std::vector<LibraryInfo> FreeBSDProcessDataProvider::get_libraries(int pid) {
         return libraries;
     }
 
+    // Real executable path, used to distinguish the main binary from shared libraries
+    const std::string exe_path = get_executable_path(pid);
+
     unsigned int vmcnt;
     struct kinfo_vmentry* vmaps = procstat_getvmmap(ps, proc, &vmcnt);
     if (vmaps) {
@@ -369,17 +366,15 @@ std::vector<LibraryInfo> FreeBSDProcessDataProvider::get_libraries(int pid) {
                 li.path = path;
                 auto slash = path.rfind('/');
                 li.name = (slash != std::string::npos) ? path.substr(slash + 1) : path;
+                li.base_addr = vmaps[i].kve_start;
                 li.base_address = std::format("{:x}", vmaps[i].kve_start);
                 li.total_size = size;
                 li.resident_size = vmaps[i].kve_resident * getpagesize();
-                li.is_executable = (vmaps[i].kve_protection & KVME_PROT_EXEC) != 0;
+                li.is_executable = (!exe_path.empty() && path == exe_path);
                 lib_map[path] = std::move(li);
             } else {
                 it->second.total_size += size;
                 it->second.resident_size += vmaps[i].kve_resident * getpagesize();
-                if (vmaps[i].kve_protection & KVME_PROT_EXEC) {
-                    it->second.is_executable = true;
-                }
             }
         }
         procstat_freevmmap(ps, vmaps);
@@ -394,7 +389,7 @@ std::vector<LibraryInfo> FreeBSDProcessDataProvider::get_libraries(int pid) {
 
     // Sort by base address
     std::sort(libraries.begin(), libraries.end(), [](const LibraryInfo& a, const LibraryInfo& b) {
-        return a.base_address < b.base_address;
+        return a.base_addr < b.base_addr;
     });
 
     return libraries;
@@ -402,7 +397,14 @@ std::vector<LibraryInfo> FreeBSDProcessDataProvider::get_libraries(int pid) {
 
 std::vector<ParseError> FreeBSDProcessDataProvider::get_recent_errors() {
     std::lock_guard lock(errors_mutex_);
-    return recent_errors_;
+    const auto cutoff = std::chrono::steady_clock::now() - std::chrono::seconds(10);
+    std::vector<ParseError> result;
+    for (const auto& err : recent_errors_) {
+        if (err.timestamp > cutoff) {
+            result.push_back(err);
+        }
+    }
+    return result;
 }
 
 void FreeBSDProcessDataProvider::clear_errors() {

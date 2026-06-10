@@ -7,6 +7,7 @@
 #include <libprocstat.h>
 #include <pwd.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include <cstring>
 #include <sstream>
@@ -23,9 +24,22 @@ FreeBSDProcessDataProvider::~FreeBSDProcessDataProvider() = default;
 void FreeBSDProcessDataProvider::add_error(const std::string& context, const std::string& message) {
     std::lock_guard lock(errors_mutex_);
     recent_errors_.push_back({std::chrono::steady_clock::now(), context + ": " + message});
-    if (recent_errors_.size() > 100) {
+    if (recent_errors_.size() > kMaxErrors) {
         recent_errors_.erase(recent_errors_.begin());
     }
+}
+
+std::string FreeBSDProcessDataProvider::get_executable_path(int pid) {
+    // Ask the kernel for the true vnode path of the executable.
+    // Unlike argv[0], this cannot be falsified by the process.
+    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, pid };
+    char pathbuf[PATH_MAX];
+    size_t len = sizeof(pathbuf);
+    if (sysctl(mib, 4, pathbuf, &len, nullptr, 0) == 0 && len > 1) {
+        pathbuf[len - 1] = '\0';  // Ensure NUL termination
+        return pathbuf;
+    }
+    return {};
 }
 
 char FreeBSDProcessDataProvider::map_state(int state) {
@@ -118,7 +132,8 @@ std::vector<ProcessInfo> FreeBSDProcessDataProvider::get_all_processes(int64_t t
         info.name = kp[i].ki_comm;
         info.state_char = map_state(kp[i].ki_stat);
         info.user_name = get_username(kp[i].ki_uid);
-        info.priority = kp[i].ki_nice;
+        info.executable_path = get_executable_path(info.pid);
+        info.priority = kp[i].ki_pri.pri_level;
         info.thread_count = kp[i].ki_numthreads;
 
         // Memory info
@@ -156,7 +171,8 @@ std::vector<ProcessInfo> FreeBSDProcessDataProvider::get_all_processes(int64_t t
                         cmdline << args[j];
                     }
                     info.command_line = cmdline.str();
-                    if (!info.command_line.empty() && args[0]) {
+                    // Fall back to argv[0] only if the kernel path lookup failed
+                    if (info.executable_path.empty() && args[0]) {
                         info.executable_path = args[0];
                     }
                     procstat_freeargv(ps);
@@ -191,7 +207,8 @@ std::optional<ProcessInfo> FreeBSDProcessDataProvider::get_process_info(int pid,
     info.name = kp.ki_comm;
     info.state_char = map_state(kp.ki_stat);
     info.user_name = get_username(kp.ki_uid);
-    info.priority = kp.ki_nice;
+    info.executable_path = get_executable_path(pid);
+    info.priority = kp.ki_pri.pri_level;
     info.thread_count = kp.ki_numthreads;
     info.resident_memory = kp.ki_rssize * getpagesize();
     info.virtual_memory = kp.ki_size;

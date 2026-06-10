@@ -1,29 +1,10 @@
 #include "data_store.hpp"
 #include <algorithm>
-#ifdef __VMS
-#else
 #include <ranges>
-#endif
 #include <set>
 #include <unordered_map>
 
 namespace pex {
-
-// Deep copy a ProcessNode tree
-std::unique_ptr<ProcessNode> ProcessNode::clone() const {
-    auto copy = std::make_unique<ProcessNode>();
-    copy->info = info;
-    copy->is_expanded = is_expanded;
-    copy->tree_working_set = tree_working_set;
-    copy->tree_memory_percent = tree_memory_percent;
-    copy->tree_cpu_percent = tree_cpu_percent;
-    copy->tree_total_cpu_percent = tree_total_cpu_percent;
-
-    for (const auto& child : children) {
-        copy->children.push_back(child->clone());
-    }
-    return copy;
-}
 
 DataStore::DataStore(IProcessDataProvider* process_provider, ISystemDataProvider* system_provider)
     : process_provider_(process_provider)
@@ -41,39 +22,32 @@ DataStore::~DataStore() {
 }
 
 void DataStore::start() {
-    if (running_) return;
+    if (running_.exchange(true)) return;
 
-    running_ = true;
     collection_thread_ = std::thread(&DataStore::collection_thread_func, this);
 }
 
+// NOTE: flags that participate in the cv_ wait predicate (running_,
+// force_refresh_) must be written while holding cv_mutex_, otherwise the
+// collection thread can evaluate the predicate, get preempted, miss the
+// notify, and sleep a full refresh interval (lost wakeup).
 void DataStore::stop() {
-    if (!running_) return;
-
-    running_ = false;
+    {
+        std::lock_guard lock(cv_mutex_);
+        if (!running_.exchange(false)) return;
+    }
     cv_.notify_all();
 
     if (collection_thread_.joinable()) {
-#ifdef __VMS
-        // On VMS, the collection thread may be blocked in sys$getjpiw
-        // system service calls that don't respond to signals.
-        // Wait up to 3 seconds, then detach — process exit will clean up.
-        for (int i = 0; i < 30 && !thread_exited_.load(); i++) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-        if (thread_exited_.load()) {
-            collection_thread_.join();
-        } else {
-            collection_thread_.detach();
-        }
-#else
         collection_thread_.join();
-#endif
     }
 }
 
 void DataStore::set_refresh_interval(const int ms) {
-    refresh_interval_ms_ = ms;
+    {
+        std::lock_guard lock(cv_mutex_);
+        refresh_interval_ms_ = ms;
+    }
     cv_.notify_all(); // Wake up thread to adjust timing
 }
 
@@ -91,7 +65,10 @@ void DataStore::refresh_now() {
         refresh_pending_ = true;
         return;
     }
-    force_refresh_ = true;
+    {
+        std::lock_guard lock(cv_mutex_);
+        force_refresh_ = true;
+    }
     cv_.notify_all();
 }
 
@@ -101,8 +78,11 @@ void DataStore::pause() {
 
 void DataStore::resume() {
     paused_ = false;
-    if (refresh_pending_.exchange(false)) {
-        force_refresh_ = true;
+    {
+        std::lock_guard lock(cv_mutex_);
+        if (refresh_pending_.exchange(false)) {
+            force_refresh_ = true;
+        }
     }
     cv_.notify_all();  // Wake up to resume collection
 }
@@ -125,25 +105,12 @@ void DataStore::collection_thread_func() {
     collect_data();
 
     while (running_) {
-#ifdef __VMS
-        // VMS: Polling approach avoids pthread_cond_timedwait issues.
-        // On VMS, std::chrono::system_clock may use VMS epoch (1858) while
-        // pthread_cond_timedwait expects POSIX epoch (1970), causing ACCVIO.
-        // Instead, poll atomics every 50ms using std::this_thread::sleep_for.
         {
-            int ms_left = refresh_interval_ms_.load();
-            while (ms_left > 0 && running_.load() && !force_refresh_.load()) {
-                int chunk = (ms_left < 50) ? ms_left : 50;
-                std::this_thread::sleep_for(std::chrono::milliseconds(chunk));
-                ms_left -= chunk;
-            }
+            std::unique_lock lock(cv_mutex_);
+            cv_.wait_for(lock, std::chrono::milliseconds(refresh_interval_ms_), [this] {
+                return !running_ || force_refresh_.load();
+            });
         }
-#else
-        std::unique_lock lock(cv_mutex_);
-        cv_.wait_for(lock, std::chrono::milliseconds(refresh_interval_ms_), [this] {
-            return !running_ || force_refresh_.load();
-        });
-#endif
 
         // Handle force_refresh_ - if paused, retain as pending
         if (force_refresh_.exchange(false) && paused_) {
@@ -154,16 +121,21 @@ void DataStore::collection_thread_func() {
             collect_data();
         }
     }
-    thread_exited_ = true;
 }
 
 void DataStore::collect_data() {
     auto new_snapshot = std::make_shared<DataSnapshot>();
     new_snapshot->timestamp = std::chrono::steady_clock::now();
 
-    // Get CPU times for delta calculation
+    // Get CPU times for delta calculation (guard against counter regression,
+    // e.g. CPU hotplug reordering — unsigned underflow would produce garbage)
     auto current_cpu_times = system_provider_->get_cpu_times();
-    uint64_t total_cpu_delta = current_cpu_times.total() - previous_system_cpu_times_.total();
+    const bool system_counters_valid =
+        current_cpu_times.total() >= previous_system_cpu_times_.total() &&
+        current_cpu_times.active() >= previous_system_cpu_times_.active();
+    uint64_t total_cpu_delta = system_counters_valid
+        ? current_cpu_times.total() - previous_system_cpu_times_.total()
+        : 0;
 
     // Read memory info once and reuse for processes and system stats
     const auto mem_info = system_provider_->get_memory_info();
@@ -195,19 +167,9 @@ void DataStore::collect_data() {
     }
 
     // Prune stale entries for processes that no longer exist
-#ifdef __VMS
-    // C++17 fallback: std::erase_if and set::contains() are C++20
-    for (auto it = previous_cpu_times_.begin(); it != previous_cpu_times_.end(); ) {
-        if (current_pids.find(it->first) == current_pids.end())
-            it = previous_cpu_times_.erase(it);
-        else
-            ++it;
-    }
-#else
     std::erase_if(previous_cpu_times_, [&current_pids](const auto& entry) {
         return !current_pids.contains(entry.first);
     });
-#endif
 
     // Build process tree
     std::unordered_map<int, std::unique_ptr<ProcessNode>> nodes;
@@ -258,11 +220,7 @@ void DataStore::collect_data() {
     }
 
     // Sort tree by PID
-#ifdef __VMS
-    std::sort(new_snapshot->process_tree.begin(), new_snapshot->process_tree.end(),
-#else
     std::ranges::sort(new_snapshot->process_tree,
-#endif
                       [](const auto& a, const auto& b) { return a->info.pid < b->info.pid; });
 
     // Build process map and calculate tree totals
@@ -303,13 +261,23 @@ void DataStore::collect_data() {
 
     if (cpu_count == previous_per_cpu_times_.size()) {
         for (size_t i = 0; i < cpu_count; i++) {
-            if (uint64_t delta_total = current_per_cpu_times_[i].total() - previous_per_cpu_times_[i].total(); delta_total > 0) {
-                const uint64_t delta_user = (current_per_cpu_times_[i].user + current_per_cpu_times_[i].nice) -
-                                            (previous_per_cpu_times_[i].user + previous_per_cpu_times_[i].nice);
-                const uint64_t delta_system = current_per_cpu_times_[i].system - previous_per_cpu_times_[i].system;
-                const uint64_t delta_irq = current_per_cpu_times_[i].irq - previous_per_cpu_times_[i].irq;
-                const uint64_t delta_softirq = current_per_cpu_times_[i].softirq - previous_per_cpu_times_[i].softirq;
-                const uint64_t delta_active = current_per_cpu_times_[i].active() - previous_per_cpu_times_[i].active();
+            const auto& cur = current_per_cpu_times_[i];
+            const auto& prev = previous_per_cpu_times_[i];
+            // Per-CPU counters can regress when CPUs go offline/online and the
+            // cpuN index mapping shifts; skip the tick instead of underflowing.
+            const bool monotonic =
+                cur.total() >= prev.total() &&
+                cur.active() >= prev.active() &&
+                cur.user + cur.nice >= prev.user + prev.nice &&
+                cur.system >= prev.system &&
+                cur.irq >= prev.irq &&
+                cur.softirq >= prev.softirq;
+            if (uint64_t delta_total = monotonic ? cur.total() - prev.total() : 0; delta_total > 0) {
+                const uint64_t delta_user = (cur.user + cur.nice) - (prev.user + prev.nice);
+                const uint64_t delta_system = cur.system - prev.system;
+                const uint64_t delta_irq = cur.irq - prev.irq;
+                const uint64_t delta_softirq = cur.softirq - prev.softirq;
+                const uint64_t delta_active = cur.active() - prev.active();
                 const uint64_t delta_kernel = delta_system + delta_irq + delta_softirq;
 
                 per_cpu_usage_buffer_[i] = static_cast<double>(delta_active) / delta_total * 100.0;
@@ -322,15 +290,9 @@ void DataStore::collect_data() {
             }
         }
     } else {
-#ifdef __VMS
-        std::fill(per_cpu_usage_buffer_.begin(), per_cpu_usage_buffer_.end(), 0.0);
-        std::fill(per_cpu_user_buffer_.begin(), per_cpu_user_buffer_.end(), 0.0);
-        std::fill(per_cpu_system_buffer_.begin(), per_cpu_system_buffer_.end(), 0.0);
-#else
         std::ranges::fill(per_cpu_usage_buffer_, 0.0);
         std::ranges::fill(per_cpu_user_buffer_, 0.0);
         std::ranges::fill(per_cpu_system_buffer_, 0.0);
-#endif
     }
 
     // Copy to snapshot (snapshot needs its own copy for thread safety)

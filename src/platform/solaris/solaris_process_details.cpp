@@ -1,4 +1,5 @@
 #include "solaris_process_data_provider.hpp"
+#include "../../core/format_utils.hpp"
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -10,6 +11,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 
+#include <charconv>
 #include <cstring>
 #include <fstream>
 #include <sstream>
@@ -253,19 +255,6 @@ int open_fd_dup(const std::string& path) {
     return -1;
 }
 
-uint64_t parse_size_string(const std::string& size_str) {
-    double value = 0;
-    char unit[8] = {};
-    if (sscanf(size_str.c_str(), "%lf %7s", &value, unit) >= 1) {
-        std::string u = unit;
-        if (u == "GB") return static_cast<uint64_t>(value * 1024.0 * 1024.0 * 1024.0);
-        if (u == "MB") return static_cast<uint64_t>(value * 1024.0 * 1024.0);
-        if (u == "KB") return static_cast<uint64_t>(value * 1024.0);
-        if (u == "B" || u.empty()) return static_cast<uint64_t>(value);
-    }
-    return 0;
-}
-
 } // anonymous namespace
 
 std::vector<ThreadInfo> SolarisProcessDataProvider::get_threads(int pid) {
@@ -316,7 +305,7 @@ std::vector<ThreadInfo> SolarisProcessDataProvider::get_threads(int pid) {
                 ti.name = std::format("LWP {}", lwpid);
             }
             ti.state = map_state(lwpinfo.pr_sname);
-            ti.priority = lwpinfo.pr_nice;
+            ti.priority = lwpinfo.pr_pri;  // Dynamic priority, consistent with other platforms
             ti.processor = lwpinfo.pr_onpro;
             threads.push_back(std::move(ti));
         }
@@ -449,11 +438,11 @@ std::vector<NetworkConnectionInfo> SolarisProcessDataProvider::get_network_conne
 
     try {
         for (const auto& entry : fs::directory_iterator(fd_path)) {
+            // Skip entries whose names are not fd numbers
             std::string fd_str = entry.path().filename().string();
-            try {
-                int fd_num = 0;
-                fd_num = std::stoi(fd_str);
-            } catch (const std::exception&) {
+            int fd_num = 0;
+            auto [ptr, ec] = std::from_chars(fd_str.data(), fd_str.data() + fd_str.size(), fd_num);
+            if (ec != std::errc() || ptr != fd_str.data() + fd_str.size()) {
                 continue;
             }
 
@@ -553,16 +542,8 @@ std::vector<MemoryMapInfo> SolarisProcessDataProvider::get_memory_maps(int pid) 
             reinterpret_cast<uintptr_t>(pmap.pr_vaddr),
             reinterpret_cast<uintptr_t>(pmap.pr_vaddr) + pmap.pr_size);
 
-        uint64_t size = pmap.pr_size;
-        if (size >= 1024 * 1024 * 1024) {
-            mm.size = std::format("{:.1f} GB", size / (1024.0 * 1024.0 * 1024.0));
-        } else if (size >= 1024 * 1024) {
-            mm.size = std::format("{:.1f} MB", size / (1024.0 * 1024.0));
-        } else if (size >= 1024) {
-            mm.size = std::format("{:.1f} KB", size / 1024.0);
-        } else {
-            mm.size = std::format("{} B", size);
-        }
+        mm.size_bytes = pmap.pr_size;
+        mm.size = format_bytes(static_cast<int64_t>(mm.size_bytes), false);
 
         // Permissions
         std::string perms;
@@ -636,8 +617,6 @@ std::vector<LibraryInfo> SolarisProcessDataProvider::get_libraries(int pid) {
     for (const auto& mm : maps) {
         if (mm.pathname.empty() || mm.pathname[0] == '[') continue;
 
-        uint64_t region_size = parse_size_string(mm.size);
-
         auto it = lib_map.find(mm.pathname);
         if (it == lib_map.end()) {
             LibraryInfo li;
@@ -645,23 +624,36 @@ std::vector<LibraryInfo> SolarisProcessDataProvider::get_libraries(int pid) {
             auto slash = mm.pathname.rfind('/');
             li.name = (slash != std::string::npos) ? mm.pathname.substr(slash + 1) : mm.pathname;
 
-            // Extract base address from mm.address (first part before '-')
+            // Extract base address from mm.address (hex part before '-')
             auto dash = mm.address.find('-');
             if (dash != std::string::npos) {
                 li.base_address = mm.address.substr(0, dash);
+                std::from_chars(li.base_address.data(),
+                                li.base_address.data() + li.base_address.size(),
+                                li.base_addr, 16);
             }
 
-            li.total_size = region_size;
-            li.resident_size = region_size;  // Solaris doesn't separate resident from total in prmap
-            li.is_executable = (mm.permissions.find('x') != std::string::npos);
+            li.total_size = static_cast<int64_t>(mm.size_bytes);
+            li.resident_size = 0;  // prmap_t does not provide RSS (0 = unknown)
+            // On Solaris the main executable's pr_mapname is "a.out"
+            li.is_executable = (mm.pathname == "a.out");
+            if (li.is_executable) {
+                // Prefer the resolved real path of the executable when available
+                try {
+                    std::string exe = fs::read_symlink("/proc/" + std::to_string(pid) + "/path/a.out").string();
+                    if (!exe.empty()) {
+                        li.path = exe;
+                        auto exe_slash = exe.rfind('/');
+                        li.name = (exe_slash != std::string::npos) ? exe.substr(exe_slash + 1) : exe;
+                    }
+                } catch (const std::exception&) {
+                    // Keep "a.out" if the symlink cannot be resolved
+                }
+            }
             lib_map[mm.pathname] = std::move(li);
         } else {
             // Accumulate sizes for same library
-            it->second.total_size += region_size;
-            it->second.resident_size += region_size;
-            if (mm.permissions.find('x') != std::string::npos) {
-                it->second.is_executable = true;
-            }
+            it->second.total_size += static_cast<int64_t>(mm.size_bytes);
         }
     }
 
@@ -670,7 +662,7 @@ std::vector<LibraryInfo> SolarisProcessDataProvider::get_libraries(int pid) {
     }
 
     std::sort(libraries.begin(), libraries.end(), [](const LibraryInfo& a, const LibraryInfo& b) {
-        return a.base_address < b.base_address;
+        return a.base_addr < b.base_addr;
     });
 
     return libraries;
@@ -678,7 +670,14 @@ std::vector<LibraryInfo> SolarisProcessDataProvider::get_libraries(int pid) {
 
 std::vector<ParseError> SolarisProcessDataProvider::get_recent_errors() {
     std::lock_guard lock(errors_mutex_);
-    return recent_errors_;
+    const auto cutoff = std::chrono::steady_clock::now() - std::chrono::seconds(10);
+    std::vector<ParseError> result;
+    for (const auto& err : recent_errors_) {
+        if (err.timestamp > cutoff) {
+            result.push_back(err);
+        }
+    }
+    return result;
 }
 
 void SolarisProcessDataProvider::clear_errors() {

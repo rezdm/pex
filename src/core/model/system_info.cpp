@@ -2,6 +2,7 @@
 
 #ifdef PEX_PLATFORM_LINUX
 
+#include <charconv>
 #include <fstream>
 #include <sstream>
 #include <unistd.h>
@@ -139,11 +140,12 @@ LoadAverage SystemInfo::get_load_average() {
         std::string running_total;
         loadavg >> load.one_min >> load.five_min >> load.fifteen_min >> running_total;
 
-        // Parse "running/total" format
+        // Parse "running/total" format (from_chars: no exceptions on malformed input)
         const size_t slash = running_total.find('/');
         if (slash != std::string::npos) {
-            load.running_tasks = std::stoi(running_total.substr(0, slash));
-            load.total_tasks = std::stoi(running_total.substr(slash + 1));
+            std::from_chars(running_total.data(), running_total.data() + slash, load.running_tasks);
+            std::from_chars(running_total.data() + slash + 1,
+                            running_total.data() + running_total.size(), load.total_tasks);
         }
     }
 

@@ -1,12 +1,7 @@
 #pragma once
 
 #include <cstdint>
-#ifdef __VMS
-#include <sstream>
-#include <iomanip>
-#else
 #include <format>
-#endif
 #include <string>
 
 namespace pex {
@@ -30,19 +25,6 @@ inline std::string format_bytes(int64_t bytes, bool compact = true) {
         unit_idx++;
     }
 
-#ifdef __VMS
-    std::ostringstream oss;
-    if (unit_idx == 0) {
-        oss << bytes << sep << units[unit_idx];
-    } else if (size >= 100.0) {
-        oss << std::fixed << std::setprecision(0) << size << sep << units[unit_idx];
-    } else if (size >= 10.0) {
-        oss << std::fixed << std::setprecision(1) << size << sep << units[unit_idx];
-    } else {
-        oss << std::fixed << std::setprecision(2) << size << sep << units[unit_idx];
-    }
-    return oss.str();
-#else
     if (unit_idx == 0) {
         return std::format("{}{}{}", bytes, sep, units[unit_idx]);
     } else if (size >= 100.0) {
@@ -52,7 +34,6 @@ inline std::string format_bytes(int64_t bytes, bool compact = true) {
     } else {
         return std::format("{:.2f}{}{}", size, sep, units[unit_idx]);
     }
-#endif
 }
 
 } // namespace pex

@@ -41,7 +41,7 @@ private:
     std::string get_username(int uid);
     std::map<int, std::string> uid_cache_;
 
-    static std::map<int, NetworkConnectionInfo> parse_net_file(const std::string& path, const std::string& protocol);
+    static std::map<uint64_t, NetworkConnectionInfo> parse_net_file(const std::string& path, const std::string& protocol);
 
     // Error tracking
     void add_error(const std::string& message);

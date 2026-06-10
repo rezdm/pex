@@ -5,6 +5,24 @@
 
 namespace pex {
 
+namespace {
+
+std::string to_lower_copy(const std::string& s) {
+    std::string result = s;
+    std::ranges::transform(result, result.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
+    return result;
+}
+
+// Case-insensitive match against process name or command line.
+// search_lower must already be lowercased.
+bool matches_search_term(const ProcessInfo& info, const std::string& search_lower) {
+    return to_lower_copy(info.name).find(search_lower) != std::string::npos ||
+           to_lower_copy(info.command_line).find(search_lower) != std::string::npos;
+}
+
+} // namespace
+
 void ImGuiApp::collect_visible_items(ProcessNode* node, std::vector<ProcessNode*>& items) {
     items.push_back(node);
     if (node->is_expanded) {
@@ -104,18 +122,20 @@ std::vector<ProcessNode*> ImGuiApp::find_matching_processes() const {
     const auto& pl = view_model_.process_list;
     if (!current_data_ || pl.search_buffer[0] == '\0') return matches;
 
-    std::string search_lower = pl.search_buffer;
-    std::ranges::transform(search_lower, search_lower.begin(),
-                           [](unsigned char c) { return std::tolower(c); });
+    const std::string search_lower = to_lower_copy(pl.search_buffer);
 
-    const auto visible = get_visible_items();
-    for (auto* node : visible) {
-        std::string name_lower = node->info.name;
-        std::ranges::transform(name_lower, name_lower.begin(),
-                               [](unsigned char c) { return std::tolower(c); });
-        if (name_lower.find(search_lower) != std::string::npos) {
+    // Search ALL processes (depth-first), regardless of expansion state,
+    // so matches under collapsed parents can still be found.
+    std::function<void(ProcessNode*)> visit = [&](ProcessNode* node) {
+        if (matches_search_term(node->info, search_lower)) {
             matches.push_back(node);
         }
+        for (auto& child : node->children) {
+            visit(child.get());
+        }
+    };
+    for (auto& root : current_data_->process_tree) {
+        visit(root.get());
     }
     return matches;
 }
@@ -127,14 +147,25 @@ bool ImGuiApp::current_selection_matches() const {
     const auto it = current_data_->process_map.find(pl.selected_pid);
     if (it == current_data_->process_map.end()) return false;
 
-    std::string search_lower = pl.search_buffer;
-    std::ranges::transform(search_lower, search_lower.begin(),
-                           [](unsigned char c) { return std::tolower(c); });
+    return matches_search_term(it->second->info, to_lower_copy(pl.search_buffer));
+}
 
-    std::string name_lower = it->second->info.name;
-    std::ranges::transform(name_lower, name_lower.begin(), ::tolower);
+void ImGuiApp::expand_ancestors(int pid) {
+    if (!current_data_) return;
+    auto& collapsed = view_model_.process_list.collapsed_pids;
 
-    return name_lower.find(search_lower) != std::string::npos;
+    int current = pid;
+    for (int hops = 0; hops < 128; ++hops) {  // Guard against parent_pid cycles
+        const auto it = current_data_->process_map.find(current);
+        if (it == current_data_->process_map.end()) break;
+        const int parent = it->second->info.parent_pid;
+        if (parent == current) break;
+        const auto parent_it = current_data_->process_map.find(parent);
+        if (parent_it == current_data_->process_map.end()) break;
+        collapsed.erase(parent);
+        parent_it->second->is_expanded = true;  // Take effect this frame
+        current = parent;
+    }
 }
 
 void ImGuiApp::search_select_first() {
@@ -145,6 +176,7 @@ void ImGuiApp::search_select_first() {
     if (matches.empty()) return;
 
     pl.selected_pid = matches[0]->info.pid;
+    expand_ancestors(pl.selected_pid);
     pl.scroll_to_selected = true;
     refresh_selected_details();
 }
@@ -164,6 +196,7 @@ void ImGuiApp::search_next() {
 
     const int next_idx = (current_match_idx + 1) % static_cast<int>(matches.size());
     pl.selected_pid = matches[next_idx]->info.pid;
+    expand_ancestors(pl.selected_pid);
     pl.scroll_to_selected = true;
     refresh_selected_details();
 }
@@ -188,6 +221,7 @@ void ImGuiApp::search_previous() {
         prev_idx = current_match_idx - 1;
     }
     pl.selected_pid = matches[prev_idx]->info.pid;
+    expand_ancestors(pl.selected_pid);
     pl.scroll_to_selected = true;
     refresh_selected_details();
 }

@@ -33,6 +33,9 @@ private:
     std::mutex errors_mutex_;
     std::vector<ParseError> recent_errors_;
 
+    // Cached clock ticks per second (sysconf(_SC_CLK_TCK)), set in constructor
+    long clock_ticks_ = 100;
+
     // Username cache to avoid repeated getpwuid calls
     mutable std::mutex username_cache_mutex_;
     std::map<uid_t, std::string> username_cache_;
