@@ -1,5 +1,6 @@
 #include "platform/platform_factory.hpp"
 #include "core/services/data_store.hpp"
+#include "core/services/history_store.hpp"
 #include "ui/imgui/imgui_app.hpp"
 #include "core/services/single_instance.hpp"
 #include <iostream>
@@ -33,9 +34,12 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
         const auto system_provider = pex::make_system_data_provider();
         const auto killer = pex::make_process_killer();
 
+        pex::HistoryStore history_store;
         pex::DataStore data_store(process_provider.get(), system_provider.get());
+        data_store.set_history_store(&history_store);
 
-        pex::ImGuiApp app(&data_store, system_provider.get(), details_provider.get(), killer.get());
+        pex::ImGuiApp app(&data_store, system_provider.get(), details_provider.get(), killer.get(),
+                          &history_store);
 
         instance.set_raise_callback([&app]() {
             app.request_focus();

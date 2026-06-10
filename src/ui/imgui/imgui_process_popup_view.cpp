@@ -1,5 +1,6 @@
 #include "imgui_app.hpp"
 #include "imgui.h"
+#include "../../core/services/history_store.hpp"
 #include <format>
 #include <algorithm>
 
@@ -16,6 +17,30 @@ void ImGuiApp::collect_tree_pids(const ProcessNode* node, std::vector<int>& pids
 void ImGuiApp::update_popup_history() {
     auto& pp = view_model_.process_popup;
     if (!pp.is_visible || pp.target_pid <= 0 || !current_data_) return;
+
+    // Seed the charts from recorded history so the past is visible the moment
+    // the popup opens (issue #9). Live sampling below then appends to it.
+    if (pp.needs_backfill) {
+        pp.needs_backfill = false;
+        if (history_) {
+            std::vector<int> backfill_pids;
+            if (const auto it = current_data_->process_map.find(pp.target_pid); it != current_data_->process_map.end()) {
+                if (pp.include_tree) {
+                    collect_tree_pids(it->second, backfill_pids);
+                } else {
+                    backfill_pids.push_back(pp.target_pid);
+                }
+            }
+            if (!backfill_pids.empty()) {
+                auto series = history_->get_series(backfill_pids, ProcessPopupViewModel::kHistorySize);
+                pp.cpu_user_history = std::move(series.cpu_user);
+                pp.cpu_kernel_history = std::move(series.cpu_kernel);
+                pp.memory_history = std::move(series.memory_percent);
+                pp.per_cpu_user_history = std::move(series.per_cpu_user);
+                pp.per_cpu_kernel_history = std::move(series.per_cpu_kernel);
+            }
+        }
+    }
 
     const auto now = std::chrono::steady_clock::now();
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - pp.last_update).count();
@@ -125,11 +150,7 @@ void ImGuiApp::render_process_popup() {
         }
 
         if (ImGui::Checkbox("Include descendants (process tree)", &pp.include_tree)) {
-            pp.cpu_user_history.clear();
-            pp.cpu_kernel_history.clear();
-            pp.memory_history.clear();
-            pp.prev_utime = 0;
-            pp.prev_stime = 0;
+            pp.clear_history();
         }
         if (pp.include_tree) {
             if (current_data_) {

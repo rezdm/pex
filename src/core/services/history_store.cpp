@@ -1,0 +1,172 @@
+#include "history_store.hpp"
+#include "data_store.hpp"
+
+#include <algorithm>
+#include <format>
+#include <fstream>
+
+namespace pex {
+
+HistoryStore::HistoryStore(const size_t max_samples)
+    : max_samples_(max_samples == 0 ? 1 : max_samples) {}
+
+void HistoryStore::record(const DataSnapshot& snapshot) {
+    HistorySample sample;
+    sample.wall_time = std::chrono::system_clock::now();
+    sample.cpu_usage = static_cast<float>(snapshot.cpu_usage);
+    sample.memory_used = snapshot.memory_used;
+    sample.memory_total = snapshot.memory_total;
+    sample.process_count = snapshot.process_count;
+    sample.thread_count = snapshot.thread_count;
+
+    sample.per_cpu_user.reserve(snapshot.per_cpu_user.size());
+    for (double v : snapshot.per_cpu_user) sample.per_cpu_user.push_back(static_cast<float>(v));
+    sample.per_cpu_system.reserve(snapshot.per_cpu_system.size());
+    for (double v : snapshot.per_cpu_system) sample.per_cpu_system.push_back(static_cast<float>(v));
+
+    sample.processes.reserve(snapshot.process_map.size());
+
+    std::lock_guard lock(mutex_);
+    for (const auto& [pid, node] : snapshot.process_map) {
+        const ProcessInfo& info = node->info;
+        ProcessSample ps;
+        ps.pid = pid;
+        ps.cpu_user_percent = static_cast<float>(info.cpu_user_percent);
+        ps.cpu_kernel_percent = static_cast<float>(info.cpu_kernel_percent);
+        ps.memory_percent = static_cast<float>(info.memory_percent);
+        ps.resident_memory = info.resident_memory;
+        ps.io_read_rate = static_cast<float>(info.io_read_rate);
+        ps.io_write_rate = static_cast<float>(info.io_write_rate);
+        sample.processes.push_back(ps);
+
+        process_names_[pid] = info.name;
+    }
+
+    samples_.push_back(std::move(sample));
+    while (samples_.size() > max_samples_) {
+        samples_.pop_front();
+    }
+
+    // Bound the name map: drop names for PIDs no longer present in any
+    // retained sample (cheap approximation: prune when it grows large).
+    if (process_names_.size() > 4 * samples_.back().processes.size() + 1024) {
+        std::unordered_map<int, std::string> kept;
+        for (const auto& s : samples_) {
+            for (const auto& ps : s.processes) {
+                if (auto it = process_names_.find(ps.pid); it != process_names_.end()) {
+                    kept[ps.pid] = it->second;
+                }
+            }
+        }
+        process_names_ = std::move(kept);
+    }
+}
+
+size_t HistoryStore::sample_count() const {
+    std::lock_guard lock(mutex_);
+    return samples_.size();
+}
+
+ProcessHistorySeries HistoryStore::get_series(const std::vector<int>& pids,
+                                              const size_t max_points) const {
+    ProcessHistorySeries series;
+
+    std::lock_guard lock(mutex_);
+    const size_t count = std::min(samples_.size(), max_points);
+    if (count == 0) return series;
+
+    series.cpu_user.reserve(count);
+    series.cpu_kernel.reserve(count);
+    series.memory_percent.reserve(count);
+
+    const size_t first = samples_.size() - count;
+    const size_t cpu_count = samples_.back().per_cpu_user.size();
+    series.per_cpu_user.assign(cpu_count, {});
+    series.per_cpu_kernel.assign(cpu_count, {});
+    for (auto& v : series.per_cpu_user) v.reserve(count);
+    for (auto& v : series.per_cpu_kernel) v.reserve(count);
+
+    for (size_t i = first; i < samples_.size(); i++) {
+        const HistorySample& s = samples_[i];
+
+        float user = 0.0f, kernel = 0.0f, mem = 0.0f;
+        for (const ProcessSample& ps : s.processes) {
+            if (std::find(pids.begin(), pids.end(), ps.pid) != pids.end()) {
+                user += ps.cpu_user_percent;
+                kernel += ps.cpu_kernel_percent;
+                mem += ps.memory_percent;
+            }
+        }
+        series.cpu_user.push_back(user);
+        series.cpu_kernel.push_back(kernel);
+        series.memory_percent.push_back(mem);
+
+        for (size_t c = 0; c < cpu_count; c++) {
+            series.per_cpu_user[c].push_back(c < s.per_cpu_user.size() ? s.per_cpu_user[c] : 0.0f);
+            series.per_cpu_kernel[c].push_back(c < s.per_cpu_system.size() ? s.per_cpu_system[c] : 0.0f);
+        }
+    }
+
+    return series;
+}
+
+static std::string format_wall_time(const std::chrono::system_clock::time_point tp) {
+    const auto time = std::chrono::system_clock::to_time_t(tp);
+    std::tm tm_val{};
+    localtime_r(&time, &tm_val);
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        tp.time_since_epoch()).count() % 1000;
+    return std::format("{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}",
+                       tm_val.tm_year + 1900, tm_val.tm_mon + 1, tm_val.tm_mday,
+                       tm_val.tm_hour, tm_val.tm_min, tm_val.tm_sec, ms);
+}
+
+bool HistoryStore::export_csv(const std::string& base_path, std::string& error) const {
+    const std::string system_path = base_path + "-system.csv";
+    const std::string process_path = base_path + "-processes.csv";
+
+    std::ofstream sys_file(system_path);
+    std::ofstream proc_file(process_path);
+    if (!sys_file || !proc_file) {
+        error = "Cannot create " + (!sys_file ? system_path : process_path);
+        return false;
+    }
+
+    sys_file << "time,cpu_usage_pct,memory_used_bytes,memory_total_bytes,process_count,thread_count\n";
+    proc_file << "time,pid,name,cpu_user_pct,cpu_kernel_pct,mem_pct,rss_bytes,io_read_bps,io_write_bps\n";
+
+    std::lock_guard lock(mutex_);
+    for (const HistorySample& s : samples_) {
+        const std::string ts = format_wall_time(s.wall_time);
+
+        sys_file << ts << ',' << s.cpu_usage << ',' << s.memory_used << ','
+                 << s.memory_total << ',' << s.process_count << ',' << s.thread_count << '\n';
+
+        for (const ProcessSample& ps : s.processes) {
+            std::string name;
+            if (const auto it = process_names_.find(ps.pid); it != process_names_.end()) {
+                name = it->second;
+            }
+            // CSV-quote the name (it may contain commas/quotes)
+            std::string quoted = "\"";
+            for (char ch : name) {
+                if (ch == '"') quoted += '"';
+                quoted += ch;
+            }
+            quoted += '"';
+
+            proc_file << ts << ',' << ps.pid << ',' << quoted << ','
+                      << ps.cpu_user_percent << ',' << ps.cpu_kernel_percent << ','
+                      << ps.memory_percent << ',' << ps.resident_memory << ','
+                      << ps.io_read_rate << ',' << ps.io_write_rate << '\n';
+        }
+    }
+
+    if (!sys_file.good() || !proc_file.good()) {
+        error = "Write failed (disk full?)";
+        return false;
+    }
+    return true;
+}
+
+} // namespace pex

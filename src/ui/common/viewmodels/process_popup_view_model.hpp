@@ -33,6 +33,10 @@ struct ProcessPopupViewModel {
     // Last update timestamp for rate limiting
     std::chrono::steady_clock::time_point last_update;
 
+    // Set when the target changes; the next update seeds the charts from the
+    // HistoryStore so past data is visible immediately (issue #9)
+    bool needs_backfill = false;
+
     // Clear all history when changing target
     void clear_history() {
         cpu_user_history.clear();
@@ -42,6 +46,7 @@ struct ProcessPopupViewModel {
         per_cpu_kernel_history.clear();
         prev_utime = 0;
         prev_stime = 0;
+        needs_backfill = true;
     }
 };
 

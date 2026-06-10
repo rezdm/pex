@@ -58,6 +58,13 @@ std::vector<ProcessNode*> ImGuiApp::get_visible_items() const {
 void ImGuiApp::handle_keyboard_navigation() {
     auto& pl = view_model_.process_list;
 
+    // Ctrl+Shift+F opens the find-open-file dialog (issue #7)
+    if (ImGui::GetIO().KeyCtrl && ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_F)) {
+        find_dialog_visible_ = true;
+        find_focus_input_ = true;
+        return;
+    }
+
     // Ctrl+F to focus search box
     if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F)) {
         pl.focus_search_box = true;
