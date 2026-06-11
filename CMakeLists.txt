@@ -190,6 +190,7 @@ if(BUILD_GUI)
         src/ui/imgui/imgui_process_popup_view.cpp
         src/ui/imgui/imgui_kill_dialog_view.cpp
         src/ui/imgui/imgui_find_handle_dialog.cpp
+        src/ui/imgui/imgui_history_view.cpp
         src/ui/imgui/imgui_input.cpp
     )
     target_include_directories(pex_ui_imgui PUBLIC src PRIVATE ${stb_SOURCE_DIR} ${CMAKE_BINARY_DIR}/generated)

@@ -46,6 +46,29 @@ struct ProcessHistorySeries {
     std::vector<std::vector<float>> per_cpu_kernel;  // [cpu][tick] system-wide
 };
 
+// Metric selector for aggregation/series queries
+enum class HistoryMetric {
+    Cpu,      // user+kernel, % of all cores
+    Memory,   // % of total memory
+    IoRead,   // bytes/sec
+    IoWrite   // bytes/sec
+};
+
+// Per-process aggregate over a window of ticks ("top consumers", issue #9)
+struct ProcessAggregate {
+    int pid = 0;
+    std::string name;       // Last-known process name
+    float avg_cpu = 0.0f;   // Averaged over the whole window (absent ticks = 0)
+    float peak_cpu = 0.0f;
+    float avg_mem = 0.0f;
+    float peak_mem = 0.0f;
+    float avg_io_read = 0.0f;
+    float peak_io_read = 0.0f;
+    float avg_io_write = 0.0f;
+    float peak_io_write = 0.0f;
+    size_t present_ticks = 0;  // Ticks in the window where the PID existed
+};
+
 // Ring buffer of system + per-process samples (issue #9).
 // record() is called from the DataStore collection thread; all query and
 // export methods are safe to call concurrently from the UI thread.
@@ -62,6 +85,16 @@ public:
     // max_points ticks. Ticks where none of the PIDs existed contribute 0.
     [[nodiscard]] ProcessHistorySeries get_series(const std::vector<int>& pids,
                                                   size_t max_points) const;
+
+    // Per-process aggregates over the most recent max_samples ticks.
+    // Averages divide by the window tick count (a process alive for half the
+    // window with 100% CPU averages 50%) - the "who ate my CPU" semantics.
+    [[nodiscard]] std::vector<ProcessAggregate> aggregate(size_t max_samples) const;
+
+    // Single-metric series for one PID over the most recent max_points ticks
+    // (oldest -> newest, 0 where the PID did not exist). For sparklines.
+    [[nodiscard]] std::vector<float> get_metric_series(int pid, HistoryMetric metric,
+                                                       size_t max_points) const;
 
     // Export everything to two CSV files next to each other:
     //   <base>-system.csv    one row per tick (system aggregates)

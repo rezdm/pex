@@ -24,6 +24,9 @@ void ImGuiApp::render_menu_bar() {
             if (ImGui::MenuItem("Toggle Tree/List View", "T")) {
                 view_model_.process_list.is_tree_view = !view_model_.process_list.is_tree_view;
             }
+            if (ImGui::MenuItem("History - Top Consumers...", nullptr, false, history_ != nullptr)) {
+                history_view_visible_ = true;
+            }
             ImGui::Separator();
             if (ImGui::MenuItem("Refresh Now", "F5")) {
                 details_force_refresh_ = true;

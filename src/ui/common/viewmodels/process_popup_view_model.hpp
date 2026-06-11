@@ -16,8 +16,9 @@ struct ProcessPopupViewModel {
     // Toggle: false = process only, true = process + descendants
     bool include_tree = true;
 
-    // History buffers for charts
-    static constexpr size_t kHistorySize = 60;  // 60 data points
+    // History buffers for charts. Matches HistoryStore::kDefaultMaxSamples so
+    // the backfill shows the full recorded depth (~10 min at 1 s refresh).
+    static constexpr size_t kHistorySize = 600;
     std::vector<float> cpu_user_history;
     std::vector<float> cpu_kernel_history;
     std::vector<float> memory_history;

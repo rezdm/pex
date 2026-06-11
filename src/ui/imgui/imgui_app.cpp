@@ -350,6 +350,7 @@ void ImGuiApp::render() {
     render_process_popup();
     render_kill_confirmation_dialog();
     render_find_handle_dialog();
+    render_history_view();
 }
 
 } // namespace pex

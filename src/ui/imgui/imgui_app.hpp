@@ -4,6 +4,7 @@
 #include "../../platform/interfaces/i_system_data_provider.hpp"
 #include "../../platform/interfaces/i_process_killer.hpp"
 #include "../../core/services/data_store.hpp"
+#include "../../core/services/history_store.hpp"
 #include "../common/viewmodels/app_view_model.hpp"
 #include "../../core/services/name_resolver.hpp"
 #include <memory>
@@ -11,13 +12,12 @@
 #include <mutex>
 #include <chrono>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 struct GLFWwindow;
 
 namespace pex {
-
-class HistoryStore;
 
 class ImGuiApp {
 public:
@@ -84,6 +84,9 @@ private:
     void start_handle_search();
     void stop_handle_search();
 
+    // History / Top Consumers view (issue #9)
+    void render_history_view();
+
     // History export (File menu)
     void export_history();
 
@@ -146,6 +149,18 @@ private:
     // details_provider_ with the UI thread.
     std::unique_ptr<IProcessDataProvider> find_provider_;
     static constexpr size_t kMaxFindResults = 5000;
+
+    // ---- History / Top Consumers view (issue #9) ----
+    bool history_view_visible_ = false;
+    int history_metric_idx_ = 0;   // 0=CPU 1=Memory 2=IO read 3=IO write
+    int history_window_idx_ = 2;   // 0=1min 1=5min 2=all recorded
+    // Cached aggregation (recomputed on parameter change or every second)
+    std::vector<ProcessAggregate> history_aggregates_;
+    std::unordered_map<int, std::vector<float>> history_sparklines_;
+    std::chrono::steady_clock::time_point history_cache_time_{};
+    int history_cache_metric_ = -1;
+    int history_cache_window_ = -1;
+    static constexpr size_t kHistoryTopN = 25;
 };
 
 } // namespace pex

@@ -110,6 +110,76 @@ ProcessHistorySeries HistoryStore::get_series(const std::vector<int>& pids,
     return series;
 }
 
+std::vector<ProcessAggregate> HistoryStore::aggregate(const size_t max_samples) const {
+    std::lock_guard lock(mutex_);
+
+    const size_t count = std::min(samples_.size(), max_samples);
+    if (count == 0) return {};
+    const size_t first = samples_.size() - count;
+
+    std::unordered_map<int, ProcessAggregate> by_pid;
+
+    for (size_t i = first; i < samples_.size(); i++) {
+        for (const ProcessSample& ps : samples_[i].processes) {
+            ProcessAggregate& agg = by_pid[ps.pid];
+            agg.pid = ps.pid;
+            agg.present_ticks++;
+
+            const float cpu = ps.cpu_user_percent + ps.cpu_kernel_percent;
+            agg.avg_cpu += cpu;  // Sums for now; divided below
+            agg.peak_cpu = std::max(agg.peak_cpu, cpu);
+            agg.avg_mem += ps.memory_percent;
+            agg.peak_mem = std::max(agg.peak_mem, ps.memory_percent);
+            agg.avg_io_read += ps.io_read_rate;
+            agg.peak_io_read = std::max(agg.peak_io_read, ps.io_read_rate);
+            agg.avg_io_write += ps.io_write_rate;
+            agg.peak_io_write = std::max(agg.peak_io_write, ps.io_write_rate);
+        }
+    }
+
+    std::vector<ProcessAggregate> result;
+    result.reserve(by_pid.size());
+    const auto window = static_cast<float>(count);
+    for (auto& [pid, agg] : by_pid) {
+        agg.avg_cpu /= window;
+        agg.avg_mem /= window;
+        agg.avg_io_read /= window;
+        agg.avg_io_write /= window;
+        if (const auto it = process_names_.find(pid); it != process_names_.end()) {
+            agg.name = it->second;
+        }
+        result.push_back(std::move(agg));
+    }
+    return result;
+}
+
+std::vector<float> HistoryStore::get_metric_series(const int pid, const HistoryMetric metric,
+                                                   const size_t max_points) const {
+    std::lock_guard lock(mutex_);
+
+    const size_t count = std::min(samples_.size(), max_points);
+    std::vector<float> series;
+    series.reserve(count);
+    if (count == 0) return series;
+    const size_t first = samples_.size() - count;
+
+    for (size_t i = first; i < samples_.size(); i++) {
+        float value = 0.0f;
+        for (const ProcessSample& ps : samples_[i].processes) {
+            if (ps.pid != pid) continue;
+            switch (metric) {
+                case HistoryMetric::Cpu:     value = ps.cpu_user_percent + ps.cpu_kernel_percent; break;
+                case HistoryMetric::Memory:  value = ps.memory_percent; break;
+                case HistoryMetric::IoRead:  value = ps.io_read_rate; break;
+                case HistoryMetric::IoWrite: value = ps.io_write_rate; break;
+            }
+            break;
+        }
+        series.push_back(value);
+    }
+    return series;
+}
+
 static std::string format_wall_time(const std::chrono::system_clock::time_point tp) {
     const auto time = std::chrono::system_clock::to_time_t(tp);
     std::tm tm_val{};
