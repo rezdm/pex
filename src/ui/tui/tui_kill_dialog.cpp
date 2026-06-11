@@ -1,5 +1,6 @@
 #include "tui_app.hpp"
 #include "tui_colors.hpp"
+#include <algorithm>
 #include <sstream>
 
 namespace pex {
@@ -87,9 +88,9 @@ void TuiApp::render_help_overlay() {
     int max_y, max_x;
     getmaxyx(stdscr, max_y, max_x);
 
-    // Help dialog dimensions
+    // Help dialog dimensions (shrink to fit small terminals; content clips)
     constexpr int help_width = 60;
-    constexpr int help_height = 31;
+    const int help_height = std::min(39, max_y - 2);
     const int help_x = (max_x - help_width) / 2;
     const int help_y = (max_y - help_height) / 2;
 
@@ -134,6 +135,8 @@ void TuiApp::render_help_overlay() {
         "Actions:",
         "  /               Search mode",
         "  n/N             Next/previous search match",
+        "  o               Find open file/handle",
+        "  d               Dump history to CSV (~/pex-history-*)",
         "  x               Kill process",
         "  K               Kill process tree",
         "  r/F5            Force refresh",
@@ -179,8 +182,17 @@ void TuiApp::render_status_bar() const {
     wbkgd(status_win_, COLOR_PAIR(COLOR_PAIR_STATUS));
     werase(status_win_);
 
+    // Transient status message (e.g. history export result) replaces hints
+    if (!status_message_.empty() &&
+        std::chrono::steady_clock::now() - status_message_time_ < kStatusMessageDuration) {
+        wattron(status_win_, A_BOLD);
+        mvwprintw(status_win_, 0, 1, "%.*s", max_x - 2, status_message_.c_str());
+        wattroff(status_win_, A_BOLD);
+        return;
+    }
+
     // Left side: key hints
-    const char* hints = "q:Quit  /:Search  s:System  c:CPUs  Tab:Panel  x:Kill  ?:Help";
+    const char* hints = "q:Quit  /:Search  o:FindFile  d:HistCSV  s:System  Tab:Panel  x:Kill  ?:Help";
     mvwprintw(status_win_, 0, 1, "%s", hints);
 
     // Right side: search text if active

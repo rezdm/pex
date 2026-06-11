@@ -7,6 +7,13 @@ namespace pex {
 void ImGuiApp::render_menu_bar() {
     if (ImGui::BeginMenuBar()) {
         if (ImGui::BeginMenu("File")) {
+            if (ImGui::MenuItem("Export History to CSV...", nullptr, false, history_ != nullptr)) {
+                export_history();
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Writes recorded per-tick system and per-process samples\nto ~/pex-history-<timestamp>-{system,processes}.csv");
+            }
+            ImGui::Separator();
             if (ImGui::MenuItem("Exit", "Alt+F4")) {
                 glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
             }
@@ -17,10 +24,21 @@ void ImGuiApp::render_menu_bar() {
             if (ImGui::MenuItem("Toggle Tree/List View", "T")) {
                 view_model_.process_list.is_tree_view = !view_model_.process_list.is_tree_view;
             }
+            if (ImGui::MenuItem("History - Top Consumers...", nullptr, false, history_ != nullptr)) {
+                history_view_visible_ = true;
+            }
             ImGui::Separator();
             if (ImGui::MenuItem("Refresh Now", "F5")) {
                 details_force_refresh_ = true;
                 data_store_->refresh_now();
+            }
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("Find")) {
+            if (ImGui::MenuItem("Find Open File / Handle...", "Ctrl+Shift+F")) {
+                find_dialog_visible_ = true;
+                find_focus_input_ = true;
             }
             ImGui::EndMenu();
         }

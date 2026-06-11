@@ -110,6 +110,7 @@ endif()
 # =============================================================================
 add_library(pex_core STATIC
     src/core/services/data_store.cpp
+    src/core/services/history_store.cpp
     src/core/services/name_resolver.cpp
     src/core/services/single_instance.cpp
     src/core/model/system_info.cpp
@@ -188,6 +189,8 @@ if(BUILD_GUI)
         src/ui/imgui/imgui_details_tabs.cpp
         src/ui/imgui/imgui_process_popup_view.cpp
         src/ui/imgui/imgui_kill_dialog_view.cpp
+        src/ui/imgui/imgui_find_handle_dialog.cpp
+        src/ui/imgui/imgui_history_view.cpp
         src/ui/imgui/imgui_input.cpp
     )
     target_include_directories(pex_ui_imgui PUBLIC src PRIVATE ${stb_SOURCE_DIR} ${CMAKE_BINARY_DIR}/generated)
@@ -278,6 +281,7 @@ if(BUILD_TUI AND NCURSES_FOUND)
         src/ui/tui/tui_details_panel.cpp
         src/ui/tui/tui_details_tabs.cpp
         src/ui/tui/tui_kill_dialog.cpp
+        src/ui/tui/tui_find_file.cpp
         src/ui/tui/tui_input.cpp
         src/ui/tui/tui_input_panels.cpp
         src/ui/tui/tui_colors.cpp

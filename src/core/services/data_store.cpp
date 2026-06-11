@@ -1,4 +1,5 @@
 #include "data_store.hpp"
+#include "history_store.hpp"
 #include <algorithm>
 #include <ranges>
 #include <set>
@@ -96,6 +97,10 @@ void DataStore::set_on_data_updated(std::function<void()> callback) {
     on_data_updated_ = std::move(callback);
 }
 
+void DataStore::set_history_store(HistoryStore* history) {
+    history_store_ = history;
+}
+
 std::vector<ParseError> DataStore::get_recent_errors() const {
     return process_provider_->get_recent_errors();
 }
@@ -143,31 +148,48 @@ void DataStore::collect_data() {
     // Get all processes
     auto processes = process_provider_->get_all_processes(mem_info.total);
 
-    // Calculate CPU percentages and collect current PIDs
+    // Wall-clock seconds since the previous tick (for I/O rate calculation)
+    const double elapsed_sec = (previous_snapshot_time_.time_since_epoch().count() != 0)
+        ? std::chrono::duration<double>(new_snapshot->timestamp - previous_snapshot_time_).count()
+        : 0.0;
+    previous_snapshot_time_ = new_snapshot->timestamp;
+
+    // Calculate CPU percentages / I/O rates and collect current PIDs
     std::set<int> current_pids;
     unsigned int proc_count = system_provider_->get_processor_count();
     for (auto& proc : processes) {
         current_pids.insert(proc.pid);
-        if (auto it = previous_cpu_times_.find(proc.pid); it != previous_cpu_times_.end()) {
-            const auto [prev_user, prev_kernel] = it->second;
-            const bool counters_valid = proc.user_time >= prev_user && proc.kernel_time >= prev_kernel;
+        if (auto it = previous_proc_counters_.find(proc.pid); it != previous_proc_counters_.end()) {
+            const ProcCounters& prev = it->second;
+            const bool counters_valid = proc.user_time >= prev.user_time && proc.kernel_time >= prev.kernel_time;
             if (counters_valid && total_cpu_delta > 0) {
-                const uint64_t user_delta = proc.user_time - prev_user;
-                const uint64_t kernel_delta = proc.kernel_time - prev_kernel;
+                const uint64_t user_delta = proc.user_time - prev.user_time;
+                const uint64_t kernel_delta = proc.kernel_time - prev.kernel_time;
                 const uint64_t process_delta = user_delta + kernel_delta;
                 proc.cpu_percent = static_cast<double>(process_delta) / total_cpu_delta * 100.0 * proc_count;
                 proc.total_cpu_percent = static_cast<double>(process_delta) / total_cpu_delta * 100.0;
+                proc.cpu_user_percent = static_cast<double>(user_delta) / total_cpu_delta * 100.0;
+                proc.cpu_kernel_percent = static_cast<double>(kernel_delta) / total_cpu_delta * 100.0;
             } else {
                 // PID reused or counters wrapped – reset baseline
                 proc.cpu_percent = 0.0;
                 proc.total_cpu_percent = 0.0;
             }
+            // I/O rates: same PID-reuse guard (counters are monotonic per process)
+            const bool io_valid = counters_valid &&
+                proc.io_read_bytes >= prev.io_read_bytes &&
+                proc.io_write_bytes >= prev.io_write_bytes;
+            if (io_valid && elapsed_sec > 0.0) {
+                proc.io_read_rate = static_cast<double>(proc.io_read_bytes - prev.io_read_bytes) / elapsed_sec;
+                proc.io_write_rate = static_cast<double>(proc.io_write_bytes - prev.io_write_bytes) / elapsed_sec;
+            }
         }
-        previous_cpu_times_[proc.pid] = {proc.user_time, proc.kernel_time};
+        previous_proc_counters_[proc.pid] = {proc.user_time, proc.kernel_time,
+                                             proc.io_read_bytes, proc.io_write_bytes};
     }
 
     // Prune stale entries for processes that no longer exist
-    std::erase_if(previous_cpu_times_, [&current_pids](const auto& entry) {
+    std::erase_if(previous_proc_counters_, [&current_pids](const auto& entry) {
         return !current_pids.contains(entry.first);
     });
 
@@ -310,6 +332,11 @@ void DataStore::collect_data() {
 
     // Update previous values
     previous_system_cpu_times_ = current_cpu_times;
+
+    // Record into history before publishing (snapshot is fully built here)
+    if (HistoryStore* history = history_store_.load()) {
+        history->record(*new_snapshot);
+    }
 
     // Atomically swap the snapshot
     std::function<void()> callback;

@@ -3,7 +3,9 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include "../../core/format_utils.hpp"
+#include "../../core/services/history_store.hpp"
 #include <GLFW/glfw3.h>
+#include <cstdlib>
 #include <format>
 #include <ctime>
 #include <fstream>
@@ -19,11 +21,13 @@ namespace pex {
 ImGuiApp::ImGuiApp(DataStore* data_store,
                    ISystemDataProvider* system_provider,
                    IProcessDataProvider* details_provider,
-                   IProcessKiller* killer)
+                   IProcessKiller* killer,
+                   HistoryStore* history)
     : data_store_(data_store)
     , system_provider_(system_provider)
     , details_provider_(details_provider)
-    , killer_(killer) {
+    , killer_(killer)
+    , history_(history) {
 
     // Validate required dependencies
     assert(data_store_ && "DataStore must not be null");
@@ -42,7 +46,9 @@ ImGuiApp::ImGuiApp(DataStore* data_store,
     });
 }
 
-ImGuiApp::~ImGuiApp() = default;
+ImGuiApp::~ImGuiApp() {
+    stop_handle_search();
+}
 
 void ImGuiApp::run() {
     // Initialize GLFW
@@ -163,7 +169,8 @@ void ImGuiApp::run() {
         glfwSwapBuffers(window_);
     }
 
-    // Stop background threads
+    // Stop background threads (find worker first: it posts GLFW events)
+    stop_handle_search();
     data_store_->stop();
     name_resolver_.stop();
 
@@ -179,6 +186,27 @@ void ImGuiApp::run() {
 void ImGuiApp::request_focus() {
     focus_requested_ = true;
     post_empty_event_debounced();
+}
+
+void ImGuiApp::export_history() {
+    if (!history_) return;
+
+    const char* home = std::getenv("HOME");
+    const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm tm_val{};
+    localtime_r(&now, &tm_val);
+    char stamp[32];
+    std::strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", &tm_val);
+
+    const std::string base = std::string(home ? home : ".") + "/pex-history-" + stamp;
+
+    std::string error;
+    if (history_->export_csv(base, error)) {
+        status_message_ = std::format("History exported to {}-{{system,processes}}.csv", base);
+    } else {
+        status_message_ = "History export failed: " + error;
+    }
+    status_message_time_ = std::chrono::steady_clock::now();
 }
 
 void ImGuiApp::post_empty_event_debounced() {
@@ -244,6 +272,12 @@ void ImGuiApp::render() {
     ImGui::EndChild();
 
     // Status bar
+    if (!status_message_.empty() &&
+        std::chrono::steady_clock::now() - status_message_time_ < kStatusMessageDuration) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.9f, 0.4f, 1.0f));
+        ImGui::TextWrapped("%s", status_message_.c_str());
+        ImGui::PopStyleColor();
+    }
     if (const auto errors = data_store_->get_recent_errors(); !errors.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.2f, 1.0f));
         ImGui::Text("[!] %s", errors.back().message.c_str());
@@ -315,6 +349,8 @@ void ImGuiApp::render() {
 
     render_process_popup();
     render_kill_confirmation_dialog();
+    render_find_handle_dialog();
+    render_history_view();
 }
 
 } // namespace pex

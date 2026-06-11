@@ -16,6 +16,8 @@
 
 namespace pex {
 
+class HistoryStore;
+
 struct ProcessNode {
     ProcessInfo info;
     std::vector<std::unique_ptr<ProcessNode>> children;
@@ -103,6 +105,10 @@ public:
     // Get recent parse errors for status bar display
     [[nodiscard]] std::vector<ParseError> get_recent_errors() const;
 
+    // Optional history recorder; every collected snapshot is recorded into it.
+    // LIFETIME: must outlive this DataStore (or be detached with nullptr first).
+    void set_history_store(HistoryStore* history);
+
 private:
     void collection_thread_func();
     void collect_data();
@@ -112,6 +118,7 @@ private:
     // Injected providers (owned externally)
     IProcessDataProvider* process_provider_;
     ISystemDataProvider* system_provider_;
+    std::atomic<HistoryStore*> history_store_{nullptr};
 
     // Background thread
     std::thread collection_thread_;
@@ -127,14 +134,23 @@ private:
     mutable std::mutex data_mutex_;
     std::shared_ptr<DataSnapshot> current_snapshot_;
 
-    // For CPU delta calculations (pre-allocated, reused each tick)
+    // For CPU/IO delta calculations (pre-allocated, reused each tick)
     CpuTimes previous_system_cpu_times_;
     std::vector<CpuTimes> previous_per_cpu_times_;
     std::vector<CpuTimes> current_per_cpu_times_;  // Reused buffer
     std::vector<double> per_cpu_usage_buffer_;     // Reused buffer
     std::vector<double> per_cpu_user_buffer_;      // Reused buffer
     std::vector<double> per_cpu_system_buffer_;    // Reused buffer
-    std::unordered_map<int, std::pair<uint64_t, uint64_t>> previous_cpu_times_;
+
+    // Per-process cumulative counters from the previous tick
+    struct ProcCounters {
+        uint64_t user_time = 0;
+        uint64_t kernel_time = 0;
+        uint64_t io_read_bytes = 0;
+        uint64_t io_write_bytes = 0;
+    };
+    std::unordered_map<int, ProcCounters> previous_proc_counters_;
+    std::chrono::steady_clock::time_point previous_snapshot_time_{};
 
     // Callback
     std::function<void()> on_data_updated_;

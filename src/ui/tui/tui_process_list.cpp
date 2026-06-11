@@ -1,5 +1,6 @@
 #include "tui_app.hpp"
 #include "tui_colors.hpp"
+#include "../../core/format_utils.hpp"
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
@@ -7,6 +8,12 @@
 #include <set>
 
 namespace pex {
+
+// "-" for idle, otherwise compact e.g. "1.2M/s" (issue #11)
+static std::string format_io_rate_tui(const double rate) {
+    if (rate < 1.0) return "-";
+    return pex::format_bytes(static_cast<int64_t>(rate), true) + "/s";
+}
 
 // Helper to check if a node is the last child of its parent
 static bool is_last_child(ProcessNode* node, const std::unordered_map<int, ProcessNode*>& process_map) {
@@ -82,7 +89,7 @@ void TuiApp::render_process_tree() {
     constexpr int tree_col_width = 32;
 
     // Scrollable header columns
-    const std::string header_scroll = "   PID   CPU%    Memory  Mem% Threads User     State TrCPU% TrTot%   TreeMem  Command";
+    const std::string header_scroll = "   PID   CPU%    Memory  Mem%  Read/s Write/s Threads User     State TrCPU% TrTot%   TreeMem  Command";
 
     // Render fixed header (Process column)
     wattron(process_win_, COLOR_PAIR(COLOR_PAIR_HEADER) | A_BOLD);
@@ -212,11 +219,13 @@ void TuiApp::render_process_tree() {
         // Build scrollable data row
         char data_buf[512];
         snprintf(data_buf, sizeof(data_buf),
-                 "%7d %5.1f%% %9s %4.1f%% %7d %-8s    %c  %5.1f%% %5.1f%% %9s  %s",
+                 "%7d %5.1f%% %9s %4.1f%% %7s %7s %7d %-8s    %c  %5.1f%% %5.1f%% %9s  %s",
                  info.pid,
                  info.cpu_percent,
                  format_bytes(info.resident_memory).c_str(),
                  info.memory_percent,
+                 format_io_rate_tui(info.io_read_rate).c_str(),
+                 format_io_rate_tui(info.io_write_rate).c_str(),
                  info.thread_count,
                  info.user_name.substr(0, 8).c_str(),
                  info.state_char,

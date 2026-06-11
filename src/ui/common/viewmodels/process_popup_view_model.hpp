@@ -16,8 +16,9 @@ struct ProcessPopupViewModel {
     // Toggle: false = process only, true = process + descendants
     bool include_tree = true;
 
-    // History buffers for charts
-    static constexpr size_t kHistorySize = 60;  // 60 data points
+    // History buffers for charts. Matches HistoryStore::kDefaultMaxSamples so
+    // the backfill shows the full recorded depth (~10 min at 1 s refresh).
+    static constexpr size_t kHistorySize = 600;
     std::vector<float> cpu_user_history;
     std::vector<float> cpu_kernel_history;
     std::vector<float> memory_history;
@@ -33,6 +34,10 @@ struct ProcessPopupViewModel {
     // Last update timestamp for rate limiting
     std::chrono::steady_clock::time_point last_update;
 
+    // Set when the target changes; the next update seeds the charts from the
+    // HistoryStore so past data is visible immediately (issue #9)
+    bool needs_backfill = false;
+
     // Clear all history when changing target
     void clear_history() {
         cpu_user_history.clear();
@@ -42,6 +47,7 @@ struct ProcessPopupViewModel {
         per_cpu_kernel_history.clear();
         prev_utime = 0;
         prev_stime = 0;
+        needs_backfill = true;
     }
 };
 

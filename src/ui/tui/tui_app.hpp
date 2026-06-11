@@ -6,13 +6,18 @@
 #include "../../core/services/data_store.hpp"
 #include "../../core/services/name_resolver.hpp"
 #include "../common/viewmodels/app_view_model.hpp"
+#include <chrono>
 #include <memory>
+#include <mutex>
 #include <atomic>
 #include <string>
+#include <thread>
 #include <vector>
 #include <ncurses.h>
 
 namespace pex {
+
+class HistoryStore;
 
 // Focus states for keyboard navigation between panels
 enum class PanelFocus {
@@ -23,11 +28,13 @@ enum class PanelFocus {
 class TuiApp {
 public:
     // Non-owning constructor: TuiApp uses but does not own the data layer.
-    // All pointers must be non-null and must outlive the TuiApp instance.
+    // All pointers must be non-null and must outlive the TuiApp instance
+    // (history may be nullptr to disable history-backed features).
     TuiApp(DataStore* data_store,
            ISystemDataProvider* system_provider,
            IProcessDataProvider* details_provider,
-           IProcessKiller* killer);
+           IProcessKiller* killer,
+           HistoryStore* history = nullptr);
     ~TuiApp();
 
     void run();
@@ -43,6 +50,17 @@ private:
 
     static void render_help_overlay();
     void render_search_bar() const;
+
+    // Find open file/handle (issue #7) - defined in tui_find_file.cpp
+    void render_find_file_bar() const;
+    void render_find_results_overlay();
+    void handle_find_file_input(int ch);
+    void handle_find_results_input(int ch);
+    void start_find_scan();
+    void stop_find_scan();
+
+    // History export (issue #9)
+    void export_history();
 
     // Tab rendering
     void render_file_handles_tab() const;
@@ -108,6 +126,7 @@ private:
     ISystemDataProvider* system_provider_ = nullptr;
     IProcessDataProvider* details_provider_ = nullptr;
     IProcessKiller* killer_ = nullptr;
+    HistoryStore* history_ = nullptr;  // Optional (nullptr = history features disabled)
 
     // Current snapshot from data store
     std::shared_ptr<DataSnapshot> current_data_;
@@ -152,6 +171,34 @@ private:
     int process_win_height_ = 0;
     int details_win_y_ = 0;
     int details_win_height_ = 0;
+
+    // Transient status message (e.g. history export result)
+    std::string status_message_;
+    std::chrono::steady_clock::time_point status_message_time_{};
+    static constexpr auto kStatusMessageDuration = std::chrono::seconds(8);
+
+    // ---- Find open file/handle (issue #7) ----
+    struct FindFileResult {
+        int pid = 0;
+        std::string process_name;
+        std::string type;   // "file", "socket", "library", ...
+        std::string path;
+    };
+    bool find_file_mode_ = false;       // Entering the query
+    bool find_results_visible_ = false; // Results overlay shown
+    std::string find_file_input_;
+    int find_selected_idx_ = 0;
+    int find_scroll_ = 0;
+    std::atomic<bool> find_running_{false};
+    std::atomic<bool> find_cancel_{false};
+    std::atomic<bool> find_dirty_{false};  // Worker progressed; main loop re-renders
+    std::thread find_thread_;              // Joined before restart/destruction
+    mutable std::mutex find_mutex_;        // Guards results + status
+    std::vector<FindFileResult> find_results_;
+    std::string find_status_;
+    // Dedicated provider: worker must not share details_provider_ with UI thread
+    std::unique_ptr<IProcessDataProvider> find_provider_;
+    static constexpr size_t kMaxFindResults = 5000;
 
     // Layout constants
     static constexpr int kSystemPanelCollapsedHeight = 3;  // Compact: avg CPU, mem, tasks

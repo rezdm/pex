@@ -29,6 +29,8 @@ struct ProcessInfo {
     // CPU usage (calculated by DataStore)
     double cpu_percent = 0.0;        // Per-core (100% = 1 core)
     double total_cpu_percent = 0.0;  // Overall (100% = all cores)
+    double cpu_user_percent = 0.0;   // User-mode share of all cores (sums with kernel to total_cpu_percent)
+    double cpu_kernel_percent = 0.0; // Kernel-mode share of all cores
 
     // Memory (in bytes)
     int64_t resident_memory = 0;     // Working set / RSS
@@ -44,6 +46,15 @@ struct ProcessInfo {
     // These are cumulative counters - only the delta between snapshots is meaningful
     uint64_t user_time = 0;
     uint64_t kernel_time = 0;
+
+    // Cumulative storage I/O counters in bytes (Linux: /proc/<pid>/io
+    // read_bytes/write_bytes). 0 = unavailable on this platform.
+    uint64_t io_read_bytes = 0;
+    uint64_t io_write_bytes = 0;
+
+    // I/O rates in bytes/sec (calculated by DataStore from counter deltas)
+    double io_read_rate = 0.0;
+    double io_write_rate = 0.0;
 };
 
 struct ThreadInfo {

@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <format>
 #include <charconv>
+#include <string_view>
 #include <algorithm>
 
 namespace fs = std::filesystem;
@@ -129,6 +130,20 @@ std::optional<ProcessInfo> ProcfsReader::get_process_info(int pid, int64_t total
     info.command_line = cmdline;
 
     info.executable_path = read_symlink(proc_path + "/exe");
+
+    // Storage I/O counters. /proc/<pid>/io needs the same privilege as ptrace
+    // read access; unreadable (other users' processes without caps) leaves 0.
+    if (std::string io = read_file(proc_path + "/io"); !io.empty()) {
+        auto parse_io_field = [&io](const std::string_view key, uint64_t& out) {
+            const size_t pos = io.find(key);
+            if (pos == std::string::npos) return;
+            size_t v = pos + key.size();
+            while (v < io.size() && io[v] == ' ') v++;
+            std::from_chars(io.data() + v, io.data() + io.size(), out);
+        };
+        parse_io_field("read_bytes:", info.io_read_bytes);
+        parse_io_field("write_bytes:", info.io_write_bytes);
+    }
 
     std::string status = read_file(proc_path + "/status");
     std::istringstream status_iss(status);

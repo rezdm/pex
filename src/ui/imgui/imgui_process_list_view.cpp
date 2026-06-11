@@ -1,5 +1,6 @@
 #include "imgui_app.hpp"
 #include "imgui.h"
+#include "../../core/format_utils.hpp"
 #include <format>
 #include <functional>
 #include <algorithm>
@@ -29,6 +30,8 @@ static constexpr const char* kColumnTooltips[] = {
     "Sum of Total% for process and all descendants",
     "Sum of memory for process and all descendants",
     "Sum of memory% for process and all descendants",
+    "Storage read rate (bytes/sec)",
+    "Storage write rate (bytes/sec)",
     "Number of threads",
     "Owner username",
     "R=Running, S=Sleeping, D=Disk, Z=Zombie, T=Stopped",
@@ -36,8 +39,10 @@ static constexpr const char* kColumnTooltips[] = {
     "Full command line with arguments"
 };
 
+static constexpr int kColumnCount = 17;
+
 static void show_column_tooltips() {
-    for (int col = 0; col < 15; col++) {
+    for (int col = 0; col < kColumnCount; col++) {
         if (ImGui::TableSetColumnIndex(col)) {
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", kColumnTooltips[col]);
@@ -46,10 +51,16 @@ static void show_column_tooltips() {
     }
 }
 
+// "-" for idle, otherwise e.g. "1.2 MB/s"
+static std::string format_io_rate(const double rate) {
+    if (rate < 1.0) return "-";
+    return pex::format_bytes(static_cast<int64_t>(rate), false) + "/s";
+}
+
 void ImGuiApp::render_process_tree() {
     if (!current_data_) return;
 
-    if (ImGui::BeginTable("ProcessTree", 15,
+    if (ImGui::BeginTable("ProcessTree", kColumnCount,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_Reorderable |
             ImGuiTableFlags_Hideable |
             ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY |
@@ -66,6 +77,8 @@ void ImGuiApp::render_process_tree() {
         ImGui::TableSetupColumn("Tree Tot", ImGuiTableColumnFlags_WidthFixed, 70);
         ImGui::TableSetupColumn("Tree Mem", ImGuiTableColumnFlags_WidthFixed, 90);
         ImGui::TableSetupColumn("Tree %", ImGuiTableColumnFlags_WidthFixed, 60);
+        ImGui::TableSetupColumn("Read/s", ImGuiTableColumnFlags_WidthFixed, 80);
+        ImGui::TableSetupColumn("Write/s", ImGuiTableColumnFlags_WidthFixed, 80);
         ImGui::TableSetupColumn("Threads", ImGuiTableColumnFlags_WidthFixed, 60);
         ImGui::TableSetupColumn("User", ImGuiTableColumnFlags_WidthFixed, 100);
         ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 50);
@@ -157,6 +170,12 @@ void ImGuiApp::render_process_tree_node(ProcessNode& node, const int depth) {
     ImGui::TextColored(ImVec4(0.4f, 0.6f, 1.0f, 1.0f), "%.1f", node.tree_memory_percent);
 
     ImGui::TableNextColumn();
+    ImGui::Text("%s", format_io_rate(node.info.io_read_rate).c_str());
+
+    ImGui::TableNextColumn();
+    ImGui::Text("%s", format_io_rate(node.info.io_write_rate).c_str());
+
+    ImGui::TableNextColumn();
     ImGui::Text("%d", node.info.thread_count);
 
     ImGui::TableNextColumn();
@@ -197,7 +216,7 @@ void ImGuiApp::render_process_tree_node(ProcessNode& node, const int depth) {
 void ImGuiApp::render_process_list() {
     if (!current_data_) return;
 
-    if (ImGui::BeginTable("ProcessList", 15,
+    if (ImGui::BeginTable("ProcessList", kColumnCount,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_Reorderable |
             ImGuiTableFlags_Hideable | ImGuiTableFlags_Sortable |
             ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY |
@@ -214,6 +233,8 @@ void ImGuiApp::render_process_list() {
         ImGui::TableSetupColumn("Tree Tot", ImGuiTableColumnFlags_WidthFixed, 70);
         ImGui::TableSetupColumn("Tree Mem", ImGuiTableColumnFlags_WidthFixed, 90);
         ImGui::TableSetupColumn("Tree %", ImGuiTableColumnFlags_WidthFixed, 60);
+        ImGui::TableSetupColumn("Read/s", ImGuiTableColumnFlags_WidthFixed, 80);
+        ImGui::TableSetupColumn("Write/s", ImGuiTableColumnFlags_WidthFixed, 80);
         ImGui::TableSetupColumn("Threads", ImGuiTableColumnFlags_WidthFixed, 60);
         ImGui::TableSetupColumn("User", ImGuiTableColumnFlags_WidthFixed, 100);
         ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 50);
@@ -262,11 +283,13 @@ void ImGuiApp::render_process_list() {
                     case 7: result = (a->tree_total_cpu_percent < b->tree_total_cpu_percent) ? -1 : (a->tree_total_cpu_percent > b->tree_total_cpu_percent) ? 1 : 0; break;
                     case 8: result = (a->tree_working_set < b->tree_working_set) ? -1 : (a->tree_working_set > b->tree_working_set) ? 1 : 0; break;
                     case 9: result = (a->tree_memory_percent < b->tree_memory_percent) ? -1 : (a->tree_memory_percent > b->tree_memory_percent) ? 1 : 0; break;
-                    case 10: result = (a->info.thread_count < b->info.thread_count) ? -1 : (a->info.thread_count > b->info.thread_count) ? 1 : 0; break;
-                    case 11: result = a->info.user_name.compare(b->info.user_name); break;
-                    case 12: result = a->info.state_char - b->info.state_char; break;
-                    case 13: result = a->info.executable_path.compare(b->info.executable_path); break;
-                    case 14: result = a->info.command_line.compare(b->info.command_line); break;
+                    case 10: result = (a->info.io_read_rate < b->info.io_read_rate) ? -1 : (a->info.io_read_rate > b->info.io_read_rate) ? 1 : 0; break;
+                    case 11: result = (a->info.io_write_rate < b->info.io_write_rate) ? -1 : (a->info.io_write_rate > b->info.io_write_rate) ? 1 : 0; break;
+                    case 12: result = (a->info.thread_count < b->info.thread_count) ? -1 : (a->info.thread_count > b->info.thread_count) ? 1 : 0; break;
+                    case 13: result = a->info.user_name.compare(b->info.user_name); break;
+                    case 14: result = a->info.state_char - b->info.state_char; break;
+                    case 15: result = a->info.executable_path.compare(b->info.executable_path); break;
+                    case 16: result = a->info.command_line.compare(b->info.command_line); break;
                     default: result = 0; break;
                 }
                 return ascending ? (result < 0) : (result > 0);
@@ -317,6 +340,12 @@ void ImGuiApp::render_process_list() {
 
             ImGui::TableNextColumn();
             ImGui::TextColored(ImVec4(0.4f, 0.6f, 1.0f, 1.0f), "%.1f", node->tree_memory_percent);
+
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", format_io_rate(node->info.io_read_rate).c_str());
+
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", format_io_rate(node->info.io_write_rate).c_str());
 
             ImGui::TableNextColumn();
             ImGui::Text("%d", node->info.thread_count);
