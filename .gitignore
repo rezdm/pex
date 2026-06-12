@@ -46,3 +46,4 @@ cmake-build-*/
 .claude/
 .idea/
 imgui.ini
+build-win/

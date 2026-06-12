@@ -13,11 +13,18 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     set(PEX_PLATFORM_DEFAULT "freebsd")
 elseif(CMAKE_SYSTEM_NAME STREQUAL "SunOS")
     set(PEX_PLATFORM_DEFAULT "solaris")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(PEX_PLATFORM_DEFAULT "windows")
 else()
-    message(FATAL_ERROR "Unsupported platform: ${CMAKE_SYSTEM_NAME}. Supported: Linux, FreeBSD, SunOS (Solaris).")
+    message(FATAL_ERROR "Unsupported platform: ${CMAKE_SYSTEM_NAME}. Supported: Linux, FreeBSD, SunOS (Solaris), Windows.")
 endif()
-set(PEX_PLATFORM "${PEX_PLATFORM_DEFAULT}" CACHE STRING "Platform backend (linux, freebsd, solaris)")
-set_property(CACHE PEX_PLATFORM PROPERTY STRINGS linux freebsd solaris)
+set(PEX_PLATFORM "${PEX_PLATFORM_DEFAULT}" CACHE STRING "Platform backend (linux, freebsd, solaris, windows)")
+set_property(CACHE PEX_PLATFORM PROPERTY STRINGS linux freebsd solaris windows)
+
+# Windows is TUI-only (issue #43): Process Explorer already owns the GUI niche
+if(PEX_PLATFORM STREQUAL "windows")
+    set(BUILD_GUI OFF CACHE BOOL "" FORCE)
+endif()
 
 message(STATUS "PEX platform: ${PEX_PLATFORM}")
 
@@ -108,18 +115,25 @@ endif()
 # =============================================================================
 # pex_core - Core library (model + services)
 # =============================================================================
-add_library(pex_core STATIC
+set(PEX_CORE_SOURCES
     src/core/services/data_store.cpp
     src/core/services/history_store.cpp
     src/core/services/name_resolver.cpp
     src/core/services/settings.cpp
-    src/core/services/single_instance.cpp
     src/core/model/system_info.cpp
 )
+if(NOT PEX_PLATFORM STREQUAL "windows")
+    # SingleInstance (unix domain sockets) is used by the GUI only
+    list(APPEND PEX_CORE_SOURCES src/core/services/single_instance.cpp)
+endif()
+add_library(pex_core STATIC ${PEX_CORE_SOURCES})
 target_include_directories(pex_core PUBLIC src)
 target_compile_options(pex_core PUBLIC -Wall -Wextra -Wpedantic)
 find_package(Threads REQUIRED)
 target_link_libraries(pex_core PUBLIC Threads::Threads)
+if(PEX_PLATFORM STREQUAL "windows")
+    target_link_libraries(pex_core PUBLIC ws2_32)  # NameResolver uses Winsock
+endif()
 
 # =============================================================================
 # pex_platform - Platform-specific library
@@ -165,12 +179,24 @@ elseif(PEX_PLATFORM STREQUAL "solaris")
         # GLFW needs rt on Solaris
         target_link_libraries(glfw PUBLIC rt)
     endif()
+elseif(PEX_PLATFORM STREQUAL "windows")
+    set(PEX_PLATFORM_SOURCES
+        src/platform/windows/windows_process_data_provider.cpp
+        src/platform/windows/windows_system_data_provider.cpp
+        src/platform/windows/windows_process_killer.cpp
+        src/platform/windows/platform_factory_windows.cpp
+    )
+    set(PEX_PLATFORM_DEFINE "PEX_PLATFORM_WINDOWS")
+    set(PEX_PLATFORM_LIBS psapi iphlpapi ws2_32 ntdll advapi32)
 else()
-    message(FATAL_ERROR "Unknown PEX_PLATFORM: ${PEX_PLATFORM}. Use 'linux', 'freebsd', or 'solaris'.")
+    message(FATAL_ERROR "Unknown PEX_PLATFORM: ${PEX_PLATFORM}. Use 'linux', 'freebsd', 'solaris', or 'windows'.")
 endif()
 
 add_library(pex_platform STATIC ${PEX_PLATFORM_SOURCES})
 target_include_directories(pex_platform PUBLIC src)
+if(PEX_PLATFORM STREQUAL "windows")
+    target_compile_definitions(pex_platform PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
 target_compile_definitions(pex_core PUBLIC ${PEX_PLATFORM_DEFINE})
 target_link_libraries(pex_platform PUBLIC pex_core)
 if(PEX_PLATFORM_LIBS)
