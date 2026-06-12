@@ -112,18 +112,7 @@ ln -s /usr/lib/64/libX11.so.4 ./lib/libX11.so.6
 LD_LIBRARY_PATH=$PWD/lib ./pex
 ```
 This is not correct, but at least allowes to test.
-To make it possible for regular users to see properties of other users' processes, instead of `setcap` from Linux, in Solaris it would be something along:
-```bash
-username=user_x
-# su...
-# printf '%s\n' 'Pex Monitor:::Run pex with process/FD/network read privileges:::' >> /etc/security/prof_attr
-# grep -n "Pex Monitor" /etc/security/prof_attr
-# getent prof_attr "Pex Monitor"
-# usermod -P +"Pex Monitor" user_x
-# profiles rezdm | grep "Pex Monitor"
-...
-$ pfexec pex
-```
+To see properties of other users' processes, set up an RBAC profile and run via `pfexec` — see [PRIVILEGES.md](PRIVILEGES.md).
 
 ## Console version
 Additional functionality -- ncurses-based TUI version. Compiled by default together with GUI version. Not to build it:
@@ -165,6 +154,7 @@ Copy pex executable and pex.png to a folder of choice and set capabilities:
 ```bash
 sudo setcap 'cap_sys_ptrace,cap_dac_read_search,cap_kill+ep' {path-to-executable-location}/pex
 ```
+pex runs fine without this — you just won't see details (files, network, environment, ...) of other users' processes. For the full story per OS (Linux capabilities incl. a group-restricted variant, Solaris RBAC/pfexec, FreeBSD sudo/doas), see **[PRIVILEGES.md](PRIVILEGES.md)**.
 
 May be create .desktop file for GNOME:
 ```
