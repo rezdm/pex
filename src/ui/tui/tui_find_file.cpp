@@ -273,7 +273,7 @@ void TuiApp::render_find_file_bar() const {
     curs_set(1);
     wmove(win, 1, 4 + static_cast<int>(find_file_input_.length()));
 
-    wrefresh(win);
+    wnoutrefresh(win);
     delwin(win);
 }
 
@@ -336,7 +336,7 @@ void TuiApp::render_find_results_overlay() {
               find_running_.load() ? "Cancel scan" : "Close");
     wattroff(win, COLOR_PAIR(COLOR_PAIR_DIALOG_BUTTON));
 
-    wrefresh(win);
+    wnoutrefresh(win);
     delwin(win);
 }
 

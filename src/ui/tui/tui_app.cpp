@@ -234,13 +234,16 @@ void TuiApp::render() {
     render_details_panel();
     render_status_bar();
 
-    // Refresh all windows
-    if (system_win_) wrefresh(system_win_);
-    wrefresh(process_win_);
-    wrefresh(details_win_);
-    wrefresh(status_win_);
+    // Stage all windows into the virtual screen; the single doupdate() below
+    // pushes one batched diff to the terminal. Calling wrefresh() per window
+    // did one physical update each - 4-6 full transfers per frame, which is
+    // very visible on large terminals (especially on Windows consoles).
+    if (system_win_) wnoutrefresh(system_win_);
+    wnoutrefresh(process_win_);
+    wnoutrefresh(details_win_);
+    wnoutrefresh(status_win_);
 
-    // Render overlays AFTER main window refresh
+    // Overlays stage on top of the main windows (they also use wnoutrefresh)
     if (view_model_.kill_dialog.is_visible) {
         render_kill_dialog();
     }
@@ -260,6 +263,9 @@ void TuiApp::render() {
     if (find_results_visible_) {
         render_find_results_overlay();
     }
+
+    // Single physical screen update for everything staged above
+    doupdate();
 }
 
 } // namespace pex
