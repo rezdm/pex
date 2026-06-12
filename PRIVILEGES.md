@@ -181,3 +181,41 @@ Footnotes:
   from non-root regardless of the above.
 * Settings saved while running under sudo land in **root's**
   `~/.config/pex/pex.conf` (and root's `imgui.ini`), not yours.
+
+---
+
+## Nuclear alternative: setuid root (works everywhere, recommended nowhere)
+
+For completeness — it works on all three OSes:
+
+```bash
+sudo chown root /opt/pex/pexc
+sudo chmod u+s /opt/pex/pexc
+```
+
+Understand what you are buying: pex needs privileged reads on **every refresh
+tick**, so unlike a well-behaved setuid program it cannot elevate briefly and
+drop — the *entire* application holds root for its whole lifetime. That root
+is then held by code that was never written to be privilege-safe:
+
+* the **DNS resolver** — the network tab does reverse lookups of remote IPs
+  via `getnameinfo()`, i.e. a root process parsing hostile network data;
+* **ncurses** (TUI) — a long CVE history of parsing terminal/terminfo data;
+* **Mesa/GL drivers + GLFW + ImGui** (GUI) — a huge attack surface, and the
+  same root-on-Wayland problems as sudo anyway.
+
+A compromise of a `setcap` pex yields three capabilities; a compromise of a
+setuid pex yields the machine. On Linux and Solaris setuid buys *zero*
+functionality over the recipes above — only blast radius. The only place it
+is even arguable is FreeBSD (no finer mechanism exists), and there:
+
+* if you must, make only **`pexc`** setuid (no GL stack), never the GUI;
+* anyone who can execute the file gets root-powered pex — combine with the
+  group-restriction pattern from the Linux section (`chown root:pexusers`,
+  `chmod 4750`);
+* the *traditional* narrow BSD answer would be setgid `kmem` with a
+  libkvm-based backend (how `ps`/`top` historically worked) — pex's FreeBSD
+  backend currently uses sysctls, so this would require code changes; noted
+  here as the principled future option.
+
+To undo: `sudo chmod u-s /opt/pex/pexc`.
