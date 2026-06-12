@@ -112,6 +112,7 @@ add_library(pex_core STATIC
     src/core/services/data_store.cpp
     src/core/services/history_store.cpp
     src/core/services/name_resolver.cpp
+    src/core/services/settings.cpp
     src/core/services/single_instance.cpp
     src/core/model/system_info.cpp
 )

@@ -131,6 +131,7 @@ std::vector<ProcessInfo> FreeBSDProcessDataProvider::get_all_processes(int64_t t
         info.parent_pid = kp[i].ki_ppid;
         info.name = kp[i].ki_comm;
         info.state_char = map_state(kp[i].ki_stat);
+        info.is_kernel_thread = (kp[i].ki_flag & P_KPROC) != 0;
         info.user_name = get_username(kp[i].ki_uid);
         info.executable_path = get_executable_path(info.pid);
         info.priority = kp[i].ki_pri.pri_level;
@@ -206,6 +207,7 @@ std::optional<ProcessInfo> FreeBSDProcessDataProvider::get_process_info(int pid,
     info.parent_pid = kp.ki_ppid;
     info.name = kp.ki_comm;
     info.state_char = map_state(kp.ki_stat);
+    info.is_kernel_thread = (kp.ki_flag & P_KPROC) != 0;
     info.user_name = get_username(kp.ki_uid);
     info.executable_path = get_executable_path(pid);
     info.priority = kp.ki_pri.pri_level;

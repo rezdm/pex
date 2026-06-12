@@ -5,6 +5,7 @@
 #include "../../platform/interfaces/i_process_killer.hpp"
 #include "../../core/services/data_store.hpp"
 #include "../../core/services/name_resolver.hpp"
+#include "../../core/services/settings.hpp"
 #include "../common/viewmodels/app_view_model.hpp"
 #include <chrono>
 #include <memory>
@@ -82,7 +83,7 @@ private:
     // Navigation helpers
     [[nodiscard]] std::vector<ProcessNode*> get_visible_items() const;
     static void collect_visible_items(ProcessNode* node, std::vector<ProcessNode*>& items,
-                                      const std::set<int>& collapsed);
+                                      const std::set<int>& collapsed, bool show_kernel_threads);
     void move_selection(int delta);
     void page_up();
     void page_down();
@@ -136,6 +137,9 @@ private:
 
     // Name resolver for DNS lookups in network tab
     mutable NameResolver name_resolver_;
+
+    // Persistent settings (issue #1) - loaded/saved in run()
+    Settings settings_;
 
     // ncurses windows
     WINDOW* main_win_ = nullptr;

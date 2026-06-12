@@ -39,6 +39,12 @@ TuiApp::~TuiApp() {
 }
 
 void TuiApp::run() {
+    // Load persisted settings (issue #1)
+    settings_.load();
+    view_model_.process_list.show_kernel_threads = settings_.get_bool("show_kernel_threads", true);
+    view_model_.system_panel.is_visible = settings_.get_bool("tui.system_panel", true);
+    system_panel_expanded_ = settings_.get_bool("tui.system_panel_expanded", false);
+
     // Initialize ncurses
     if (!initscr()) {
         fprintf(stderr, "pexc: initscr() failed\n");
@@ -150,6 +156,12 @@ void TuiApp::run() {
             needs_render = false;
         }
     }
+
+    // Persist settings (issue #1)
+    settings_.set_bool("show_kernel_threads", view_model_.process_list.show_kernel_threads);
+    settings_.set_bool("tui.system_panel", view_model_.system_panel.is_visible);
+    settings_.set_bool("tui.system_panel_expanded", system_panel_expanded_);
+    settings_.save();
 
     // Cleanup
     stop_find_scan();

@@ -9,20 +9,23 @@ std::vector<ProcessNode*> TuiApp::get_visible_items() const {
     if (!current_data_) return items;
 
     for (const auto& root : current_data_->process_tree) {
-        collect_visible_items(root.get(), items, view_model_.process_list.collapsed_pids);
+        collect_visible_items(root.get(), items, view_model_.process_list.collapsed_pids,
+                              view_model_.process_list.show_kernel_threads);
     }
     return items;
 }
 
 void TuiApp::collect_visible_items(ProcessNode* node, std::vector<ProcessNode*>& items,
-                                   const std::set<int>& collapsed) {
+                                   const std::set<int>& collapsed,
+                                   const bool show_kernel_threads) {
     if (!node) return;
+    if (!show_kernel_threads && node->info.is_kernel_thread) return;
 
     items.push_back(node);
 
     if (const bool is_collapsed = collapsed.contains(node->info.pid); !is_collapsed) {
         for (const auto& child : node->children) {
-            collect_visible_items(child.get(), items, collapsed);
+            collect_visible_items(child.get(), items, collapsed, show_kernel_threads);
         }
     }
 }
@@ -103,8 +106,11 @@ std::vector<ProcessNode*> TuiApp::find_matching_processes() const {
     if (!current_data_) return matches;
 
     // Search ALL processes (depth-first), regardless of collapsed state,
-    // so matches under collapsed parents can still be found.
+    // so matches under collapsed parents can still be found. Hidden kernel
+    // threads are excluded so search cannot land on an invisible row.
+    const bool show_kernel = view_model_.process_list.show_kernel_threads;
     std::function<void(ProcessNode*)> visit = [&](ProcessNode* node) {
+        if (!show_kernel && node->info.is_kernel_thread) return;
         if (matches_search(node->info)) {
             matches.push_back(node);
         }

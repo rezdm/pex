@@ -97,6 +97,9 @@ void ImGuiApp::render_process_tree() {
 }
 
 void ImGuiApp::render_process_tree_node(ProcessNode& node, const int depth) {
+    // Kernel threads hidden: skip the node and its (kernel) subtree
+    if (!view_model_.process_list.show_kernel_threads && node.info.is_kernel_thread) return;
+
     ImGui::PushID(node.info.pid);
     ImGui::TableNextRow();
 
@@ -245,9 +248,11 @@ void ImGuiApp::render_process_list() {
         show_column_tooltips();
 
         // Flatten tree for list view
+        const bool show_kernel = view_model_.process_list.show_kernel_threads;
         std::vector<ProcessNode*> flat_list;
         std::function<void(ProcessNode*)> flatten;
         flatten = [&](ProcessNode* node) {
+            if (!show_kernel && node->info.is_kernel_thread) return;
             flat_list.push_back(node);
             for (auto& child : node->children) {
                 flatten(child.get());

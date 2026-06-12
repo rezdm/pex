@@ -98,6 +98,8 @@ std::optional<ProcessInfo> ProcfsReader::get_process_info(int pid, int64_t total
     info.kernel_time = stime;
     info.priority = static_cast<int>(priority);
     info.thread_count = static_cast<int>(num_threads);
+    constexpr unsigned int kPfKthread = 0x00200000;  // PF_KTHREAD from linux/sched.h
+    info.is_kernel_thread = (flags & kPfKthread) != 0;
 
     auto& sys = SystemInfo::instance();
     uint64_t boot_time = sys.get_boot_time_ticks();

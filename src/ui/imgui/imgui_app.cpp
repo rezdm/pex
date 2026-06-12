@@ -51,6 +51,16 @@ ImGuiApp::~ImGuiApp() {
 }
 
 void ImGuiApp::run() {
+    // Load persisted settings (issue #1)
+    settings_.load();
+    const int win_w = std::clamp(settings_.get_int("gui.window_width", 1400), 400, 10000);
+    const int win_h = std::clamp(settings_.get_int("gui.window_height", 900), 300, 10000);
+    data_store_->set_refresh_interval(
+        std::clamp(settings_.get_int("refresh_interval_ms", 1000), 100, 60000));
+    view_model_.process_list.is_tree_view = settings_.get_bool("gui.tree_view", true);
+    view_model_.process_list.show_kernel_threads = settings_.get_bool("show_kernel_threads", true);
+    view_model_.system_panel.is_visible = settings_.get_bool("gui.system_panel", true);
+
     // Initialize GLFW
     glfwSetErrorCallback([](int code, const char* desc) {
         std::fprintf(stderr, "GLFW error %d: %s\n", code, desc ? desc : "(null)");
@@ -71,7 +81,7 @@ void ImGuiApp::run() {
     const std::string window_title = "PEX: " + system_provider_->get_system_info_string();
 
     // Create window
-    window_ = glfwCreateWindow(1400, 900, window_title.c_str(), nullptr, nullptr);
+    window_ = glfwCreateWindow(win_w, win_h, window_title.c_str(), nullptr, nullptr);
     if (!window_) {
         glfwTerminate();
         throw std::runtime_error("Failed to create GLFW window");
@@ -167,6 +177,21 @@ void ImGuiApp::run() {
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         glfwSwapBuffers(window_);
+    }
+
+    // Persist settings (issue #1) - window size must be read before destroy
+    {
+        int w = 0, h = 0;
+        glfwGetWindowSize(window_, &w, &h);
+        if (w > 0 && h > 0) {
+            settings_.set_int("gui.window_width", w);
+            settings_.set_int("gui.window_height", h);
+        }
+        settings_.set_int("refresh_interval_ms", data_store_->get_refresh_interval());
+        settings_.set_bool("gui.tree_view", view_model_.process_list.is_tree_view);
+        settings_.set_bool("show_kernel_threads", view_model_.process_list.show_kernel_threads);
+        settings_.set_bool("gui.system_panel", view_model_.system_panel.is_visible);
+        settings_.save();
     }
 
     // Stop background threads (find worker first: it posts GLFW events)

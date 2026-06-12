@@ -7,6 +7,7 @@
 #include "../../core/services/history_store.hpp"
 #include "../common/viewmodels/app_view_model.hpp"
 #include "../../core/services/name_resolver.hpp"
+#include "../../core/services/settings.hpp"
 #include <memory>
 #include <atomic>
 #include <mutex>
@@ -62,7 +63,8 @@ private:
 
     void handle_keyboard_navigation();
     [[nodiscard]] std::vector<ProcessNode*> get_visible_items() const;
-    static void collect_visible_items(ProcessNode* node, std::vector<ProcessNode*>& items);
+    static void collect_visible_items(ProcessNode* node, std::vector<ProcessNode*>& items,
+                                      bool show_kernel_threads);
 
     void search_select_first();
     void search_next();
@@ -121,6 +123,9 @@ private:
 
     // Name resolver for DNS and service lookups
     NameResolver name_resolver_;
+
+    // Persistent settings (issue #1) - loaded/saved in run()
+    Settings settings_;
 
     // Event debouncing
     void post_empty_event_debounced();
