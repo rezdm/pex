@@ -70,8 +70,28 @@ void TuiApp::run() {
     timeout(50);  // Blocking input with 50 ms timeout (paces the main loop)
     mouseinterval(200);  // Double-click timeout in milliseconds
 
-    // Enable mouse support (button presses and scroll wheel, not movement tracking)
-    mousemask(ALL_MOUSE_EVENTS, nullptr);
+    // Enable mouse support: only the button/wheel events we act on, never
+    // movement reporting (would flood the input queue).
+    mmask_t wanted = BUTTON1_PRESSED | BUTTON1_RELEASED | BUTTON1_CLICKED |
+                     BUTTON1_DOUBLE_CLICKED | BUTTON4_PRESSED;
+#ifdef BUTTON5_PRESSED
+    wanted |= BUTTON5_PRESSED;
+#endif
+    mousemask(wanted, nullptr);
+
+#ifdef _WIN32
+    // Disable console QuickEdit mode: with it on (the Windows default), a
+    // stray click/drag puts the console into text-selection mode, which
+    // FREEZES the application until Esc/Enter. Keep mouse + window input.
+    if (HANDLE hin = GetStdHandle(STD_INPUT_HANDLE); hin != INVALID_HANDLE_VALUE) {
+        DWORD mode = 0;
+        if (GetConsoleMode(hin, &mode)) {
+            mode &= ~ENABLE_QUICK_EDIT_MODE;
+            mode |= ENABLE_EXTENDED_FLAGS | ENABLE_MOUSE_INPUT | ENABLE_WINDOW_INPUT;
+            SetConsoleMode(hin, mode);
+        }
+    }
+#endif
 
     // Initialize colors
     init_colors();
@@ -146,16 +166,24 @@ void TuiApp::run() {
         }
 #endif
 
-        // Handle input (blocks up to 50 ms, which paces the loop)
-        if (const int ch = getch(); ch != ERR) {
-            if (ch == KEY_RESIZE) {
-                // PDCurses (and ncurses) deliver resizes as a key event
-                resize_term(0, 0);
-                resize_windows();
-            } else {
-                handle_input(ch);
-            }
-            needs_render = true;
+        // Read input: getch() blocks up to 50 ms (idle pacing). If a key
+        // arrives, DRAIN the whole pending backlog with a non-blocking read
+        // before rendering once - otherwise, when events (e.g. mouse) arrive
+        // faster than a full-screen repaint completes, the console input
+        // queue grows without bound and keypresses lag then appear dead.
+        if (int ch = getch(); ch != ERR) {
+            timeout(0);  // non-blocking for the drain
+            int drained = 0;
+            do {
+                if (ch == KEY_RESIZE) {
+                    resize_term(0, 0);
+                    resize_windows();
+                } else {
+                    handle_input(ch);
+                }
+                needs_render = true;
+            } while (++drained < 512 && (ch = getch()) != ERR);
+            timeout(50);  // restore idle-pacing block
         }
 
         // Update data periodically
