@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ncurses.h>
+#include "curses_compat.hpp"
 
 namespace pex {
 

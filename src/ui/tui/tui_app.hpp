@@ -14,7 +14,7 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <ncurses.h>
+#include "curses_compat.hpp"
 
 namespace pex {
 

@@ -81,6 +81,36 @@ jobs:
     - name: ccache stats
       run: ccache --show-stats
 
+  build-windows:
+    name: Windows (TUI only)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - uses: msys2/setup-msys2@v2
+      with:
+        msystem: UCRT64
+        update: false
+        install: >-
+          mingw-w64-ucrt-x86_64-gcc
+          mingw-w64-ucrt-x86_64-cmake
+          mingw-w64-ucrt-x86_64-ninja
+          git
+
+    - name: Configure
+      run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build
+      run: cmake --build build -j$(nproc)
+
+    - name: Verify binaries
+      run: |
+        test -f build/pexc.exe && echo "pexc.exe: OK"
+
   build-freebsd:
     name: FreeBSD (latest)
     runs-on: ubuntu-latest

@@ -242,7 +242,35 @@ option(BUILD_NCURSES "Build ncurses from source if not found" OFF)
 
 # Allow manual override of curses paths, otherwise use find_package
 set(NCURSES_FOUND FALSE)
-if(CURSES_INCLUDE_DIR AND CURSES_LIBRARY)
+if(PEX_PLATFORM STREQUAL "windows" AND BUILD_TUI)
+    # Windows: PDCursesMod (curses API, WinCon backend) built from source.
+    # SOURCE_SUBDIR points at a non-existent dir so MakeAvailable only
+    # populates the sources without running PDCursesMod's own CMake.
+    enable_language(C)
+    include(FetchContent)
+    FetchContent_Declare(
+        pdcursesmod
+        GIT_REPOSITORY https://github.com/Bill-Gray/PDCursesMod.git
+        GIT_TAG v4.5.4
+        SOURCE_SUBDIR cmake-not-used
+    )
+    FetchContent_MakeAvailable(pdcursesmod)
+
+    file(GLOB PDCURSES_SOURCES
+        ${pdcursesmod_SOURCE_DIR}/pdcurses/*.c
+        ${pdcursesmod_SOURCE_DIR}/wincon/*.c
+    )
+    add_library(pdcurses STATIC ${PDCURSES_SOURCES})
+    target_include_directories(pdcurses PUBLIC ${pdcursesmod_SOURCE_DIR})
+    # Wide-char + UTF-8 output so ACS box-drawing renders in Windows Terminal
+    target_compile_definitions(pdcurses PUBLIC PDC_WIDE PDC_FORCE_UTF8)
+    target_link_libraries(pdcurses PUBLIC winmm)
+
+    set(CURSES_FOUND TRUE)
+    set(NCURSES_FOUND TRUE)
+    set(CURSES_INCLUDE_DIR "")     # Comes via the pdcurses target
+    set(CURSES_LIBRARIES pdcurses)
+elseif(CURSES_INCLUDE_DIR AND CURSES_LIBRARY)
     message(STATUS "Using manually specified curses: ${CURSES_INCLUDE_DIR}, ${CURSES_LIBRARY}")
     set(CURSES_FOUND TRUE)
     set(NCURSES_FOUND TRUE)

@@ -33,10 +33,18 @@ void TuiApp::export_history() {
         return;
     }
 
+#ifdef _WIN32
+    const char* home = std::getenv("USERPROFILE");
+#else
     const char* home = std::getenv("HOME");
+#endif
     const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     std::tm tm_val{};
+#ifdef _WIN32
+    localtime_s(&tm_val, &now);
+#else
     localtime_r(&now, &tm_val);
+#endif
     char stamp[32];
     std::strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", &tm_val);
 

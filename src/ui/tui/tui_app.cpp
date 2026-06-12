@@ -6,15 +6,27 @@
 #include <cstring>
 #include <chrono>
 #include <thread>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 namespace pex {
 
+#ifndef _WIN32
 // Signal handler for terminal resize - use sig_atomic_t for signal safety
+// (Windows/PDCurses delivers resizes as KEY_RESIZE through getch instead)
 static volatile sig_atomic_t g_resize_requested = 0;
 
 static void handle_resize([[maybe_unused]] int sig) {
     g_resize_requested = 1;
 }
+#endif
 
 TuiApp::TuiApp(DataStore* data_store,
                ISystemDataProvider* system_provider,
@@ -60,14 +72,16 @@ void TuiApp::run() {
 
     // Enable mouse support (button presses and scroll wheel, not movement tracking)
     mousemask(ALL_MOUSE_EVENTS, nullptr);
-    printf("\033[?1000h");
-    fflush(stdout);
 
     // Initialize colors
     init_colors();
 
     // Set terminal title (like GUI version: "PEX: uname-info")
     const std::string title = "PEX: " + system_provider_->get_system_info_string();
+#ifdef _WIN32
+    SetConsoleTitleA(title.c_str());
+#else
+    printf("\033[?1000h");  // xterm mouse tracking (ncurses path)
     printf("\033]0;%s\007", title.c_str());
     fflush(stdout);
 
@@ -77,6 +91,7 @@ void TuiApp::run() {
     sigemptyset(&sa_resize.sa_mask);
     sa_resize.sa_flags = SA_RESTART;
     sigaction(SIGWINCH, &sa_resize, nullptr);
+#endif
 
     // Clear and refresh stdscr first to initialize the screen properly
     clear();
@@ -99,9 +114,11 @@ void TuiApp::run() {
 
     if (!current_data_ || current_data_->process_count == 0) {
         // Restore terminal state before exiting
+#ifndef _WIN32
         printf("\033[?1000l");  // Disable mouse tracking
         printf("\033]0;\007");   // Reset terminal title
         fflush(stdout);
+#endif
         endwin();
         data_store_->stop();
         name_resolver_.stop();
@@ -118,7 +135,8 @@ void TuiApp::run() {
     bool needs_render = true;  // Initial paint
 
     while (running_) {
-        // Handle terminal resize
+#ifndef _WIN32
+        // Handle terminal resize (SIGWINCH path)
         if (g_resize_requested) {
             g_resize_requested = 0;
             endwin();
@@ -126,10 +144,17 @@ void TuiApp::run() {
             resize_windows();
             needs_render = true;
         }
+#endif
 
         // Handle input (blocks up to 50 ms, which paces the loop)
         if (const int ch = getch(); ch != ERR) {
-            handle_input(ch);
+            if (ch == KEY_RESIZE) {
+                // PDCurses (and ncurses) deliver resizes as a key event
+                resize_term(0, 0);
+                resize_windows();
+            } else {
+                handle_input(ch);
+            }
             needs_render = true;
         }
 
@@ -169,15 +194,19 @@ void TuiApp::run() {
     name_resolver_.stop();
     cleanup_windows();
 
+#ifndef _WIN32
     // Disable mouse tracking
     printf("\033[?1000l");
     fflush(stdout);
+#endif
 
     endwin();
 
+#ifndef _WIN32
     // Reset terminal title
     printf("\033]0;\007");
     fflush(stdout);
+#endif
 }
 
 void TuiApp::render() {
