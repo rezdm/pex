@@ -16,6 +16,7 @@ struct ProcessListViewModel {
 
     // Tree view state
     bool is_tree_view = true;
+    bool show_kernel_threads = true;
     std::set<int> collapsed_pids;  // Track which nodes are collapsed
 
     // Sorting state (for list view)

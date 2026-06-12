@@ -93,6 +93,11 @@ std::optional<ProcessInfo> SolarisProcessDataProvider::read_process_info(int pid
     info.parent_pid = psinfo.pr_ppid;
     info.name = psinfo.pr_fname;
     info.state_char = map_state(psinfo.pr_lwp.pr_sname);
+    // SSYS from <sys/proc.h>: system process (sched, pageout, fsflush, ...).
+    // The constant is used directly because including <sys/proc.h> clashes
+    // with the std::filesystem namespace alias in this file.
+    constexpr int kSsysFlag = 0x00000001;
+    info.is_kernel_thread = (psinfo.pr_flag & kSsysFlag) != 0;
     info.user_name = get_username(psinfo.pr_uid);
     info.priority = psinfo.pr_lwp.pr_pri;  // Dynamic priority, consistent with other platforms
     info.thread_count = psinfo.pr_nlwp;

@@ -23,11 +23,13 @@ bool matches_search_term(const ProcessInfo& info, const std::string& search_lowe
 
 } // namespace
 
-void ImGuiApp::collect_visible_items(ProcessNode* node, std::vector<ProcessNode*>& items) {
+void ImGuiApp::collect_visible_items(ProcessNode* node, std::vector<ProcessNode*>& items,
+                                     const bool show_kernel_threads) {
+    if (!show_kernel_threads && node->info.is_kernel_thread) return;
     items.push_back(node);
     if (node->is_expanded) {
         for (auto& child : node->children) {
-            collect_visible_items(child.get(), items);
+            collect_visible_items(child.get(), items, show_kernel_threads);
         }
     }
 }
@@ -36,13 +38,15 @@ std::vector<ProcessNode*> ImGuiApp::get_visible_items() const {
     std::vector<ProcessNode*> items;
     if (!current_data_) return items;
 
+    const bool show_kernel = view_model_.process_list.show_kernel_threads;
     if (view_model_.process_list.is_tree_view) {
         for (auto& root : current_data_->process_tree) {
-            collect_visible_items(root.get(), items);
+            collect_visible_items(root.get(), items, show_kernel);
         }
     } else {
         std::function<void(ProcessNode*)> flatten;
         flatten = [&](ProcessNode* node) {
+            if (!show_kernel && node->info.is_kernel_thread) return;
             items.push_back(node);
             for (auto& child : node->children) {
                 flatten(child.get());
@@ -132,8 +136,11 @@ std::vector<ProcessNode*> ImGuiApp::find_matching_processes() const {
     const std::string search_lower = to_lower_copy(pl.search_buffer);
 
     // Search ALL processes (depth-first), regardless of expansion state,
-    // so matches under collapsed parents can still be found.
+    // so matches under collapsed parents can still be found. Hidden kernel
+    // threads are excluded so search cannot land on an invisible row.
+    const bool show_kernel = view_model_.process_list.show_kernel_threads;
     std::function<void(ProcessNode*)> visit = [&](ProcessNode* node) {
+        if (!show_kernel && node->info.is_kernel_thread) return;
         if (matches_search_term(node->info, search_lower)) {
             matches.push_back(node);
         }

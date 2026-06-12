@@ -137,6 +137,7 @@ void TuiApp::render_help_overlay() {
         "  n/N             Next/previous search match",
         "  o               Find open file/handle",
         "  d               Dump history to CSV (~/pex-history-*)",
+        "  u               Show/hide kernel threads",
         "  x               Kill process",
         "  K               Kill process tree",
         "  r/F5            Force refresh",

@@ -25,6 +25,7 @@ struct ProcessInfo {
     std::string executable_path;
     char state_char = '?';
     std::string user_name;
+    bool is_kernel_thread = false;  // Linux: PF_KTHREAD, FreeBSD: P_KPROC, Solaris: SSYS
 
     // CPU usage (calculated by DataStore)
     double cpu_percent = 0.0;        // Per-core (100% = 1 core)

@@ -93,6 +93,11 @@ void TuiApp::handle_input(int ch) {
             export_history();
             return;
 
+        case 'u':  // Show/hide kernel threads (issue #2)
+            view_model_.process_list.show_kernel_threads =
+                !view_model_.process_list.show_kernel_threads;
+            return;
+
         case 'n':  // Next search match
             if (!view_model_.process_list.search_text.empty()) {
                 search_next();
