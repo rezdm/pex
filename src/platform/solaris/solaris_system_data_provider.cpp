@@ -168,39 +168,10 @@ LoadAverage SolarisSystemDataProvider::get_load_average() {
         la.fifteen_min = loadavg[2];
     }
 
-    // Count processes by iterating /proc
-    int total = 0;
-    int running = 0;
-
-    if (DIR* dir = opendir("/proc")) {
-        dirent* entry;
-        while ((entry = readdir(dir)) != nullptr) {
-            // Skip non-numeric entries
-            if (entry->d_name[0] < '0' || entry->d_name[0] > '9') continue;
-
-            char psinfo_path[64];
-            snprintf(psinfo_path, sizeof(psinfo_path), "/proc/%s/psinfo", entry->d_name);
-
-            int fd = open(psinfo_path, O_RDONLY);
-            if (fd < 0) continue;
-
-            psinfo_t psinfo;
-            ssize_t n = read(fd, &psinfo, sizeof(psinfo));
-            close(fd);
-
-            if (n == sizeof(psinfo)) {
-                total++;
-                // Check if running (O = on processor, R = runnable)
-                if (psinfo.pr_lwp.pr_sname == 'O' || psinfo.pr_lwp.pr_sname == 'R') {
-                    running++;
-                }
-            }
-        }
-        closedir(dir);
-    }
-
-    la.total_tasks = total;
-    la.running_tasks = running;
+    // total_tasks/running_tasks stay 0: nothing displays them, and counting
+    // them here re-read every /proc/<pid>/psinfo on every tick — a full
+    // second scan on top of get_all_processes. The snapshot already carries
+    // process_count/running_count computed from the process list.
 
     return la;
 }

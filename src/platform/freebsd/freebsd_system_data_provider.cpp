@@ -145,30 +145,10 @@ LoadAverage FreeBSDSystemDataProvider::get_load_average() {
         la.fifteen_min = loadavg[2];
     }
 
-    // Get process counts
-    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
-    size_t len = 0;
-    if (sysctl(mib, 3, nullptr, &len, nullptr, 0) == 0) {
-        la.total_tasks = len / sizeof(struct kinfo_proc);
-    }
-
-    // Running processes
-    mib[2] = KERN_PROC_PROC;  // Only actual processes, not threads
-    if (sysctl(mib, 3, nullptr, &len, nullptr, 0) == 0) {
-        std::vector<char> buf(len * 5 / 4);
-        size_t actual_len = buf.size();
-        if (sysctl(mib, 3, buf.data(), &actual_len, nullptr, 0) == 0) {
-            struct kinfo_proc* kp = reinterpret_cast<struct kinfo_proc*>(buf.data());
-            size_t count = actual_len / sizeof(struct kinfo_proc);
-            int running = 0;
-            for (size_t i = 0; i < count; ++i) {
-                if (kp[i].ki_stat == SRUN) {
-                    running++;
-                }
-            }
-            la.running_tasks = running;
-        }
-    }
+    // total_tasks/running_tasks stay 0: nothing displays them, and counting
+    // them here fetched the full kinfo_proc table again on every tick. The
+    // snapshot already carries process_count/running_count computed from the
+    // process list.
 
     return la;
 }
