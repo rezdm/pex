@@ -4,13 +4,16 @@
 namespace pex {
 
 void ImGuiApp::request_kill_process(const int pid, const std::string& name, const bool is_tree) {
-    auto&[is_visible, target_pid, target_name, is_tree_kill, error_message, show_force_option] = view_model_.kill_dialog;
-    target_pid = pid;
-    target_name = name;
-    is_tree_kill = is_tree;
-    error_message.clear();
-    show_force_option = false;
-    is_visible = true;
+    auto& kd = view_model_.kill_dialog;
+    kd.target_pid = pid;
+    kd.target_name = name;
+    // Capture the start-time token now: the dialog can stay open indefinitely
+    // and the killer refuses to signal a recycled PID.
+    kd.target_token = killer_->process_start_token(pid);
+    kd.is_tree_kill = is_tree;
+    kd.error_message.clear();
+    kd.show_force_option = false;
+    kd.is_visible = true;
 }
 
 void ImGuiApp::execute_kill(const bool force) {
@@ -19,9 +22,9 @@ void ImGuiApp::execute_kill(const bool force) {
 
     KillResult result;
     if (kd.is_tree_kill) {
-        result = killer_->kill_process_tree(kd.target_pid, force);
+        result = killer_->kill_process_tree(kd.target_pid, force, kd.target_token);
     } else {
-        result = killer_->kill_process(kd.target_pid, force);
+        result = killer_->kill_process(kd.target_pid, force, kd.target_token);
     }
 
     if (result.success && !result.process_still_running) {
@@ -39,7 +42,9 @@ void ImGuiApp::execute_kill(const bool force) {
 }
 
 void ImGuiApp::render_kill_confirmation_dialog() {
-    auto& [is_visible, target_pid, target_name, is_tree_kill, error_message, show_force_option] = view_model_.kill_dialog;
+    auto& [is_visible, target_pid, target_name, target_token,
+           is_tree_kill, error_message, show_force_option] = view_model_.kill_dialog;
+    (void)target_token;  // Consumed by execute_kill()
     if (!is_visible) return;
 
     ImGui::OpenPopup("Kill Confirmation");

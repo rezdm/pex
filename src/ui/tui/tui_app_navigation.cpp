@@ -209,6 +209,9 @@ void TuiApp::request_kill_process(int pid, const std::string& name, bool is_tree
     view_model_.kill_dialog.is_visible = true;
     view_model_.kill_dialog.target_pid = pid;
     view_model_.kill_dialog.target_name = name;
+    // Capture the start-time token now: the dialog can stay open indefinitely
+    // and the killer refuses to signal a recycled PID.
+    view_model_.kill_dialog.target_token = killer_->process_start_token(pid);
     view_model_.kill_dialog.is_tree_kill = is_tree;
     view_model_.kill_dialog.error_message.clear();
     view_model_.kill_dialog.show_force_option = false;
@@ -221,9 +224,9 @@ void TuiApp::execute_kill(bool force) {
 
     KillResult result;
     if (kd.is_tree_kill) {
-        result = killer_->kill_process_tree(kd.target_pid, force);
+        result = killer_->kill_process_tree(kd.target_pid, force, kd.target_token);
     } else {
-        result = killer_->kill_process(kd.target_pid, force);
+        result = killer_->kill_process(kd.target_pid, force, kd.target_token);
     }
 
     if (result.success) {

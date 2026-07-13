@@ -125,13 +125,43 @@ std::string LinuxProcessKiller::get_kill_error_message(int err) {
     }
 }
 
-KillResult LinuxProcessKiller::kill_process(int pid, bool force) {
+std::optional<uint64_t> LinuxProcessKiller::process_start_token(const int pid) {
+    ProcMeta meta;
+    if (pid <= 0 || !read_proc_meta(pid, meta)) return std::nullopt;
+    return meta.starttime;
+}
+
+// Returns a failure result if the PID no longer refers to the process
+// instance identified by 'token' (recycled or gone); nullopt = OK to kill.
+static std::optional<KillResult> check_token(const int pid, const std::optional<uint64_t>& token,
+                                             LinuxProcessKiller& killer) {
+    if (!token) return std::nullopt;
+    KillResult result;
+    const auto current = killer.process_start_token(pid);
+    if (!current) {
+        result.error_message = "Process not found. It may have already terminated.";
+        return result;
+    }
+    if (*current != *token) {
+        result.error_message =
+            "PID was reused by a different process since the dialog opened. Kill aborted.";
+        return result;
+    }
+    return std::nullopt;
+}
+
+KillResult LinuxProcessKiller::kill_process(int pid, bool force,
+                                            std::optional<uint64_t> expected_token) {
     KillResult result;
 
     if (pid <= 0) {
         result.success = false;
         result.error_message = "Invalid PID";
         return result;
+    }
+
+    if (auto refusal = check_token(pid, expected_token, *this)) {
+        return *refusal;
     }
 
     const int signal = force ? SIGKILL : SIGTERM;
@@ -163,13 +193,20 @@ KillResult LinuxProcessKiller::kill_process(int pid, bool force) {
     return result;
 }
 
-KillResult LinuxProcessKiller::kill_process_tree(int pid, bool force) {
+KillResult LinuxProcessKiller::kill_process_tree(int pid, bool force,
+                                                 std::optional<uint64_t> expected_token) {
     KillResult result;
 
     if (pid <= 0) {
         result.success = false;
         result.error_message = "Invalid PID";
         return result;
+    }
+
+    // The tree is rebuilt from *current* /proc state, so a recycled root PID
+    // would otherwise target an unrelated process's whole tree.
+    if (auto refusal = check_token(pid, expected_token, *this)) {
+        return *refusal;
     }
 
     // Build fresh parent -> children map and capture start times from /proc

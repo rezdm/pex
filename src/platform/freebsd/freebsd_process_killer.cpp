@@ -16,6 +16,12 @@ namespace pex {
 
 namespace {
 
+// Pack a start time into the opaque token used by IProcessKiller
+uint64_t pack_start_time(const struct timeval& start) {
+    return static_cast<uint64_t>(start.tv_sec) * 1000000ULL +
+           static_cast<uint64_t>(start.tv_usec);
+}
+
 // Verify a PID still refers to the same process by comparing start times
 bool is_same_process(int pid, const struct timeval& expected_start) {
     int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
@@ -28,14 +34,49 @@ bool is_same_process(int pid, const struct timeval& expected_start) {
            kp.ki_start.tv_usec == expected_start.tv_usec;
 }
 
+// Returns a failure result if the PID no longer refers to the process
+// instance identified by 'token' (recycled or gone); nullopt = OK to kill.
+std::optional<KillResult> check_token(FreeBSDProcessKiller& killer, int pid,
+                                      const std::optional<uint64_t>& token) {
+    if (!token) return std::nullopt;
+    KillResult result;
+    const auto current = killer.process_start_token(pid);
+    if (!current) {
+        result.error_message = "Process not found. It may have already terminated.";
+        return result;
+    }
+    if (*current != *token) {
+        result.error_message =
+            "PID was reused by a different process since the dialog opened. Kill aborted.";
+        return result;
+    }
+    return std::nullopt;
+}
+
 } // anonymous namespace
 
-KillResult FreeBSDProcessKiller::kill_process(int pid, bool force) {
+std::optional<uint64_t> FreeBSDProcessKiller::process_start_token(int pid) {
+    if (pid <= 0) return std::nullopt;
+    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
+    struct kinfo_proc kp;
+    size_t len = sizeof(kp);
+    if (sysctl(mib, 4, &kp, &len, nullptr, 0) < 0 || len != sizeof(kp)) {
+        return std::nullopt;
+    }
+    return pack_start_time(kp.ki_start);
+}
+
+KillResult FreeBSDProcessKiller::kill_process(int pid, bool force,
+                                              std::optional<uint64_t> expected_token) {
     KillResult result;
     if (pid <= 0) {
         result.success = false;
         result.error_message = "Invalid PID";
         return result;
+    }
+
+    if (auto refusal = check_token(*this, pid, expected_token)) {
+        return *refusal;
     }
 
     int sig = force ? SIGKILL : SIGTERM;
@@ -72,12 +113,18 @@ KillResult FreeBSDProcessKiller::kill_process(int pid, bool force) {
     return result;
 }
 
-KillResult FreeBSDProcessKiller::kill_process_tree(int pid, bool force) {
+KillResult FreeBSDProcessKiller::kill_process_tree(int pid, bool force,
+                                                   std::optional<uint64_t> expected_token) {
     KillResult result;
     if (pid <= 0) {
         result.success = false;
         result.error_message = "Invalid PID";
         return result;
+    }
+    // The tree is rebuilt from *current* kernel state, so a recycled root PID
+    // would otherwise target an unrelated process's whole tree.
+    if (auto refusal = check_token(*this, pid, expected_token)) {
+        return *refusal;
     }
     // Collect all descendant PIDs
     std::set<int> pids_to_kill;
