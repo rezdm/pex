@@ -11,11 +11,13 @@
 #include <vm/vm_param.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+#include <algorithm>
 #include <cstring>
 #include <ctime>
 #include <cerrno>
 #include <cstdlib>
 #include <cstdio>
+#include <vector>
 
 #if __has_include(<sys/swap.h>)
 #include <sys/swap.h>
@@ -56,14 +58,21 @@ std::vector<CpuTimes> FreeBSDSystemDataProvider::get_per_cpu_times() {
 
 void FreeBSDSystemDataProvider::get_per_cpu_times(std::vector<CpuTimes>& out) {
     int ncpu = get_processor_count();
-    out.resize(ncpu);
+    out.assign(ncpu, CpuTimes{});
 
-    // Get per-CPU times via kern.cp_times
-    size_t len = sizeof(long) * CPUSTATES * ncpu;
-    std::vector<long> cp_times(CPUSTATES * ncpu);
+    // kern.cp_times is sized by kern.smp.maxcpus, which can exceed hw.ncpu
+    // (offline CPU slots); a buffer sized by ncpu makes the sysctl fail with
+    // ENOMEM and every per-CPU bar silently read zero. Query the size first.
+    size_t len = 0;
+    if (sysctlbyname("kern.cp_times", nullptr, &len, nullptr, 0) != 0 || len == 0) {
+        return;
+    }
+    std::vector<long> cp_times(len / sizeof(long));
 
     if (sysctlbyname("kern.cp_times", cp_times.data(), &len, nullptr, 0) == 0) {
-        for (int i = 0; i < ncpu; ++i) {
+        const int entries = static_cast<int>(len / (sizeof(long) * CPUSTATES));
+        const int n = std::min(ncpu, entries);
+        for (int i = 0; i < n; ++i) {
             long* cpu = &cp_times[i * CPUSTATES];
             out[i].user = cpu[CP_USER];
             out[i].nice = cpu[CP_NICE];

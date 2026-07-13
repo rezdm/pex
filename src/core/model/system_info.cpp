@@ -2,6 +2,7 @@
 
 #ifdef PEX_PLATFORM_LINUX
 
+#include <cctype>
 #include <charconv>
 #include <fstream>
 #include <sstream>
@@ -16,23 +17,32 @@ SystemInfo& SystemInfo::instance() {
 }
 
 SystemInfo::SystemInfo() {
-    processor_count_ = std::thread::hardware_concurrency();
-    if (processor_count_ == 0) processor_count_ = 1;
-
     clock_ticks_ = sysconf(_SC_CLK_TCK);
     if (clock_ticks_ <= 0) clock_ticks_ = 100;
 
-    // Read boot time from /proc/stat
+    // One /proc/stat pass: boot time (btime) and CPU count. The cpuN lines
+    // are counted instead of using hardware_concurrency(), which respects
+    // CPU affinity (taskset) and would then mismatch the per-CPU stats that
+    // per-process CPU% is scaled against.
+    unsigned int cpu_lines = 0;
     std::ifstream stat("/proc/stat");
     std::string line;
     while (std::getline(stat, line)) {
-        if (line.starts_with("btime ")) {
+        if (line.starts_with("cpu") && line.size() > 3 &&
+            std::isdigit(static_cast<unsigned char>(line[3]))) {
+            cpu_lines++;
+        } else if (line.starts_with("btime ")) {
             std::istringstream iss(line);
             std::string key;
             iss >> key >> boot_time_seconds_;
-            break;
         }
     }
+
+    processor_count_ = cpu_lines;
+    if (processor_count_ == 0) {
+        processor_count_ = std::thread::hardware_concurrency();
+    }
+    if (processor_count_ == 0) processor_count_ = 1;
 }
 
 CpuTimes SystemInfo::get_cpu_times() {
@@ -63,7 +73,8 @@ void SystemInfo::get_per_cpu_times(std::vector<CpuTimes>& out) {
 
     while (std::getline(stat, line)) {
         // Look for lines starting with "cpu" followed by a digit (cpu0, cpu1, etc.)
-        if (line.starts_with("cpu") && line.size() > 3 && std::isdigit(line[3])) {
+        if (line.starts_with("cpu") && line.size() > 3 &&
+            std::isdigit(static_cast<unsigned char>(line[3]))) {
             CpuTimes times;
             std::istringstream iss(line);
             std::string cpu;
@@ -88,6 +99,7 @@ void SystemInfo::get_per_cpu_times(std::vector<CpuTimes>& out) {
 void SystemInfo::read_meminfo(MemoryInfo& mem, SwapInfo& swap) {
     std::ifstream meminfo("/proc/meminfo");
     std::string line;
+    int64_t mem_free = 0, buffers = 0, cached = 0;
 
     while (std::getline(meminfo, line)) {
         std::istringstream iss(line);
@@ -102,11 +114,23 @@ void SystemInfo::read_meminfo(MemoryInfo& mem, SwapInfo& swap) {
             mem.total = value * 1024; // Convert from KB to bytes
         } else if (key == "MemAvailable:") {
             mem.available = value * 1024;
+        } else if (key == "MemFree:") {
+            mem_free = value * 1024;
+        } else if (key == "Buffers:") {
+            buffers = value * 1024;
+        } else if (key == "Cached:") {
+            cached = value * 1024;
         } else if (key == "SwapTotal:") {
             swap.total = value * 1024;
         } else if (key == "SwapFree:") {
             swap.free = value * 1024;
         }
+    }
+
+    // Kernels < 3.14 have no MemAvailable; without a fallback memory shows
+    // as 100% used. Free+Buffers+Cached is the classic approximation.
+    if (mem.available == 0) {
+        mem.available = mem_free + buffers + cached;
     }
 
     mem.used = mem.total - mem.available;

@@ -11,8 +11,11 @@
 #include <unistd.h>
 #include <cstring>
 #include <sys/utsname.h>
+#include <algorithm>
 #include <cstdio>
 #include <ctime>
+#include <utility>
+#include <vector>
 
 namespace pex {
 
@@ -72,28 +75,47 @@ std::vector<CpuTimes> SolarisSystemDataProvider::get_per_cpu_times() {
 }
 
 void SolarisSystemDataProvider::get_per_cpu_times(std::vector<CpuTimes>& out) {
-    int ncpu = get_processor_count();
+    const int ncpu = get_processor_count();
     out.clear();
-    out.resize(ncpu);
 
     ensure_kstat();
-    if (!kc_) return;
+    if (!kc_) {
+        out.resize(ncpu);
+        return;
+    }
+
+    // kstat instance IDs can be sparse after CPUs are offlined (e.g. 0,1,4,5);
+    // indexing out[] by instance directly skipped such CPUs entirely. Collect
+    // whatever instances exist and order them by instance ID so each CPU maps
+    // to a stable slot across ticks (delta math compares slot to slot).
+    std::vector<std::pair<int, CpuTimes>> per_instance;
 
     for (kstat_t* ksp = kc_->kc_chain; ksp != nullptr; ksp = ksp->ks_next) {
         if (strcmp(ksp->ks_module, "cpu_stat") != 0) continue;
-
-        int cpu_id = ksp->ks_instance;
-        if (cpu_id < 0 || cpu_id >= ncpu) continue;
+        if (ksp->ks_instance < 0) continue;
 
         if (kstat_read(kc_, ksp, nullptr) < 0) continue;
 
         cpu_stat_t* cs = reinterpret_cast<cpu_stat_t*>(ksp->ks_data);
         if (!cs) continue;
 
-        out[cpu_id].user = cs->cpu_sysinfo.cpu[CPU_USER];
-        out[cpu_id].system = cs->cpu_sysinfo.cpu[CPU_KERNEL];
-        out[cpu_id].idle = cs->cpu_sysinfo.cpu[CPU_IDLE];
-        out[cpu_id].iowait = cs->cpu_sysinfo.cpu[CPU_WAIT];
+        CpuTimes times;
+        times.user = cs->cpu_sysinfo.cpu[CPU_USER];
+        times.system = cs->cpu_sysinfo.cpu[CPU_KERNEL];
+        times.idle = cs->cpu_sysinfo.cpu[CPU_IDLE];
+        times.iowait = cs->cpu_sysinfo.cpu[CPU_WAIT];
+        per_instance.emplace_back(ksp->ks_instance, times);
+    }
+
+    std::sort(per_instance.begin(), per_instance.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+
+    out.reserve(per_instance.size());
+    for (const auto& [instance, times] : per_instance) {
+        out.push_back(times);
+    }
+    if (out.size() < static_cast<size_t>(ncpu)) {
+        out.resize(ncpu);
     }
 }
 

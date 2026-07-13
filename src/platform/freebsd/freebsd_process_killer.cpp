@@ -3,6 +3,7 @@
 #include <sys/types.h>
 #include <sys/sysctl.h>
 #include <sys/user.h>
+#include <sys/proc.h>
 #include <signal.h>
 #include <cerrno>
 #include <cstring>
@@ -20,6 +21,19 @@ namespace {
 uint64_t pack_start_time(const struct timeval& start) {
     return static_cast<uint64_t>(start.tv_sec) * 1000000ULL +
            static_cast<uint64_t>(start.tv_usec);
+}
+
+// A zombie answers kill(pid, 0) but is already dead — without this check the
+// UI reports "may still be running" for processes that terminated but have
+// not been reaped yet.
+bool is_zombie(int pid) {
+    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
+    struct kinfo_proc kp;
+    size_t len = sizeof(kp);
+    if (sysctl(mib, 4, &kp, &len, nullptr, 0) < 0 || len != sizeof(kp)) {
+        return false;
+    }
+    return kp.ki_stat == SZOMB;
 }
 
 // Verify a PID still refers to the same process by comparing start times
@@ -84,7 +98,7 @@ KillResult FreeBSDProcessKiller::kill_process(int pid, bool force,
     if (::kill(pid, sig) == 0) {
         if (!force) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            if (::kill(pid, 0) == 0) {
+            if (::kill(pid, 0) == 0 && !is_zombie(pid)) {
                 result.success = true;
                 result.process_still_running = true;
                 result.error_message = "SIGTERM sent. Process may still be running. Use Force Kill (SIGKILL) if it doesn't terminate.";
@@ -197,7 +211,7 @@ KillResult FreeBSDProcessKiller::kill_process_tree(int pid, bool force,
 
     if (any_success) {
         if (!force) {
-            if (::kill(pid, 0) == 0) {
+            if (::kill(pid, 0) == 0 && !is_zombie(pid)) {
                 result.success = true;
                 result.process_still_running = true;
                 result.error_message = "SIGTERM sent. Process tree may still be running. Use Force Kill (SIGKILL) if it doesn't terminate.";

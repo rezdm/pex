@@ -27,6 +27,22 @@ uint64_t pack_start_time(const timestruc_t& start) {
            static_cast<uint64_t>(start.tv_nsec);
 }
 
+// A zombie answers kill(pid, 0) but is already dead — without this check the
+// UI reports "may still be running" for processes that terminated but have
+// not been reaped yet.
+bool is_zombie(int pid) {
+    std::string path = "/proc/" + std::to_string(pid) + "/psinfo";
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) return false;
+
+    psinfo_t psinfo;
+    ssize_t n = read(fd, &psinfo, sizeof(psinfo));
+    close(fd);
+
+    if (n != static_cast<ssize_t>(sizeof(psinfo))) return false;
+    return psinfo.pr_lwp.pr_sname == 'Z';
+}
+
 // Verify a PID still refers to the same process by comparing start times
 bool is_same_process(int pid, const timestruc_t& expected_start) {
     std::string path = "/proc/" + std::to_string(pid) + "/psinfo";
@@ -93,7 +109,7 @@ KillResult SolarisProcessKiller::kill_process(int pid, bool force,
     if (const int sig = force ? SIGKILL : SIGTERM; ::kill(pid, sig) == 0) {
         if (!force) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            if (::kill(pid, 0) == 0) {
+            if (::kill(pid, 0) == 0 && !is_zombie(pid)) {
                 result.success = true;
                 result.process_still_running = true;
                 result.error_message = "SIGTERM sent. Process may still be running. Use Force Kill (SIGKILL) if it doesn't terminate.";
@@ -210,7 +226,7 @@ KillResult SolarisProcessKiller::kill_process_tree(int pid, bool force,
 
     if (any_success) {
         if (!force) {
-            if (::kill(pid, 0) == 0) {
+            if (::kill(pid, 0) == 0 && !is_zombie(pid)) {
                 result.success = true;
                 result.process_still_running = true;
                 result.error_message = "SIGTERM sent. Process tree may still be running. Use Force Kill (SIGKILL) if it doesn't terminate.";

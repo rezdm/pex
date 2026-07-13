@@ -125,6 +125,19 @@ std::string LinuxProcessKiller::get_kill_error_message(int err) {
     }
 }
 
+// A zombie answers kill(pid, 0) but is already dead — without this check the
+// UI reports "may still be running" for processes that terminated but have
+// not been reaped yet.
+static bool is_zombie(const int pid) {
+    std::ifstream file("/proc/" + std::to_string(pid) + "/stat");
+    if (!file) return false;
+    std::string content;
+    std::getline(file, content);
+    const size_t comm_end = content.rfind(')');
+    if (comm_end == std::string::npos || comm_end + 2 >= content.size()) return false;
+    return content[comm_end + 2] == 'Z';
+}
+
 std::optional<uint64_t> LinuxProcessKiller::process_start_token(const int pid) {
     ProcMeta meta;
     if (pid <= 0 || !read_proc_meta(pid, meta)) return std::nullopt;
@@ -179,7 +192,7 @@ KillResult LinuxProcessKiller::kill_process(int pid, bool force,
     // Give process a moment to terminate, then check if still alive
     if (!force) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        if (kill(pid, 0) == 0) {
+        if (kill(pid, 0) == 0 && !is_zombie(pid)) {
             // Still running
             result.success = true;
             result.process_still_running = true;
@@ -273,7 +286,7 @@ KillResult LinuxProcessKiller::kill_process_tree(int pid, bool force,
             result.error_message = get_kill_error_message(errno);
             return result;
         }
-        if (check == 0) {
+        if (check == 0 && !is_zombie(pid)) {
             // Process still exists - if we used SIGTERM, offer force kill
             if (!force) {
                 result.success = true;
