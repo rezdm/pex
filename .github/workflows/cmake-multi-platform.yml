@@ -41,6 +41,9 @@ jobs:
         test -f build/pex && echo "pex: OK"
         test -f build/pexc && echo "pexc: OK"
 
+    - name: Run unit tests
+      run: ./build/pex_tests
+
     - name: ccache stats
       run: ccache --show-stats
 
@@ -78,6 +81,9 @@ jobs:
         test -f build/pex && echo "pex: OK"
         test -f build/pexc && echo "pexc: OK"
 
+    - name: Run unit tests
+      run: ./build/pex_tests
+
     - name: ccache stats
       run: ccache --show-stats
 
@@ -103,6 +109,7 @@ jobs:
           cmake --build build -j$(sysctl -n hw.ncpu)
           test -f build/pex && echo "pex: OK"
           test -f build/pexc && echo "pexc: OK"
+          ./build/pex_tests
           ccache --show-stats
 
   build-solaris:
@@ -134,3 +141,4 @@ jobs:
           cmake --build build -j$(psrinfo -p)
           test -f build/pex && echo "pex: OK"
           test -f build/pexc && echo "pexc: OK"
+          ./build/pex_tests

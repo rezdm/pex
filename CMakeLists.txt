@@ -276,6 +276,17 @@ if(NOT NCURSES_FOUND AND BUILD_TUI AND BUILD_NCURSES)
     set(NCURSES_BUILT_FROM_SOURCE TRUE)
 endif()
 
+# =============================================================================
+# Unit tests (dependency-free, platform-neutral core only)
+# =============================================================================
+option(BUILD_TESTS "Build unit tests (pex_tests)" ON)
+if(BUILD_TESTS)
+    enable_testing()
+    add_executable(pex_tests tests/test_core.cpp)
+    target_link_libraries(pex_tests PRIVATE pex_core)
+    add_test(NAME pex_tests COMMAND pex_tests)
+endif()
+
 if(BUILD_TUI AND NCURSES_FOUND)
     message(STATUS "Building TUI version (pexc)")
 
