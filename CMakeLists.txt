@@ -32,6 +32,8 @@ message(STATUS "PEX platform: ${PEX_PLATFORM}")
 # Include custom CMake modules
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 
+include(GNUInstallDirs)
+
 # Build options
 option(BUILD_GUI "Build GUI version (pex) - requires OpenGL and X11/Wayland" ON)
 
@@ -55,15 +57,16 @@ if(BUILD_GUI)
 
     include(FetchContent)
 
-    # GLFW
+    # GLFW (pinned to the commit of tag 3.4 — tags are mutable, hashes are not)
     FetchContent_Declare(
         glfw
         GIT_REPOSITORY https://github.com/glfw/glfw.git
-        GIT_TAG 3.4
+        GIT_TAG 7b6aead9fb88b3623e3b3725ebb42670cbe4c579  # 3.4
     )
     set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)  # Keep 'make install' to pex files only
 
     # Wayland is only available on Linux; other platforms use X11 only
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -77,11 +80,11 @@ if(BUILD_GUI)
 
     FetchContent_MakeAvailable(glfw)
 
-    # Dear ImGui
+    # Dear ImGui (pinned to the commit of tag v1.91.6)
     FetchContent_Declare(
         imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG v1.91.6
+        GIT_TAG 993fa347495860ed44b83574254ef2a317d0c14f  # v1.91.6
     )
     FetchContent_MakeAvailable(imgui)
 
@@ -96,10 +99,10 @@ if(BUILD_GUI)
     # Find OpenGL
     find_package(OpenGL REQUIRED)
 
-    # ImGui library
+    # ImGui library (imgui_demo.cpp intentionally excluded: nothing calls
+    # ShowDemoWindow and it bloats the release binary)
     add_library(imgui STATIC
         ${imgui_SOURCE_DIR}/imgui.cpp
-        ${imgui_SOURCE_DIR}/imgui_demo.cpp
         ${imgui_SOURCE_DIR}/imgui_draw.cpp
         ${imgui_SOURCE_DIR}/imgui_tables.cpp
         ${imgui_SOURCE_DIR}/imgui_widgets.cpp
@@ -214,6 +217,10 @@ if(BUILD_GUI)
     )
     target_include_directories(pex PRIVATE ${stb_SOURCE_DIR} ${CMAKE_BINARY_DIR}/generated)
     target_link_libraries(pex PRIVATE pex_ui_imgui OpenGL::GL)
+
+    install(TARGETS pex RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(FILES pex.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+    install(FILES src/pex.png DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps)
 endif()
 
 # =============================================================================
@@ -312,6 +319,7 @@ if(BUILD_TUI AND NCURSES_FOUND)
     # Main TUI executable
     add_executable(pexc src/main_tui.cpp)
     target_link_libraries(pexc PRIVATE pex_ui_tui)
+    install(TARGETS pexc RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
     # If ncurses was built from source, add dependency
     if(NCURSES_BUILT_FROM_SOURCE)
