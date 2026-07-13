@@ -5,6 +5,14 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Default to an optimized build: an empty build type means -O0, and a process
+# monitor's own overhead is on display in its own process list.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type (default Release)" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release RelWithDebInfo MinSizeRel)
+endif()
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+
 # Platform selection - user can override with -DPEX_PLATFORM=<platform>
 # Auto-detect default based on OS, but allow explicit override
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

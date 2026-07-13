@@ -80,6 +80,9 @@ Being able to compile (C++23, CMake >= 3.20). Tested to run on:
 
 ## Building
 
+The build type defaults to `Release`; pass `-DCMAKE_BUILD_TYPE=Debug` for a
+debug build.
+
 ### Linux (works)
 ```bash
 git clone https://github.com/rezdm/pex.git && cd pex
