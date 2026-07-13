@@ -80,8 +80,14 @@ void ImGuiApp::run() {
     // Build window title with platform info
     const std::string window_title = "PEX: " + system_provider_->get_system_info_string();
 
-    // Create window
-    window_ = glfwCreateWindow(win_w, win_h, window_title.c_str(), nullptr, nullptr);
+    // Create window (published under the mutex: the single-instance listener
+    // thread may already be calling post_empty_event_debounced via
+    // request_focus)
+    GLFWwindow* window = glfwCreateWindow(win_w, win_h, window_title.c_str(), nullptr, nullptr);
+    {
+        std::lock_guard lock(event_debounce_mutex_);
+        window_ = window;
+    }
     if (!window_) {
         glfwTerminate();
         throw std::runtime_error("Failed to create GLFW window");
@@ -205,6 +211,13 @@ void ImGuiApp::run() {
     ImGui::DestroyContext();
 
     glfwDestroyWindow(window_);
+    {
+        // The single-instance listener may still call request_focus() until
+        // main() detaches its callback; null under the same mutex that
+        // post_empty_event_debounced() checks it under.
+        std::lock_guard lock(event_debounce_mutex_);
+        window_ = nullptr;
+    }
     glfwTerminate();
 }
 
@@ -235,9 +248,9 @@ void ImGuiApp::export_history() {
 }
 
 void ImGuiApp::post_empty_event_debounced() {
+    std::lock_guard lock(event_debounce_mutex_);
     if (!window_) return;
 
-    std::lock_guard lock(event_debounce_mutex_);
     const auto now = std::chrono::steady_clock::now();
     if (now - last_event_post_time_ >= kEventDebounceInterval) {
         last_event_post_time_ = now;
