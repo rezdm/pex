@@ -237,7 +237,7 @@ long SolarisSystemDataProvider::get_clock_ticks_per_second() const {
     return sysconf(_SC_CLK_TCK);
 }
 
-uint64_t SolarisSystemDataProvider::get_boot_time_ticks() const {
+uint64_t SolarisSystemDataProvider::get_boot_time_seconds() const {
     uint64_t boot_time = 0;
 
     ensure_kstat();
@@ -247,7 +247,7 @@ uint64_t SolarisSystemDataProvider::get_boot_time_ticks() const {
             kstat_named_t* kn = reinterpret_cast<kstat_named_t*>(
                 kstat_data_lookup(ksp, const_cast<char*>("boot_time")));
             if (kn) {
-                boot_time = kn->value.ul * sysconf(_SC_CLK_TCK);
+                boot_time = kn->value.ul;
             }
         }
     }

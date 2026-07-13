@@ -23,7 +23,7 @@ public:
     UptimeInfo get_uptime() override;
     unsigned int get_processor_count() const override;
     long get_clock_ticks_per_second() const override;
-    uint64_t get_boot_time_ticks() const override;
+    uint64_t get_boot_time_seconds() const override;
     [[nodiscard]] std::string get_system_info_string() const override;
 
 private:

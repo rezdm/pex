@@ -66,13 +66,13 @@ public:
 
     [[nodiscard]] unsigned int get_processor_count() const;
     [[nodiscard]] long get_clock_ticks_per_second() const;
-    [[nodiscard]] uint64_t get_boot_time_ticks() const;
+    [[nodiscard]] uint64_t get_boot_time_seconds() const;
 
 private:
     SystemInfo();
     unsigned int processor_count_ = 1;
     long clock_ticks_ = 100;
-    uint64_t boot_time_ticks_ = 0;
+    uint64_t boot_time_seconds_ = 0;
 };
 #endif // PEX_PLATFORM_LINUX
 

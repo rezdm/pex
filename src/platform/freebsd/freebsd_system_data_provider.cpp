@@ -204,11 +204,11 @@ long FreeBSDSystemDataProvider::get_clock_ticks_per_second() const {
     return sysconf(_SC_CLK_TCK);
 }
 
-uint64_t FreeBSDSystemDataProvider::get_boot_time_ticks() const {
+uint64_t FreeBSDSystemDataProvider::get_boot_time_seconds() const {
     struct timeval boottime;
     size_t len = sizeof(boottime);
     if (sysctlbyname("kern.boottime", &boottime, &len, nullptr, 0) == 0) {
-        return static_cast<uint64_t>(boottime.tv_sec) * sysconf(_SC_CLK_TCK);
+        return static_cast<uint64_t>(boottime.tv_sec);
     }
     return 0;
 }

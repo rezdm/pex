@@ -29,7 +29,7 @@ SystemInfo::SystemInfo() {
         if (line.starts_with("btime ")) {
             std::istringstream iss(line);
             std::string key;
-            iss >> key >> boot_time_ticks_;
+            iss >> key >> boot_time_seconds_;
             break;
         }
     }
@@ -174,8 +174,8 @@ long SystemInfo::get_clock_ticks_per_second() const {
     return clock_ticks_;
 }
 
-uint64_t SystemInfo::get_boot_time_ticks() const {
-    return boot_time_ticks_;
+uint64_t SystemInfo::get_boot_time_seconds() const {
+    return boot_time_seconds_;
 }
 
 } // namespace pex

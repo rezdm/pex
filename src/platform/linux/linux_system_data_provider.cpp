@@ -37,7 +37,7 @@ LinuxSystemDataProvider::LinuxSystemDataProvider() {
     const auto& sys_info = SystemInfo::instance();
     processor_count_ = sys_info.get_processor_count();
     clock_ticks_per_second_ = sys_info.get_clock_ticks_per_second();
-    boot_time_ticks_ = sys_info.get_boot_time_ticks();
+    boot_time_seconds_ = sys_info.get_boot_time_seconds();
 }
 
 CpuTimes LinuxSystemDataProvider::get_cpu_times() {
@@ -76,8 +76,8 @@ long LinuxSystemDataProvider::get_clock_ticks_per_second() const {
     return clock_ticks_per_second_;
 }
 
-uint64_t LinuxSystemDataProvider::get_boot_time_ticks() const {
-    return boot_time_ticks_;
+uint64_t LinuxSystemDataProvider::get_boot_time_seconds() const {
+    return boot_time_seconds_;
 }
 
 std::string LinuxSystemDataProvider::get_system_info_string() const {
