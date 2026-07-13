@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../interfaces/i_system_data_provider.hpp"
+#include <optional>
 
 namespace pex {
 
@@ -27,6 +28,12 @@ private:
     unsigned int processor_count_;
     long clock_ticks_per_second_;
     uint64_t boot_time_seconds_;
+
+    // Swap values from the last get_memory_info() call: both come from the
+    // same single-pass /proc/meminfo read, so the collection thread's
+    // get_memory_info + get_swap_info pair costs one file read per tick.
+    // Only touched from the collection thread.
+    std::optional<SwapInfo> swap_from_last_meminfo_read_;
 };
 
 } // namespace pex

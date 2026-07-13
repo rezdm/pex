@@ -85,52 +85,46 @@ void SystemInfo::get_per_cpu_times(std::vector<CpuTimes>& out) {
     }
 }
 
-MemoryInfo SystemInfo::get_memory_info() {
-    MemoryInfo info;
+void SystemInfo::read_meminfo(MemoryInfo& mem, SwapInfo& swap) {
     std::ifstream meminfo("/proc/meminfo");
     std::string line;
 
     while (std::getline(meminfo, line)) {
         std::istringstream iss(line);
         std::string key;
-        int64_t value;
+        int64_t value = 0;
         std::string unit;
 
         iss >> key >> value >> unit;
+        if (iss.fail()) continue;
 
         if (key == "MemTotal:") {
-            info.total = value * 1024; // Convert from KB to bytes
+            mem.total = value * 1024; // Convert from KB to bytes
         } else if (key == "MemAvailable:") {
-            info.available = value * 1024;
+            mem.available = value * 1024;
+        } else if (key == "SwapTotal:") {
+            swap.total = value * 1024;
+        } else if (key == "SwapFree:") {
+            swap.free = value * 1024;
         }
     }
 
-    info.used = info.total - info.available;
-    return info;
+    mem.used = mem.total - mem.available;
+    swap.used = swap.total - swap.free;
+}
+
+MemoryInfo SystemInfo::get_memory_info() {
+    MemoryInfo mem;
+    SwapInfo swap;
+    read_meminfo(mem, swap);
+    return mem;
 }
 
 SwapInfo SystemInfo::get_swap_info() {
-    SwapInfo info;
-    std::ifstream meminfo("/proc/meminfo");
-    std::string line;
-
-    while (std::getline(meminfo, line)) {
-        std::istringstream iss(line);
-        std::string key;
-        int64_t value;
-        std::string unit;
-
-        iss >> key >> value >> unit;
-
-        if (key == "SwapTotal:") {
-            info.total = value * 1024;
-        } else if (key == "SwapFree:") {
-            info.free = value * 1024;
-        }
-    }
-
-    info.used = info.total - info.free;
-    return info;
+    MemoryInfo mem;
+    SwapInfo swap;
+    read_meminfo(mem, swap);
+    return swap;
 }
 
 LoadAverage SystemInfo::get_load_average() {

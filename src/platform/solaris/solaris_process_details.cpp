@@ -405,12 +405,19 @@ std::vector<FileHandleInfo> SolarisProcessDataProvider::get_file_handles(int pid
         });
     }
 
+    // pfiles briefly *stops the target process*, so only shell out when the
+    // native /proc data is missing or incomplete — not on every refresh.
+    const bool any_incomplete = std::ranges::any_of(handles, [](const FileHandleInfo& fh) {
+        return fh.path.empty() || fh.path == "[unknown]" ||
+               fh.type.empty() || fh.type == "unknown";
+    });
+
     if (needs_fallback) {
         auto parsed = parse_pfiles(pid);
         if (!parsed.handles.empty()) {
             return parsed.handles;
         }
-    } else {
+    } else if (any_incomplete) {
         auto parsed = parse_pfiles(pid);
         if (!parsed.handles.empty()) {
             std::map<int, FileHandleInfo> parsed_map;

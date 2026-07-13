@@ -61,6 +61,8 @@ public:
     static void get_per_cpu_times(std::vector<CpuTimes>& out);  // Reuses existing vector
     static MemoryInfo get_memory_info();
     static SwapInfo get_swap_info();
+    // Single-pass /proc/meminfo parse filling both (one file read per tick)
+    static void read_meminfo(MemoryInfo& mem, SwapInfo& swap);
     static LoadAverage get_load_average();
     static UptimeInfo get_uptime();
 

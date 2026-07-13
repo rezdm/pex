@@ -164,6 +164,9 @@ void ImGuiApp::run() {
         // Refresh details when data updates
         if (data_changed) {
             refresh_selected_details();
+            // Cached for render(): fetching copies a vector under a mutex,
+            // which is wasted work on frames without new data
+            recent_errors_cache_ = data_store_->get_recent_errors();
         }
 
         // Start the Dear ImGui frame
@@ -316,9 +319,9 @@ void ImGuiApp::render() {
         ImGui::TextWrapped("%s", status_message_.c_str());
         ImGui::PopStyleColor();
     }
-    if (const auto errors = data_store_->get_recent_errors(); !errors.empty()) {
+    if (!recent_errors_cache_.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.2f, 1.0f));
-        ImGui::Text("[!] %s", errors.back().message.c_str());
+        ImGui::Text("[!] %s", recent_errors_cache_.back().message.c_str());
         ImGui::PopStyleColor();
         ImGui::SameLine();
         ImGui::TextDisabled("|");

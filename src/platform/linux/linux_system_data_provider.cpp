@@ -53,10 +53,17 @@ void LinuxSystemDataProvider::get_per_cpu_times(std::vector<CpuTimes>& out) {
 }
 
 MemoryInfo LinuxSystemDataProvider::get_memory_info() {
-    return SystemInfo::get_memory_info();
+    MemoryInfo mem;
+    SwapInfo swap;
+    SystemInfo::read_meminfo(mem, swap);
+    swap_from_last_meminfo_read_ = swap;
+    return mem;
 }
 
 SwapInfo LinuxSystemDataProvider::get_swap_info() {
+    if (swap_from_last_meminfo_read_) {
+        return *swap_from_last_meminfo_read_;
+    }
     return SystemInfo::get_swap_info();
 }
 
