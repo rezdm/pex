@@ -61,26 +61,30 @@ std::shared_ptr<DataSnapshot> DataStore::get_snapshot() const {
     return current_snapshot_;
 }
 
+// paused_/refresh_pending_ are read-modify-written under cv_mutex_ in all
+// three methods below so a refresh_now() racing resume() cannot strand a
+// pending refresh (set-after-consume).
 void DataStore::refresh_now() {
-    if (paused_) {
-        refresh_pending_ = true;
-        return;
-    }
     {
         std::lock_guard lock(cv_mutex_);
+        if (paused_) {
+            refresh_pending_ = true;
+            return;
+        }
         force_refresh_ = true;
     }
     cv_.notify_all();
 }
 
 void DataStore::pause() {
+    std::lock_guard lock(cv_mutex_);
     paused_ = true;
 }
 
 void DataStore::resume() {
-    paused_ = false;
     {
         std::lock_guard lock(cv_mutex_);
+        paused_ = false;
         if (refresh_pending_.exchange(false)) {
             force_refresh_ = true;
         }

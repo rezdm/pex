@@ -23,7 +23,9 @@ std::vector<MemoryMapInfo> ProcfsReader::get_memory_maps(int pid) {
         iss >> address >> perms >> offset >> dev >> inode;
         std::getline(iss >> std::ws, pathname);
 
-        if (pathname.find("(deleted)") != std::string::npos) continue;
+        // "(deleted)" mappings are deliberately kept: a process still mapping
+        // a deleted file (e.g. an upgraded library) is exactly what one looks
+        // for in a memory map; the kernel's suffix marks them in the UI.
 
         size_t dash = address.find('-');
         uint64_t start_addr = 0, end_addr = 0;

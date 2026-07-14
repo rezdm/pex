@@ -20,7 +20,8 @@ public:
 
     [[nodiscard]] virtual unsigned int get_processor_count() const = 0;
     [[nodiscard]] virtual long get_clock_ticks_per_second() const = 0;
-    [[nodiscard]] virtual uint64_t get_boot_time_ticks() const = 0;
+    // Boot time as seconds since the Unix epoch (all platforms)
+    [[nodiscard]] virtual uint64_t get_boot_time_seconds() const = 0;
 
     // Returns system identification string (like uname -sr: "Linux 6.1.0" or "FreeBSD 14.0")
     [[nodiscard]] virtual std::string get_system_info_string() const = 0;

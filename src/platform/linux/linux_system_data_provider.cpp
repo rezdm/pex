@@ -37,7 +37,7 @@ LinuxSystemDataProvider::LinuxSystemDataProvider() {
     const auto& sys_info = SystemInfo::instance();
     processor_count_ = sys_info.get_processor_count();
     clock_ticks_per_second_ = sys_info.get_clock_ticks_per_second();
-    boot_time_ticks_ = sys_info.get_boot_time_ticks();
+    boot_time_seconds_ = sys_info.get_boot_time_seconds();
 }
 
 CpuTimes LinuxSystemDataProvider::get_cpu_times() {
@@ -53,10 +53,17 @@ void LinuxSystemDataProvider::get_per_cpu_times(std::vector<CpuTimes>& out) {
 }
 
 MemoryInfo LinuxSystemDataProvider::get_memory_info() {
-    return SystemInfo::get_memory_info();
+    MemoryInfo mem;
+    SwapInfo swap;
+    SystemInfo::read_meminfo(mem, swap);
+    swap_from_last_meminfo_read_ = swap;
+    return mem;
 }
 
 SwapInfo LinuxSystemDataProvider::get_swap_info() {
+    if (swap_from_last_meminfo_read_) {
+        return *swap_from_last_meminfo_read_;
+    }
     return SystemInfo::get_swap_info();
 }
 
@@ -76,8 +83,8 @@ long LinuxSystemDataProvider::get_clock_ticks_per_second() const {
     return clock_ticks_per_second_;
 }
 
-uint64_t LinuxSystemDataProvider::get_boot_time_ticks() const {
-    return boot_time_ticks_;
+uint64_t LinuxSystemDataProvider::get_boot_time_seconds() const {
+    return boot_time_seconds_;
 }
 
 std::string LinuxSystemDataProvider::get_system_info_string() const {

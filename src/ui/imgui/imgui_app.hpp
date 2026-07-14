@@ -107,6 +107,10 @@ private:
     // Current snapshot from data store
     std::shared_ptr<DataSnapshot> current_data_;
 
+    // Recent parse errors, refreshed when the snapshot changes (render()
+    // would otherwise copy the vector under a mutex every frame)
+    std::vector<ParseError> recent_errors_cache_;
+
     // ViewModel (holds all UI state - single source of truth)
     AppViewModel view_model_;
 

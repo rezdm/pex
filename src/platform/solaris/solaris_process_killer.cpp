@@ -21,6 +21,28 @@ namespace pex {
 
 namespace {
 
+// Pack a start time into the opaque token used by IProcessKiller
+uint64_t pack_start_time(const timestruc_t& start) {
+    return static_cast<uint64_t>(start.tv_sec) * 1000000000ULL +
+           static_cast<uint64_t>(start.tv_nsec);
+}
+
+// A zombie answers kill(pid, 0) but is already dead — without this check the
+// UI reports "may still be running" for processes that terminated but have
+// not been reaped yet.
+bool is_zombie(int pid) {
+    std::string path = "/proc/" + std::to_string(pid) + "/psinfo";
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) return false;
+
+    psinfo_t psinfo;
+    ssize_t n = read(fd, &psinfo, sizeof(psinfo));
+    close(fd);
+
+    if (n != static_cast<ssize_t>(sizeof(psinfo))) return false;
+    return psinfo.pr_lwp.pr_sname == 'Z';
+}
+
 // Verify a PID still refers to the same process by comparing start times
 bool is_same_process(int pid, const timestruc_t& expected_start) {
     std::string path = "/proc/" + std::to_string(pid) + "/psinfo";
@@ -36,9 +58,43 @@ bool is_same_process(int pid, const timestruc_t& expected_start) {
            psinfo.pr_start.tv_nsec == expected_start.tv_nsec;
 }
 
+// Returns a failure result if the PID no longer refers to the process
+// instance identified by 'token' (recycled or gone); nullopt = OK to kill.
+std::optional<KillResult> check_token(SolarisProcessKiller& killer, int pid,
+                                      const std::optional<uint64_t>& token) {
+    if (!token) return std::nullopt;
+    KillResult result;
+    const auto current = killer.process_start_token(pid);
+    if (!current) {
+        result.error_message = "Process not found. It may have already terminated.";
+        return result;
+    }
+    if (*current != *token) {
+        result.error_message =
+            "PID was reused by a different process since the dialog opened. Kill aborted.";
+        return result;
+    }
+    return std::nullopt;
+}
+
 } // anonymous namespace
 
-KillResult SolarisProcessKiller::kill_process(int pid, bool force) {
+std::optional<uint64_t> SolarisProcessKiller::process_start_token(int pid) {
+    if (pid <= 0) return std::nullopt;
+    std::string path = "/proc/" + std::to_string(pid) + "/psinfo";
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) return std::nullopt;
+
+    psinfo_t psinfo;
+    ssize_t n = read(fd, &psinfo, sizeof(psinfo));
+    close(fd);
+
+    if (n != static_cast<ssize_t>(sizeof(psinfo))) return std::nullopt;
+    return pack_start_time(psinfo.pr_start);
+}
+
+KillResult SolarisProcessKiller::kill_process(int pid, bool force,
+                                              std::optional<uint64_t> expected_token) {
     KillResult result;
     if (pid <= 0) {
         result.success = false;
@@ -46,10 +102,14 @@ KillResult SolarisProcessKiller::kill_process(int pid, bool force) {
         return result;
     }
 
+    if (auto refusal = check_token(*this, pid, expected_token)) {
+        return *refusal;
+    }
+
     if (const int sig = force ? SIGKILL : SIGTERM; ::kill(pid, sig) == 0) {
         if (!force) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            if (::kill(pid, 0) == 0) {
+            if (::kill(pid, 0) == 0 && !is_zombie(pid)) {
                 result.success = true;
                 result.process_still_running = true;
                 result.error_message = "SIGTERM sent. Process may still be running. Use Force Kill (SIGKILL) if it doesn't terminate.";
@@ -78,12 +138,18 @@ KillResult SolarisProcessKiller::kill_process(int pid, bool force) {
     return result;
 }
 
-KillResult SolarisProcessKiller::kill_process_tree(int pid, bool force) {
+KillResult SolarisProcessKiller::kill_process_tree(int pid, bool force,
+                                                   std::optional<uint64_t> expected_token) {
     KillResult result;
     if (pid <= 0) {
         result.success = false;
         result.error_message = "Invalid PID";
         return result;
+    }
+    // The tree is rebuilt from *current* /proc state, so a recycled root PID
+    // would otherwise target an unrelated process's whole tree.
+    if (auto refusal = check_token(*this, pid, expected_token)) {
+        return *refusal;
     }
     // Collect all descendant PIDs by reading /proc
     std::set<int> pids_to_kill;
@@ -160,7 +226,7 @@ KillResult SolarisProcessKiller::kill_process_tree(int pid, bool force) {
 
     if (any_success) {
         if (!force) {
-            if (::kill(pid, 0) == 0) {
+            if (::kill(pid, 0) == 0 && !is_zombie(pid)) {
                 result.success = true;
                 result.process_still_running = true;
                 result.error_message = "SIGTERM sent. Process tree may still be running. Use Force Kill (SIGKILL) if it doesn't terminate.";

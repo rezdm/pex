@@ -61,18 +61,20 @@ public:
     static void get_per_cpu_times(std::vector<CpuTimes>& out);  // Reuses existing vector
     static MemoryInfo get_memory_info();
     static SwapInfo get_swap_info();
+    // Single-pass /proc/meminfo parse filling both (one file read per tick)
+    static void read_meminfo(MemoryInfo& mem, SwapInfo& swap);
     static LoadAverage get_load_average();
     static UptimeInfo get_uptime();
 
     [[nodiscard]] unsigned int get_processor_count() const;
     [[nodiscard]] long get_clock_ticks_per_second() const;
-    [[nodiscard]] uint64_t get_boot_time_ticks() const;
+    [[nodiscard]] uint64_t get_boot_time_seconds() const;
 
 private:
     SystemInfo();
     unsigned int processor_count_ = 1;
     long clock_ticks_ = 100;
-    uint64_t boot_time_ticks_ = 0;
+    uint64_t boot_time_seconds_ = 0;
 };
 #endif // PEX_PLATFORM_LINUX
 
