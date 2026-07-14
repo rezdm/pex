@@ -98,6 +98,25 @@ void ImGuiApp::render_system_panel() const {
             ImGui::Text("Tasks: %d, %d thr; %d running",
                 current_data_->process_count, current_data_->thread_count, current_data_->running_count);
 
+            // Kernel event feed (issue #60): per-tick process churn.
+            // "unseen" = processes that lived and died inside one tick.
+            if (current_data_->events_active) {
+                if (current_data_->short_lived_exits > 0) {
+                    ImGui::Text("Churn: +%d fork, %d exec, -%d exit (%d unseen)",
+                        current_data_->fork_events, current_data_->exec_events,
+                        current_data_->exit_events, current_data_->short_lived_exits);
+                } else {
+                    ImGui::Text("Churn: +%d fork, %d exec, -%d exit",
+                        current_data_->fork_events, current_data_->exec_events,
+                        current_data_->exit_events);
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Process events since the last refresh (kernel feed).\n"
+                                      "\"unseen\" = short-lived processes that started and\n"
+                                      "exited within one tick - invisible to polling.");
+                }
+            }
+
             ImGui::Text("Load average: %.2f %.2f %.2f", load.one_min, load.five_min, load.fifteen_min);
 
             uint64_t secs = uptime_seconds;

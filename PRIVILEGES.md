@@ -28,6 +28,13 @@ Capabilities used:
 * `cap_dac_read_search` — bypass file-permission checks on procfs entries
 * `cap_kill` — send signals to other users' processes. **Optional**: drop it
   from the commands below if you only want to observe, never kill.
+* `cap_net_admin` — **Optional**: subscribe to the kernel process-event feed
+  (proc connector), which powers the "Churn" line in the system panel and
+  counts short-lived processes that polling never sees. Without it pex runs
+  poll-only; add it to the `setcap` list if you want the event feed:
+  ```bash
+  sudo setcap 'cap_sys_ptrace,cap_dac_read_search,cap_kill,cap_net_admin+ep' /opt/pex/pex
+  ```
 
 > Why not `sudo pex`? On GNOME/Wayland root GUI clients are blocked or
 > fragile, and sudo would write root-owned files into your `~/.config/pex`

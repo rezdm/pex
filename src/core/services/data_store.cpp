@@ -25,6 +25,9 @@ DataStore::~DataStore() {
 void DataStore::start() {
     if (running_.exchange(true)) return;
 
+    if (event_source_) {
+        event_source_->start();  // May fail (no privileges); poll-only then
+    }
     collection_thread_ = std::thread(&DataStore::collection_thread_func, this);
 }
 
@@ -41,6 +44,9 @@ void DataStore::stop() {
 
     if (collection_thread_.joinable()) {
         collection_thread_.join();
+    }
+    if (event_source_) {
+        event_source_->stop();
     }
 }
 
@@ -103,6 +109,10 @@ void DataStore::set_on_data_updated(std::function<void()> callback) {
 
 void DataStore::set_history_store(HistoryStore* history) {
     history_store_ = history;
+}
+
+void DataStore::set_event_source(IProcessEventSource* source) {
+    event_source_ = source;
 }
 
 std::vector<ParseError> DataStore::get_recent_errors() const {
@@ -190,6 +200,31 @@ void DataStore::collect_data() {
         }
         previous_proc_counters_[proc.pid] = {proc.user_time, proc.kernel_time,
                                              proc.io_read_bytes, proc.io_write_bytes};
+    }
+
+    // Process churn from the kernel event feed (issue #60). Runs before the
+    // prune below: previous_proc_counters_ still holds last tick's PIDs, so
+    // an exit whose PID is in neither map belongs to a process that appeared
+    // in no snapshot — one polling alone would never have seen.
+    if (event_source_ && event_source_->is_active()) {
+        new_snapshot->events_active = true;
+        for (const ProcessEvent& ev : event_source_->drain()) {
+            switch (ev.type) {
+                case ProcessEventType::Fork:
+                    new_snapshot->fork_events++;
+                    break;
+                case ProcessEventType::Exec:
+                    new_snapshot->exec_events++;
+                    break;
+                case ProcessEventType::Exit:
+                    new_snapshot->exit_events++;
+                    if (!previous_proc_counters_.contains(ev.pid) &&
+                        !current_pids.contains(ev.pid)) {
+                        new_snapshot->short_lived_exits++;
+                    }
+                    break;
+            }
+        }
     }
 
     // Prune stale entries for processes that no longer exist

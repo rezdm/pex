@@ -5,6 +5,7 @@
 #include "../src/core/services/data_store.hpp"
 #include "../src/core/services/history_store.hpp"
 #include "../src/core/services/settings.hpp"
+#include "../src/core/services/snapshot_diff.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -161,6 +162,53 @@ void test_csv_export_formula_injection(const std::string& tmpdir) {
     CHECK(sys_csv.find("cpu_usage_pct") != std::string::npos);
 }
 
+// Snapshot with an arbitrary set of PIDs (flat tree) for diff tests
+pex::DataSnapshot make_pid_snapshot(const std::vector<int>& pids) {
+    pex::DataSnapshot snap;
+    for (const int pid : pids) {
+        auto node = std::make_unique<pex::ProcessNode>();
+        node->info.pid = pid;
+        node->info.name = "proc-" + std::to_string(pid);
+        snap.process_map[pid] = node.get();
+        snap.process_tree.push_back(std::move(node));
+    }
+    return snap;
+}
+
+void test_snapshot_diff() {
+    const auto older = make_pid_snapshot({1, 2, 5});
+    const auto newer = make_pid_snapshot({2, 3, 5, 7});
+
+    const auto diff = pex::compute_snapshot_diff(&older, &newer);
+    CHECK_EQ(diff.new_pids.size(), size_t{2});
+    CHECK(diff.new_pids.contains(3));
+    CHECK(diff.new_pids.contains(7));
+    CHECK_EQ(diff.exited_processes.size(), size_t{1});
+    if (!diff.exited_processes.empty()) {
+        CHECK_EQ(diff.exited_processes[0].pid, 1);
+        CHECK_EQ(diff.exited_processes[0].name, "proc-1");
+    }
+
+    // Identical snapshots: empty diff
+    const auto same = pex::compute_snapshot_diff(&newer, &newer);
+    CHECK(same.new_pids.empty());
+    CHECK(same.exited_processes.empty());
+
+    // No previous snapshot: the first tick must not flash everything green
+    const auto first = pex::compute_snapshot_diff(nullptr, &newer);
+    CHECK(first.new_pids.empty());
+    CHECK(first.exited_processes.empty());
+
+    // Exited ghosts are sorted by PID for deterministic rendering
+    const auto empty_now = make_pid_snapshot({});
+    const auto all_gone = pex::compute_snapshot_diff(&newer, &empty_now);
+    CHECK_EQ(all_gone.exited_processes.size(), size_t{4});
+    if (all_gone.exited_processes.size() == 4) {
+        CHECK(all_gone.exited_processes[0].pid < all_gone.exited_processes[1].pid);
+        CHECK(all_gone.exited_processes[2].pid < all_gone.exited_processes[3].pid);
+    }
+}
+
 } // namespace
 
 int main() {
@@ -177,6 +225,7 @@ int main() {
     test_settings_roundtrip(tmpdir);
     test_history_store();
     test_csv_export_formula_injection(tmpdir);
+    test_snapshot_diff();
 
     std::printf("%d checks, %d failure(s)\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

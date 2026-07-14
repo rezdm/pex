@@ -88,15 +88,86 @@ void ImGuiApp::render_process_tree() {
 
         show_column_tooltips();
 
+        // Exited since the previous snapshot (issue #61): red ghost rows
+        // rendered *in place* — right below their still-living parent, where
+        // the process's row was a tick ago (Process Explorer behavior).
+        // Ghosts whose parent died with them fall back to top level.
+        std::unordered_map<int, std::vector<const ProcessInfo*>> ghost_children;
+        std::vector<const ProcessInfo*> orphan_ghosts;
+        for (const auto& info : snapshot_diff_.exited_processes) {
+            if (!view_model_.process_list.show_kernel_threads && info.is_kernel_thread) continue;
+            if (current_data_->process_map.contains(info.parent_pid)) {
+                ghost_children[info.parent_pid].push_back(&info);
+            } else {
+                orphan_ghosts.push_back(&info);
+            }
+        }
+
         for (auto& root : current_data_->process_tree) {
-            render_process_tree_node(*root, 0);
+            render_process_tree_node(*root, 0, ghost_children);
+        }
+
+        for (const ProcessInfo* info : orphan_ghosts) {
+            render_ghost_row(*info);
         }
 
         ImGui::EndTable();
     }
 }
 
-void ImGuiApp::render_process_tree_node(ProcessNode& node, const int depth) {
+void ImGuiApp::render_ghost_children(const int parent_pid,
+        const std::unordered_map<int, std::vector<const ProcessInfo*>>& ghost_children) {
+    if (const auto it = ghost_children.find(parent_pid); it != ghost_children.end()) {
+        for (const ProcessInfo* info : it->second) {
+            render_ghost_row(*info);
+        }
+    }
+}
+
+// A red one-tick row for a process that exited since the previous snapshot
+// (issue #61). Rendered from a copied ProcessInfo — the live node is gone —
+// so rate columns are blank and the row is not selectable.
+void ImGuiApp::render_ghost_row(const ProcessInfo& info) {
+    // Offset the ID space: the PID may already be recycled by a live row
+    ImGui::PushID(-info.pid - 1);
+    ImGui::TableNextRow();
+    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
+        ImGui::GetColorU32(ImVec4(0.55f, 0.1f, 0.1f, 0.5f)));
+    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1,
+        ImGui::GetColorU32(ImVec4(0.55f, 0.1f, 0.1f, 0.5f)));
+
+    ImGui::TableNextColumn();
+    ImGui::Text("%s", info.name.c_str());
+    ImGui::TableNextColumn();
+    ImGui::Text("%d", info.pid);
+    for (int i = 0; i < 2; i++) {  // CPU %, Total %
+        ImGui::TableNextColumn();
+        ImGui::TextDisabled("-");
+    }
+    ImGui::TableNextColumn();
+    ImGui::Text("%s", format_bytes(info.resident_memory).c_str());
+    ImGui::TableNextColumn();
+    ImGui::Text("%.1f", info.memory_percent);
+    for (int i = 0; i < 6; i++) {  // Tree CPU/Tot/Mem/%, Read/s, Write/s
+        ImGui::TableNextColumn();
+        ImGui::TextDisabled("-");
+    }
+    ImGui::TableNextColumn();
+    ImGui::Text("%d", info.thread_count);
+    ImGui::TableNextColumn();
+    ImGui::Text("%s", info.user_name.c_str());
+    ImGui::TableNextColumn();
+    ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "X");
+    ImGui::TableNextColumn();
+    ImGui::Text("%s", info.executable_path.c_str());
+    ImGui::TableNextColumn();
+    ImGui::Text("%s", info.command_line.c_str());
+
+    ImGui::PopID();
+}
+
+void ImGuiApp::render_process_tree_node(ProcessNode& node, const int depth,
+        const std::unordered_map<int, std::vector<const ProcessInfo*>>& ghost_children) {
     // Kernel threads hidden: skip the node and its (kernel) subtree
     if (!view_model_.process_list.show_kernel_threads && node.info.is_kernel_thread) return;
 
@@ -114,6 +185,12 @@ void ImGuiApp::render_process_tree_node(ProcessNode& node, const int depth) {
             ImGui::SetScrollHereY(0.5f);
             view_model_.process_list.scroll_to_selected = false;
         }
+    } else if (snapshot_diff_.new_pids.contains(node.info.pid)) {
+        // New since the previous snapshot (issue #61): green for one tick
+        ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
+            ImGui::GetColorU32(ImVec4(0.1f, 0.5f, 0.1f, 0.45f)));
+        ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1,
+            ImGui::GetColorU32(ImVec4(0.1f, 0.5f, 0.1f, 0.45f)));
     }
 
     ImGui::TableNextColumn();
@@ -206,11 +283,17 @@ void ImGuiApp::render_process_tree_node(ProcessNode& node, const int depth) {
     if (is_open && !node.children.empty()) {
         view_model_.process_list.collapsed_pids.erase(node.info.pid);
         for (auto& child : node.children) {
-            render_process_tree_node(*child, depth + 1);
+            render_process_tree_node(*child, depth + 1, ghost_children);
         }
+        // Children that exited last tick appear where they used to be
+        render_ghost_children(node.info.pid, ghost_children);
         ImGui::TreePop();
     } else if (!node.children.empty()) {
+        // Collapsed: ghost children stay hidden along with the live ones
         view_model_.process_list.collapsed_pids.insert(node.info.pid);
+    } else {
+        // Leaf whose only children just exited: show them right below it
+        render_ghost_children(node.info.pid, ghost_children);
     }
 
     ImGui::PopID();
@@ -262,6 +345,24 @@ void ImGuiApp::render_process_list() {
             flatten(root.get());
         }
 
+        // Live rows plus exited ghosts (issue #61), merged before sorting so
+        // a ghost occupies the position its process held a tick ago instead
+        // of clustering at one end of the table (node == nullptr marks a
+        // ghost; its tree aggregates sort as zero).
+        struct RowRef {
+            const ProcessNode* node;
+            const ProcessInfo* info;
+        };
+        std::vector<RowRef> rows;
+        rows.reserve(flat_list.size() + snapshot_diff_.exited_processes.size());
+        for (const ProcessNode* n : flat_list) {
+            rows.push_back({n, &n->info});
+        }
+        for (const auto& info : snapshot_diff_.exited_processes) {
+            if (!show_kernel && info.is_kernel_thread) continue;
+            rows.push_back({nullptr, &info});
+        }
+
         // Handle sorting
         if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
             if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
@@ -272,36 +373,51 @@ void ImGuiApp::render_process_list() {
             }
         }
 
-        if (!flat_list.empty()) {
+        if (!rows.empty()) {
             const int column = view_model_.process_list.sort_column;
             const bool ascending = view_model_.process_list.sort_ascending;
-            std::ranges::sort(flat_list, [column, ascending](const ProcessNode* a, const ProcessNode* b) {
+            std::ranges::sort(rows, [column, ascending](const RowRef& ra, const RowRef& rb) {
+                const ProcessInfo& a = *ra.info;
+                const ProcessInfo& b = *rb.info;
+                const double a_tcpu = ra.node ? ra.node->tree_cpu_percent : 0.0;
+                const double b_tcpu = rb.node ? rb.node->tree_cpu_percent : 0.0;
+                const double a_ttot = ra.node ? ra.node->tree_total_cpu_percent : 0.0;
+                const double b_ttot = rb.node ? rb.node->tree_total_cpu_percent : 0.0;
+                const int64_t a_tmem = ra.node ? ra.node->tree_working_set : 0;
+                const int64_t b_tmem = rb.node ? rb.node->tree_working_set : 0;
+                const double a_tpct = ra.node ? ra.node->tree_memory_percent : 0.0;
+                const double b_tpct = rb.node ? rb.node->tree_memory_percent : 0.0;
                 int result = 0;
                 switch (column) {
-                    case 0: result = a->info.name.compare(b->info.name); break;
-                    case 1: result = (a->info.pid < b->info.pid) ? -1 : (a->info.pid > b->info.pid) ? 1 : 0; break;
-                    case 2: result = (a->info.cpu_percent < b->info.cpu_percent) ? -1 : (a->info.cpu_percent > b->info.cpu_percent) ? 1 : 0; break;
-                    case 3: result = (a->info.total_cpu_percent < b->info.total_cpu_percent) ? -1 : (a->info.total_cpu_percent > b->info.total_cpu_percent) ? 1 : 0; break;
-                    case 4: result = (a->info.resident_memory < b->info.resident_memory) ? -1 : (a->info.resident_memory > b->info.resident_memory) ? 1 : 0; break;
-                    case 5: result = (a->info.memory_percent < b->info.memory_percent) ? -1 : (a->info.memory_percent > b->info.memory_percent) ? 1 : 0; break;
-                    case 6: result = (a->tree_cpu_percent < b->tree_cpu_percent) ? -1 : (a->tree_cpu_percent > b->tree_cpu_percent) ? 1 : 0; break;
-                    case 7: result = (a->tree_total_cpu_percent < b->tree_total_cpu_percent) ? -1 : (a->tree_total_cpu_percent > b->tree_total_cpu_percent) ? 1 : 0; break;
-                    case 8: result = (a->tree_working_set < b->tree_working_set) ? -1 : (a->tree_working_set > b->tree_working_set) ? 1 : 0; break;
-                    case 9: result = (a->tree_memory_percent < b->tree_memory_percent) ? -1 : (a->tree_memory_percent > b->tree_memory_percent) ? 1 : 0; break;
-                    case 10: result = (a->info.io_read_rate < b->info.io_read_rate) ? -1 : (a->info.io_read_rate > b->info.io_read_rate) ? 1 : 0; break;
-                    case 11: result = (a->info.io_write_rate < b->info.io_write_rate) ? -1 : (a->info.io_write_rate > b->info.io_write_rate) ? 1 : 0; break;
-                    case 12: result = (a->info.thread_count < b->info.thread_count) ? -1 : (a->info.thread_count > b->info.thread_count) ? 1 : 0; break;
-                    case 13: result = a->info.user_name.compare(b->info.user_name); break;
-                    case 14: result = a->info.state_char - b->info.state_char; break;
-                    case 15: result = a->info.executable_path.compare(b->info.executable_path); break;
-                    case 16: result = a->info.command_line.compare(b->info.command_line); break;
+                    case 0: result = a.name.compare(b.name); break;
+                    case 1: result = (a.pid < b.pid) ? -1 : (a.pid > b.pid) ? 1 : 0; break;
+                    case 2: result = (a.cpu_percent < b.cpu_percent) ? -1 : (a.cpu_percent > b.cpu_percent) ? 1 : 0; break;
+                    case 3: result = (a.total_cpu_percent < b.total_cpu_percent) ? -1 : (a.total_cpu_percent > b.total_cpu_percent) ? 1 : 0; break;
+                    case 4: result = (a.resident_memory < b.resident_memory) ? -1 : (a.resident_memory > b.resident_memory) ? 1 : 0; break;
+                    case 5: result = (a.memory_percent < b.memory_percent) ? -1 : (a.memory_percent > b.memory_percent) ? 1 : 0; break;
+                    case 6: result = (a_tcpu < b_tcpu) ? -1 : (a_tcpu > b_tcpu) ? 1 : 0; break;
+                    case 7: result = (a_ttot < b_ttot) ? -1 : (a_ttot > b_ttot) ? 1 : 0; break;
+                    case 8: result = (a_tmem < b_tmem) ? -1 : (a_tmem > b_tmem) ? 1 : 0; break;
+                    case 9: result = (a_tpct < b_tpct) ? -1 : (a_tpct > b_tpct) ? 1 : 0; break;
+                    case 10: result = (a.io_read_rate < b.io_read_rate) ? -1 : (a.io_read_rate > b.io_read_rate) ? 1 : 0; break;
+                    case 11: result = (a.io_write_rate < b.io_write_rate) ? -1 : (a.io_write_rate > b.io_write_rate) ? 1 : 0; break;
+                    case 12: result = (a.thread_count < b.thread_count) ? -1 : (a.thread_count > b.thread_count) ? 1 : 0; break;
+                    case 13: result = a.user_name.compare(b.user_name); break;
+                    case 14: result = a.state_char - b.state_char; break;
+                    case 15: result = a.executable_path.compare(b.executable_path); break;
+                    case 16: result = a.command_line.compare(b.command_line); break;
                     default: result = 0; break;
                 }
                 return ascending ? (result < 0) : (result > 0);
             });
         }
 
-        for (const auto* node : flat_list) {
+        for (const RowRef& row_ref : rows) {
+            if (!row_ref.node) {
+                render_ghost_row(*row_ref.info);  // Exited: red, in sorted position
+                continue;
+            }
+            const ProcessNode* node = row_ref.node;
             ImGui::PushID(node->info.pid);
             ImGui::TableNextRow();
 
@@ -314,6 +430,12 @@ void ImGuiApp::render_process_list() {
                     ImGui::SetScrollHereY(0.5f);
                     view_model_.process_list.scroll_to_selected = false;
                 }
+            } else if (snapshot_diff_.new_pids.contains(node->info.pid)) {
+                // New since the previous snapshot (issue #61): green for one tick
+                ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
+                    ImGui::GetColorU32(ImVec4(0.1f, 0.5f, 0.1f, 0.45f)));
+                ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1,
+                    ImGui::GetColorU32(ImVec4(0.1f, 0.5f, 0.1f, 0.45f)));
             }
 
             ImGui::TableNextColumn();
