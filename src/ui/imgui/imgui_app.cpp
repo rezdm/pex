@@ -60,6 +60,7 @@ void ImGuiApp::run() {
     view_model_.process_list.is_tree_view = settings_.get_bool("gui.tree_view", true);
     view_model_.process_list.show_kernel_threads = settings_.get_bool("show_kernel_threads", true);
     view_model_.system_panel.is_visible = settings_.get_bool("gui.system_panel", true);
+    diff_highlight_enabled_ = settings_.get_bool("diff_highlight", true);
 
     // Initialize GLFW
     glfwSetErrorCallback([](int code, const char* desc) {
@@ -152,6 +153,13 @@ void ImGuiApp::run() {
         const auto new_data = data_store_->get_snapshot();
         const bool data_changed = !current_data_ ||
             (new_data && new_data->timestamp != current_data_->timestamp);
+        if (data_changed) {
+            // Diff against the outgoing snapshot (issue #61); highlights are
+            // then valid until the next swap = one refresh interval
+            snapshot_diff_ = diff_highlight_enabled_
+                ? compute_snapshot_diff(current_data_.get(), new_data.get())
+                : SnapshotDiff{};
+        }
         current_data_ = new_data;
 
         // Apply UI state (collapsed nodes) to the data
@@ -200,6 +208,7 @@ void ImGuiApp::run() {
         settings_.set_bool("gui.tree_view", view_model_.process_list.is_tree_view);
         settings_.set_bool("show_kernel_threads", view_model_.process_list.show_kernel_threads);
         settings_.set_bool("gui.system_panel", view_model_.system_panel.is_visible);
+        settings_.set_bool("diff_highlight", diff_highlight_enabled_);
         settings_.save();
     }
 

@@ -88,12 +88,62 @@ void ImGuiApp::render_process_tree() {
 
         show_column_tooltips();
 
+        // Exited since the previous snapshot: red ghost rows for one tick,
+        // at the top of the table where they are visible regardless of the
+        // scroll position (appended rows would sit below the fold).
+        for (const auto& info : snapshot_diff_.exited_processes) {
+            if (!view_model_.process_list.show_kernel_threads && info.is_kernel_thread) continue;
+            render_ghost_row(info);
+        }
+
         for (auto& root : current_data_->process_tree) {
             render_process_tree_node(*root, 0);
         }
 
         ImGui::EndTable();
     }
+}
+
+// A red one-tick row for a process that exited since the previous snapshot
+// (issue #61). Rendered from a copied ProcessInfo — the live node is gone —
+// so rate columns are blank and the row is not selectable.
+void ImGuiApp::render_ghost_row(const ProcessInfo& info) {
+    // Offset the ID space: the PID may already be recycled by a live row
+    ImGui::PushID(-info.pid - 1);
+    ImGui::TableNextRow();
+    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
+        ImGui::GetColorU32(ImVec4(0.55f, 0.1f, 0.1f, 0.5f)));
+    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1,
+        ImGui::GetColorU32(ImVec4(0.55f, 0.1f, 0.1f, 0.5f)));
+
+    ImGui::TableNextColumn();
+    ImGui::Text("%s", info.name.c_str());
+    ImGui::TableNextColumn();
+    ImGui::Text("%d", info.pid);
+    for (int i = 0; i < 2; i++) {  // CPU %, Total %
+        ImGui::TableNextColumn();
+        ImGui::TextDisabled("-");
+    }
+    ImGui::TableNextColumn();
+    ImGui::Text("%s", format_bytes(info.resident_memory).c_str());
+    ImGui::TableNextColumn();
+    ImGui::Text("%.1f", info.memory_percent);
+    for (int i = 0; i < 6; i++) {  // Tree CPU/Tot/Mem/%, Read/s, Write/s
+        ImGui::TableNextColumn();
+        ImGui::TextDisabled("-");
+    }
+    ImGui::TableNextColumn();
+    ImGui::Text("%d", info.thread_count);
+    ImGui::TableNextColumn();
+    ImGui::Text("%s", info.user_name.c_str());
+    ImGui::TableNextColumn();
+    ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "X");
+    ImGui::TableNextColumn();
+    ImGui::Text("%s", info.executable_path.c_str());
+    ImGui::TableNextColumn();
+    ImGui::Text("%s", info.command_line.c_str());
+
+    ImGui::PopID();
 }
 
 void ImGuiApp::render_process_tree_node(ProcessNode& node, const int depth) {
@@ -114,6 +164,12 @@ void ImGuiApp::render_process_tree_node(ProcessNode& node, const int depth) {
             ImGui::SetScrollHereY(0.5f);
             view_model_.process_list.scroll_to_selected = false;
         }
+    } else if (snapshot_diff_.new_pids.contains(node.info.pid)) {
+        // New since the previous snapshot (issue #61): green for one tick
+        ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
+            ImGui::GetColorU32(ImVec4(0.1f, 0.5f, 0.1f, 0.45f)));
+        ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1,
+            ImGui::GetColorU32(ImVec4(0.1f, 0.5f, 0.1f, 0.45f)));
     }
 
     ImGui::TableNextColumn();
@@ -301,6 +357,14 @@ void ImGuiApp::render_process_list() {
             });
         }
 
+        // Exited since the previous snapshot: red ghost rows for one tick,
+        // at the top of the table where they are visible regardless of the
+        // scroll position (appended rows would sit below the fold).
+        for (const auto& info : snapshot_diff_.exited_processes) {
+            if (!show_kernel && info.is_kernel_thread) continue;
+            render_ghost_row(info);
+        }
+
         for (const auto* node : flat_list) {
             ImGui::PushID(node->info.pid);
             ImGui::TableNextRow();
@@ -314,6 +378,12 @@ void ImGuiApp::render_process_list() {
                     ImGui::SetScrollHereY(0.5f);
                     view_model_.process_list.scroll_to_selected = false;
                 }
+            } else if (snapshot_diff_.new_pids.contains(node->info.pid)) {
+                // New since the previous snapshot (issue #61): green for one tick
+                ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
+                    ImGui::GetColorU32(ImVec4(0.1f, 0.5f, 0.1f, 0.45f)));
+                ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1,
+                    ImGui::GetColorU32(ImVec4(0.1f, 0.5f, 0.1f, 0.45f)));
             }
 
             ImGui::TableNextColumn();

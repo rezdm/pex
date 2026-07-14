@@ -121,6 +121,9 @@ void TuiApp::render_process_tree() {
         const auto& info = node->info;
         const bool is_selected = (info.pid == view_model_.process_list.selected_pid);
         const bool is_match = matches_search(info) && !view_model_.process_list.search_text.empty();
+        // New since the previous snapshot (issue #61): green for one tick
+        const bool is_new = snapshot_diff_.new_pids.contains(info.pid);
+        const bool row_highlighted = is_selected || is_match || is_new;
         const bool has_children = !node->children.empty();
         const bool is_collapsed = view_model_.process_list.collapsed_pids.contains(info.pid);
 
@@ -140,12 +143,15 @@ void TuiApp::render_process_tree() {
         } else if (is_match) {
             wattron(process_win_, COLOR_PAIR(COLOR_PAIR_SEARCH));
             mvwhline(process_win_, row, 1, ' ', max_x - 2);
+        } else if (is_new) {
+            wattron(process_win_, COLOR_PAIR(COLOR_PAIR_ROW_NEW));
+            mvwhline(process_win_, row, 1, ' ', max_x - 2);
         }
 
         int col = 2;
 
         // Draw tree connectors
-        if (!is_selected && !is_match) {
+        if (!row_highlighted) {
             wattron(process_win_, COLOR_PAIR(COLOR_PAIR_TREE_LINE));
         }
 
@@ -171,19 +177,19 @@ void TuiApp::render_process_tree() {
             col += 2;
         }
 
-        if (!is_selected && !is_match) {
+        if (!row_highlighted) {
             wattroff(process_win_, COLOR_PAIR(COLOR_PAIR_TREE_LINE));
         }
 
         // Expand/collapse indicator
         if (has_children) {
-            if (!is_selected && !is_match) {
+            if (!row_highlighted) {
                 wattron(process_win_, COLOR_PAIR(COLOR_PAIR_TITLE) | A_BOLD);
             } else {
                 wattron(process_win_, A_BOLD);
             }
             mvwaddch(process_win_, row, col, is_collapsed ? '+' : '-');
-            if (!is_selected && !is_match) {
+            if (!row_highlighted) {
                 wattroff(process_win_, COLOR_PAIR(COLOR_PAIR_TITLE) | A_BOLD);
             } else {
                 wattroff(process_win_, A_BOLD);
@@ -207,9 +213,9 @@ void TuiApp::render_process_tree() {
             }
         }
 
-        // State color (only if not selected/matched)
+        // State color (only if the row has no full-row highlight)
         const int state_color = get_state_color(info.state_char);
-        if (!is_selected && !is_match) {
+        if (!row_highlighted) {
             wattron(process_win_, COLOR_PAIR(state_color));
         }
 
@@ -249,10 +255,64 @@ void TuiApp::render_process_tree() {
             wattroff(process_win_, COLOR_PAIR(COLOR_PAIR_SELECTED));
         } else if (is_match) {
             wattroff(process_win_, COLOR_PAIR(COLOR_PAIR_SEARCH));
+        } else if (is_new) {
+            wattroff(process_win_, COLOR_PAIR(COLOR_PAIR_ROW_NEW));
         } else {
             wattroff(process_win_, COLOR_PAIR(state_color));
         }
         row++;
+    }
+
+    // Exited since the previous snapshot (issue #61): red ghost rows pinned
+    // to the bottom of the window for one tick. Appending them after the
+    // live rows would put them below the fold on any busy system; instead
+    // they overlay the last rows so an exit is always visible. Rendered from
+    // copied ProcessInfo — the live nodes are gone — so CPU/IO columns are
+    // blank and the rows are not selectable.
+    std::vector<const ProcessInfo*> ghosts;
+    for (const auto& info : snapshot_diff_.exited_processes) {
+        if (!view_model_.process_list.show_kernel_threads && info.is_kernel_thread) continue;
+        ghosts.push_back(&info);
+    }
+    constexpr int kMaxGhostRows = 3;
+    const int ghost_count = std::min<int>(kMaxGhostRows, static_cast<int>(ghosts.size()));
+    for (int g = 0; g < ghost_count; ++g) {
+        const ProcessInfo& info = *ghosts[g];
+        const int y = max_y - 1 - ghost_count + g;
+        if (y < 2) continue;
+
+        wattron(process_win_, COLOR_PAIR(COLOR_PAIR_ROW_EXITED));
+        mvwhline(process_win_, y, 1, ' ', max_x - 2);
+
+        std::string name = info.name;
+        if (name.length() > 29) name = name.substr(0, 26) + "...";
+        mvwprintw(process_win_, y, 2, " %-29s", name.c_str());
+
+        char data_buf[512];
+        if (g == kMaxGhostRows - 1 && static_cast<int>(ghosts.size()) > kMaxGhostRows) {
+            snprintf(data_buf, sizeof(data_buf), "%7d  ... and %zu more exited",
+                     info.pid, ghosts.size() - kMaxGhostRows);
+        } else {
+            snprintf(data_buf, sizeof(data_buf),
+                     "%7d      -%10s %4.1f%%       -       - %7d %-8s    X       -      -         -  %s",
+                     info.pid,
+                     format_bytes(info.resident_memory).c_str(),
+                     info.memory_percent,
+                     info.thread_count,
+                     info.user_name.substr(0, 8).c_str(),
+                     info.command_line.c_str());
+        }
+
+        std::string data_str(data_buf);
+        if (scroll_width > 0 && process_h_scroll_ < static_cast<int>(data_str.length())) {
+            std::string visible_data = data_str.substr(process_h_scroll_);
+            if (static_cast<int>(visible_data.length()) > scroll_width) {
+                visible_data = visible_data.substr(0, scroll_width);
+            }
+            mvwprintw(process_win_, y, scroll_start, "%s", visible_data.c_str());
+        }
+
+        wattroff(process_win_, COLOR_PAIR(COLOR_PAIR_ROW_EXITED));
     }
 
     // Scroll indicators

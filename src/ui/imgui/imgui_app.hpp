@@ -5,6 +5,7 @@
 #include "../../platform/interfaces/i_process_killer.hpp"
 #include "../../core/services/data_store.hpp"
 #include "../../core/services/history_store.hpp"
+#include "../../core/services/snapshot_diff.hpp"
 #include "../common/viewmodels/app_view_model.hpp"
 #include "../../core/services/name_resolver.hpp"
 #include "../../core/services/settings.hpp"
@@ -110,6 +111,13 @@ private:
     // Recent parse errors, refreshed when the snapshot changes (render()
     // would otherwise copy the vector under a mutex every frame)
     std::vector<ParseError> recent_errors_cache_;
+
+    // Process Explorer-style difference highlighting (issue #61): recomputed
+    // on every snapshot swap, so new-process green and exited-process red
+    // ghost rows last exactly one refresh interval.
+    bool diff_highlight_enabled_ = true;
+    SnapshotDiff snapshot_diff_;
+    void render_ghost_row(const ProcessInfo& info);
 
     // ViewModel (holds all UI state - single source of truth)
     AppViewModel view_model_;

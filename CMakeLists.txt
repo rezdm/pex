@@ -125,6 +125,7 @@ add_library(pex_core STATIC
     src/core/services/name_resolver.cpp
     src/core/services/settings.cpp
     src/core/services/single_instance.cpp
+    src/core/services/snapshot_diff.cpp
     src/core/model/system_info.cpp
 )
 target_include_directories(pex_core PUBLIC src)
