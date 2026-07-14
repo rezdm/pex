@@ -157,9 +157,9 @@ mkdir build && cd build && cmake .. && make -j$(nproc)
 ```
 Copy pex executable and pex.png to a folder of choice and set capabilities:
 ```bash
-sudo setcap 'cap_sys_ptrace,cap_dac_read_search,cap_kill+ep' {path-to-executable-location}/pex
+sudo setcap 'cap_sys_ptrace,cap_dac_read_search,cap_kill,cap_net_admin+ep' {path-to-executable-location}/pex
 ```
-pex runs fine without this — you just won't see details (files, network, environment, ...) of other users' processes. For the full story per OS (Linux capabilities incl. a group-restricted variant, Solaris RBAC/pfexec, FreeBSD sudo/doas), see **[PRIVILEGES.md](PRIVILEGES.md)**.
+pex runs fine without this — you just won't see details (files, network, environment, ...) of other users' processes, and the churn line stays hidden. `cap_kill` (kill others' processes) and `cap_net_admin` (kernel process-event feed) are optional — drop them if unwanted. For the full story per OS (Linux capabilities incl. a group-restricted variant, Solaris RBAC/pfexec, FreeBSD sudo/doas), see **[PRIVILEGES.md](PRIVILEGES.md)**.
 
 May be create .desktop file for GNOME:
 ```
