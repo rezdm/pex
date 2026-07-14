@@ -17,7 +17,7 @@ It started as AI generated code for a one-off need, then turned out to be useful
   * Process popup charts show the recorded past the moment you open them
   * **History – Top Consumers** view (GUI): rank processes by average CPU / memory / I/O over the last 1 min / 5 min / all recorded, with trend sparklines — including processes that have already exited
   * Export everything to CSV for offline analysis
-* **Difference highlighting** (Process Explorer style) — new processes flash green, exited processes linger as red ghost rows for one refresh interval; toggle in the GUI View menu (`diff_highlight` setting)
+* **Difference highlighting** (Process Explorer style) — new processes flash green, exited processes linger as red ghost rows for one refresh interval. In the GUI the ghost stays *in place* (under its parent in tree view, in sorted position in list view); the TUI pins ghosts to the bottom of the process panel so they are visible regardless of scroll. Toggle in the GUI View menu (`diff_highlight` setting)
 * **Process churn from the kernel** — with the event feed active (Linux proc connector, needs `cap_net_admin`, see [PRIVILEGES.md](PRIVILEGES.md); FreeBSD kqueue `EVFILT_PROC`), the system panel counts forks/execs/exits per tick, including short-lived processes that live and die between refreshes — the ones polling never sees
 * **Find open file / handle** — search all processes for an open file, socket, pipe or loaded library by path substring (like Process Explorer's "Find Handle or DLL")
 * **Kill** process or whole process tree (SIGTERM, escalate to SIGKILL), with PID-reuse guards

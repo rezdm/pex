@@ -48,7 +48,10 @@ private:
     void render_toolbar();
     void render_system_panel() const;
     void render_process_tree();
-    void render_process_tree_node(ProcessNode& node, int depth);
+    void render_process_tree_node(ProcessNode& node, int depth,
+                                  const std::unordered_map<int, std::vector<const ProcessInfo*>>& ghost_children);
+    void render_ghost_children(int parent_pid,
+                               const std::unordered_map<int, std::vector<const ProcessInfo*>>& ghost_children);
     void render_process_list();
     void render_details_panel();
     void render_file_handles_tab();
