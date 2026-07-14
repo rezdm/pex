@@ -32,6 +32,13 @@ struct SystemPanelViewModel {
     int thread_count = 0;
     int running_count = 0;
 
+    // Per-tick process churn from the kernel event feed (issue #60)
+    bool events_active = false;
+    int fork_events = 0;
+    int exec_events = 0;
+    int exit_events = 0;
+    int short_lived_exits = 0;
+
     // Overall CPU usage
     double cpu_usage = 0.0;
 };

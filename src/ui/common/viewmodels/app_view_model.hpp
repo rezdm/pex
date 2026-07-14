@@ -35,6 +35,11 @@ struct AppViewModel {
         system_panel.process_count = snapshot->process_count;
         system_panel.thread_count = snapshot->thread_count;
         system_panel.running_count = snapshot->running_count;
+        system_panel.events_active = snapshot->events_active;
+        system_panel.fork_events = snapshot->fork_events;
+        system_panel.exec_events = snapshot->exec_events;
+        system_panel.exit_events = snapshot->exit_events;
+        system_panel.short_lived_exits = snapshot->short_lived_exits;
         system_panel.cpu_usage = snapshot->cpu_usage;
     }
 };

@@ -3,6 +3,7 @@
 #include "../model/process_info.hpp"
 #include "../../platform/interfaces/i_process_data_provider.hpp"
 #include "../../platform/interfaces/i_system_data_provider.hpp"
+#include "../../platform/interfaces/i_process_event_source.hpp"
 #include "../model/errors.hpp"
 #include "../model/system_info.hpp"
 #include <vector>
@@ -60,6 +61,16 @@ struct DataSnapshot {
     LoadAverage load_average;
     UptimeInfo uptime_info;
 
+    // Process churn since the previous tick, from the kernel event feed
+    // (issue #60). Only meaningful when events_active; all zero otherwise.
+    bool events_active = false;
+    int fork_events = 0;
+    int exec_events = 0;
+    int exit_events = 0;
+    // Exits of processes that appeared in no snapshot (lived < one tick) —
+    // the processes a poll-based monitor never sees.
+    int short_lived_exits = 0;
+
     // Timestamp of this snapshot
     std::chrono::steady_clock::time_point timestamp;
 };
@@ -109,6 +120,12 @@ public:
     // LIFETIME: must outlive this DataStore (or be detached with nullptr first).
     void set_history_store(HistoryStore* history);
 
+    // Optional kernel process-event feed (issue #60). Must be set before
+    // start(); DataStore drives its lifecycle (started with start(), stopped
+    // with stop()) and drains it every collection tick.
+    // LIFETIME: must outlive this DataStore.
+    void set_event_source(IProcessEventSource* source);
+
 private:
     void collection_thread_func();
     void collect_data();
@@ -119,6 +136,7 @@ private:
     IProcessDataProvider* process_provider_;
     ISystemDataProvider* system_provider_;
     std::atomic<HistoryStore*> history_store_{nullptr};
+    IProcessEventSource* event_source_ = nullptr;  // Set before start(); collection thread only
 
     // Background thread
     std::thread collection_thread_;

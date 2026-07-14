@@ -148,6 +148,7 @@ if(PEX_PLATFORM STREQUAL "linux")
         src/platform/linux/linux_process_data_provider.cpp
         src/platform/linux/linux_system_data_provider.cpp
         src/platform/linux/linux_process_killer.cpp
+        src/platform/linux/linux_process_event_source.cpp
         src/platform/linux/platform_factory_linux.cpp
     )
     set(PEX_PLATFORM_DEFINE "PEX_PLATFORM_LINUX")
@@ -158,6 +159,7 @@ elseif(PEX_PLATFORM STREQUAL "freebsd")
         src/platform/freebsd/freebsd_process_details.cpp
         src/platform/freebsd/freebsd_system_data_provider.cpp
         src/platform/freebsd/freebsd_process_killer.cpp
+        src/platform/freebsd/freebsd_process_event_source.cpp
         src/platform/freebsd/platform_factory_freebsd.cpp
     )
     set(PEX_PLATFORM_DEFINE "PEX_PLATFORM_FREEBSD")
