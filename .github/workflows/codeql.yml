@@ -69,11 +69,14 @@ jobs:
       with:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
+        # Exclude vendored FetchContent checkouts (stb, ImGui, GLFW): the
+        # autobuild places them under _codeql_build_dir/_deps, which the old
+        # 'build/_deps' patterns never matched — third-party alerts leaked
+        # into the Security tab.
         config: |
           paths-ignore:
-            - '_deps'
-            - 'build/_deps'
-            - '**/build/_deps'
+            - '**/_deps'
+            - '_codeql_build_dir'
         # If you wish to specify custom queries, you can do so here or in a config file.
         # By default, queries listed here will override any specified in a config file.
         # Prefix the list here with "+" to use these queries and those in the config file.
