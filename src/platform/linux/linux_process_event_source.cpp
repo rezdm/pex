@@ -17,6 +17,12 @@ namespace pex {
 static constexpr size_t kMcastRequestSize =
     sizeof(nlmsghdr) + sizeof(cn_msg) + sizeof(proc_cn_mcast_op);
 
+// The parts are memcpy'd back to back; that only matches the kernel's
+// expected layout (payload at NLMSG_DATA, i.e. NLMSG_ALIGN'ed header) as
+// long as the header size is already netlink-aligned.
+static_assert(sizeof(nlmsghdr) % NLMSG_ALIGNTO == 0,
+              "cn_msg offset would need NLMSG_ALIGN padding");
+
 LinuxProcessEventSource::~LinuxProcessEventSource() {
     stop();
 }
@@ -86,20 +92,28 @@ std::vector<ProcessEvent> LinuxProcessEventSource::drain() {
 }
 
 void LinuxProcessEventSource::set_mcast_listen(const bool enable) const {
-    alignas(nlmsghdr) char buf[kMcastRequestSize] = {};
+    // Built as ordinary structs and memcpy'd into the wire buffer: writing
+    // through pointers cast into a char array would violate strict aliasing.
+    nlmsghdr hdr{};
+    hdr.nlmsg_len = kMcastRequestSize;
+    hdr.nlmsg_type = NLMSG_DONE;
+    hdr.nlmsg_pid = static_cast<uint32_t>(getpid());
 
-    auto* hdr = reinterpret_cast<nlmsghdr*>(buf);
-    hdr->nlmsg_len = kMcastRequestSize;
-    hdr->nlmsg_type = NLMSG_DONE;
-    hdr->nlmsg_pid = static_cast<uint32_t>(getpid());
+    cn_msg msg;
+    std::memset(&msg, 0, sizeof(msg));  // {}-init trips on the flexible array member
+    msg.id.idx = CN_IDX_PROC;
+    msg.id.val = CN_VAL_PROC;
+    msg.len = sizeof(proc_cn_mcast_op);
 
-    auto* msg = reinterpret_cast<cn_msg*>(buf + sizeof(nlmsghdr));
-    msg->id.idx = CN_IDX_PROC;
-    msg->id.val = CN_VAL_PROC;
-    msg->len = sizeof(proc_cn_mcast_op);
+    const proc_cn_mcast_op op = enable ? PROC_CN_MCAST_LISTEN : PROC_CN_MCAST_IGNORE;
 
-    auto* op = reinterpret_cast<proc_cn_mcast_op*>(buf + sizeof(nlmsghdr) + sizeof(cn_msg));
-    *op = enable ? PROC_CN_MCAST_LISTEN : PROC_CN_MCAST_IGNORE;
+    char buf[kMcastRequestSize];
+    size_t offset = 0;
+    std::memcpy(buf + offset, &hdr, sizeof(hdr));
+    offset += sizeof(hdr);
+    std::memcpy(buf + offset, &msg, sizeof(msg));
+    offset += sizeof(msg);
+    std::memcpy(buf + offset, &op, sizeof(op));
 
     (void)!send(netlink_fd_, buf, sizeof(buf), 0);
 }
