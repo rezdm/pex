@@ -69,10 +69,11 @@ jobs:
       with:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
-        # Exclude vendored FetchContent checkouts (stb, ImGui, GLFW): the
-        # autobuild places them under _codeql_build_dir/_deps, which the old
-        # 'build/_deps' patterns never matched — third-party alerts leaked
-        # into the Security tab.
+        # NOTE: for compiled languages this config paths-ignore does NOT
+        # filter results (extraction follows the build); it is kept as a
+        # statement of intent. The actual exclusion of vendored FetchContent
+        # checkouts (stb, ImGui, GLFW under _codeql_build_dir/_deps) happens
+        # in the filter-sarif step below.
         config: |
           paths-ignore:
             - '**/_deps'
@@ -104,4 +105,29 @@ jobs:
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v4
       with:
+        category: "/language:${{matrix.language}}"
+        upload: never
+        output: sarif-results
+
+    # Config paths-ignore has no effect on results for compiled languages,
+    # so vendored code (FetchContent checkouts, generated build artifacts)
+    # is dropped from the SARIF before upload instead.
+    - name: Normalize SARIF file name
+      shell: bash
+      run: mv sarif-results/*.sarif sarif-results/results.sarif
+
+    - name: Filter vendored code out of the results
+      uses: advanced-security/filter-sarif@v1
+      with:
+        patterns: |
+          +**/*
+          -**/_deps/**
+          -_codeql_build_dir/**
+        input: sarif-results/results.sarif
+        output: sarif-results/results.sarif
+
+    - name: Upload filtered results
+      uses: github/codeql-action/upload-sarif@v4
+      with:
+        sarif_file: sarif-results/results.sarif
         category: "/language:${{matrix.language}}"
