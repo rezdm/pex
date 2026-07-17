@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <ctime>
+#include <map>
 #include <utility>
 #include <vector>
 
@@ -75,21 +76,17 @@ std::vector<CpuTimes> SolarisSystemDataProvider::get_per_cpu_times() {
 }
 
 void SolarisSystemDataProvider::get_per_cpu_times(std::vector<CpuTimes>& out) {
-    const int ncpu = get_processor_count();
-    out.clear();
-
     ensure_kstat();
     if (!kc_) {
-        out.resize(ncpu);
+        out.assign(cpu_slot_instances_.empty()
+                       ? static_cast<size_t>(get_processor_count())
+                       : cpu_slot_instances_.size(),
+                   CpuTimes{});
         return;
     }
 
-    // kstat instance IDs can be sparse after CPUs are offlined (e.g. 0,1,4,5);
-    // indexing out[] by instance directly skipped such CPUs entirely. Collect
-    // whatever instances exist and order them by instance ID so each CPU maps
-    // to a stable slot across ticks (delta math compares slot to slot).
-    std::vector<std::pair<int, CpuTimes>> per_instance;
-
+    // Collect the counters present this tick, keyed by kstat instance id.
+    std::map<int, CpuTimes> by_instance;
     for (kstat_t* ksp = kc_->kc_chain; ksp != nullptr; ksp = ksp->ks_next) {
         if (strcmp(ksp->ks_module, "cpu_stat") != 0) continue;
         if (ksp->ks_instance < 0) continue;
@@ -104,18 +101,27 @@ void SolarisSystemDataProvider::get_per_cpu_times(std::vector<CpuTimes>& out) {
         times.system = cs->cpu_sysinfo.cpu[CPU_KERNEL];
         times.idle = cs->cpu_sysinfo.cpu[CPU_IDLE];
         times.iowait = cs->cpu_sysinfo.cpu[CPU_WAIT];
-        per_instance.emplace_back(ksp->ks_instance, times);
+        by_instance.emplace(ksp->ks_instance, times);
     }
 
-    std::sort(per_instance.begin(), per_instance.end(),
-              [](const auto& a, const auto& b) { return a.first < b.first; });
-
-    out.reserve(per_instance.size());
-    for (const auto& [instance, times] : per_instance) {
-        out.push_back(times);
+    // Assign new instances to fresh slots (sorted, appended — never reordered),
+    // so an instance keeps its slot for the life of this provider. The delta
+    // math in DataStore compares out[i] this tick to out[i] last tick, so the
+    // slot for a given CPU must not move even as other CPUs come and go.
+    for (const auto& [instance, times] : by_instance) {
+        if (std::find(cpu_slot_instances_.begin(), cpu_slot_instances_.end(), instance)
+            == cpu_slot_instances_.end()) {
+            cpu_slot_instances_.push_back(instance);
+        }
     }
-    if (out.size() < static_cast<size_t>(ncpu)) {
-        out.resize(ncpu);
+
+    // Emit one entry per known slot; a CPU absent this tick (offlined) yields
+    // zeros in its slot rather than shifting every later CPU down.
+    out.assign(cpu_slot_instances_.size(), CpuTimes{});
+    for (size_t slot = 0; slot < cpu_slot_instances_.size(); ++slot) {
+        if (const auto it = by_instance.find(cpu_slot_instances_[slot]); it != by_instance.end()) {
+            out[slot] = it->second;
+        }
     }
 }
 
