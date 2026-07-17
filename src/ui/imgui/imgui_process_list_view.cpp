@@ -94,12 +94,12 @@ void ImGuiApp::render_process_tree() {
         // Ghosts whose parent died with them fall back to top level.
         std::unordered_map<int, std::vector<const ProcessInfo*>> ghost_children;
         std::vector<const ProcessInfo*> orphan_ghosts;
-        for (const auto& info : snapshot_diff_.exited_processes) {
-            if (!view_model_.process_list.show_kernel_threads && info.is_kernel_thread) continue;
-            if (current_data_->process_map.contains(info.parent_pid)) {
-                ghost_children[info.parent_pid].push_back(&info);
+        for (const ProcessInfo* info : snapshot_diff_.exited_processes) {
+            if (!view_model_.process_list.show_kernel_threads && info->is_kernel_thread) continue;
+            if (current_data_->process_map.contains(info->parent_pid)) {
+                ghost_children[info->parent_pid].push_back(info);
             } else {
-                orphan_ghosts.push_back(&info);
+                orphan_ghosts.push_back(info);
             }
         }
 
@@ -358,9 +358,9 @@ void ImGuiApp::render_process_list() {
         for (const ProcessNode* n : flat_list) {
             rows.push_back({n, &n->info});
         }
-        for (const auto& info : snapshot_diff_.exited_processes) {
-            if (!show_kernel && info.is_kernel_thread) continue;
-            rows.push_back({nullptr, &info});
+        for (const ProcessInfo* info : snapshot_diff_.exited_processes) {
+            if (!show_kernel && info->is_kernel_thread) continue;
+            rows.push_back({nullptr, info});
         }
 
         // Handle sorting

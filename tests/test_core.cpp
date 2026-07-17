@@ -163,14 +163,14 @@ void test_csv_export_formula_injection(const std::string& tmpdir) {
 }
 
 // Snapshot with an arbitrary set of PIDs (flat tree) for diff tests
-pex::DataSnapshot make_pid_snapshot(const std::vector<int>& pids) {
-    pex::DataSnapshot snap;
+std::shared_ptr<pex::DataSnapshot> make_pid_snapshot(const std::vector<int>& pids) {
+    auto snap = std::make_shared<pex::DataSnapshot>();
     for (const int pid : pids) {
         auto node = std::make_unique<pex::ProcessNode>();
         node->info.pid = pid;
         node->info.name = "proc-" + std::to_string(pid);
-        snap.process_map[pid] = node.get();
-        snap.process_tree.push_back(std::move(node));
+        snap->process_map[pid] = node.get();
+        snap->process_tree.push_back(std::move(node));
     }
     return snap;
 }
@@ -179,23 +179,23 @@ void test_snapshot_diff() {
     const auto older = make_pid_snapshot({1, 2, 5});
     const auto newer = make_pid_snapshot({2, 3, 5, 7});
 
-    const auto diff = pex::compute_snapshot_diff(&older, &newer);
+    const auto diff = pex::compute_snapshot_diff(older, newer.get());
     CHECK_EQ(diff.new_pids.size(), size_t{2});
     CHECK(diff.new_pids.contains(3));
     CHECK(diff.new_pids.contains(7));
     CHECK_EQ(diff.exited_processes.size(), size_t{1});
     if (!diff.exited_processes.empty()) {
-        CHECK_EQ(diff.exited_processes[0].pid, 1);
-        CHECK_EQ(diff.exited_processes[0].name, "proc-1");
+        CHECK_EQ(diff.exited_processes[0]->pid, 1);
+        CHECK_EQ(diff.exited_processes[0]->name, "proc-1");
     }
 
     // Identical snapshots: empty diff
-    const auto same = pex::compute_snapshot_diff(&newer, &newer);
+    const auto same = pex::compute_snapshot_diff(newer, newer.get());
     CHECK(same.new_pids.empty());
     CHECK(same.exited_processes.empty());
 
     // No previous snapshot: the first tick must not flash everything green
-    const auto first = pex::compute_snapshot_diff(nullptr, &newer);
+    const auto first = pex::compute_snapshot_diff(nullptr, newer.get());
     CHECK(first.new_pids.empty());
     CHECK(first.exited_processes.empty());
 
@@ -203,17 +203,30 @@ void test_snapshot_diff() {
     // one before the first scan; diffing against it must not flag everything
     // as new (launch green-flash guard).
     const auto empty_prev = make_pid_snapshot({});
-    const auto vs_empty = pex::compute_snapshot_diff(&empty_prev, &newer);
+    const auto vs_empty = pex::compute_snapshot_diff(empty_prev, newer.get());
     CHECK(vs_empty.new_pids.empty());
     CHECK(vs_empty.exited_processes.empty());
 
     // Exited ghosts are sorted by PID for deterministic rendering
     const auto empty_now = make_pid_snapshot({});
-    const auto all_gone = pex::compute_snapshot_diff(&newer, &empty_now);
+    const auto all_gone = pex::compute_snapshot_diff(newer, empty_now.get());
     CHECK_EQ(all_gone.exited_processes.size(), size_t{4});
     if (all_gone.exited_processes.size() == 4) {
-        CHECK(all_gone.exited_processes[0].pid < all_gone.exited_processes[1].pid);
-        CHECK(all_gone.exited_processes[2].pid < all_gone.exited_processes[3].pid);
+        CHECK(all_gone.exited_processes[0]->pid < all_gone.exited_processes[1]->pid);
+        CHECK(all_gone.exited_processes[2]->pid < all_gone.exited_processes[3]->pid);
+    }
+
+    // Exited-process pointers stay valid after the previous snapshot handle is
+    // released, because the diff holds its own shared_ptr to it.
+    {
+        auto prev = make_pid_snapshot({100, 200});
+        const auto now = make_pid_snapshot({200});
+        auto lifetime_diff = pex::compute_snapshot_diff(prev, now.get());
+        prev.reset();  // Drop the caller's handle; diff must keep it alive
+        CHECK_EQ(lifetime_diff.exited_processes.size(), size_t{1});
+        if (!lifetime_diff.exited_processes.empty()) {
+            CHECK_EQ(lifetime_diff.exited_processes[0]->pid, 100);
+        }
     }
 }
 
