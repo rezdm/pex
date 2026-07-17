@@ -277,10 +277,10 @@ void TuiApp::handle_kill_dialog_input(int ch) {
     }
 }
 
-void TuiApp::handle_mouse_event() {
+bool TuiApp::handle_mouse_event() {
     MEVENT event;
     if (getmouse(&event) != OK) {
-        return;
+        return false;
     }
 
     const int y = event.y;
@@ -294,7 +294,7 @@ void TuiApp::handle_mouse_event() {
         } else {
             details_scroll_offset_ = std::max(0, details_scroll_offset_ - 3);
         }
-        return;
+        return true;
     }
 
     // BUTTON5_PRESSED (wheel down) only exists with ncurses mouse protocol v2
@@ -307,7 +307,7 @@ void TuiApp::handle_mouse_event() {
         } else {
             details_scroll_offset_ += 3;
         }
-        return;
+        return true;
     }
 #endif
 
@@ -344,7 +344,7 @@ void TuiApp::handle_mouse_event() {
                     view_model_.process_list.selected_pid = clicked_pid;
                 }
             }
-            return;
+            return true;
         }
 
         // Check if click is in details panel
@@ -379,9 +379,12 @@ void TuiApp::handle_mouse_event() {
                     details_scroll_offset_ = 0;
                 }
             }
-            return;
+            return true;
         }
     }
+    // Fell through: a click outside both panels, or a pure motion event with
+    // no button/wheel — nothing changed, so no redraw is warranted.
+    return false;
 }
 
 } // namespace pex

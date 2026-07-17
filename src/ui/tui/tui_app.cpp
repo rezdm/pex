@@ -179,10 +179,13 @@ void TuiApp::run() {
                 if (ch == KEY_RESIZE) {
                     resize_term(0, 0);
                     resize_windows();
-                } else {
-                    handle_input(ch);
+                    needs_render = true;
+                } else if (handle_input(ch)) {
+                    // Only repaint for events that changed something. Pure
+                    // mouse motion returns false, so moving the mouse over the
+                    // window drains cheaply instead of spinning repaints.
+                    needs_render = true;
                 }
-                needs_render = true;
             } while (++drained < 512 && (ch = getch()) != ERR);
             timeout(50);  // restore idle-pacing block
         }

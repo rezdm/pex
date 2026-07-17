@@ -3,7 +3,7 @@
 
 namespace pex {
 
-void TuiApp::handle_input(int ch) {
+bool TuiApp::handle_input(int ch) {
     if (terminal_too_small_) {
         // Allow to quit and panel toggles as escape hatches to reclaim height
         switch (ch) {
@@ -23,7 +23,7 @@ void TuiApp::handle_input(int ch) {
                 break;
             default: ;
         }
-        return;
+        return true;
     }
 
     // Debounce: ignore input for a few frames after showing dialogs
@@ -34,35 +34,35 @@ void TuiApp::handle_input(int ch) {
             MEVENT event;
             getmouse(&event);
         }
-        return;
+        return false;  // Nothing changed while debouncing
     }
 
     // Help overlay takes priority
     if (show_help_) {
         handle_help_input(ch);
-        return;
+        return true;
     }
 
     // Kill dialog takes priority
     if (view_model_.kill_dialog.is_visible) {
         handle_kill_dialog_input(ch);
-        return;
+        return true;
     }
 
     // Search mode takes priority
     if (search_mode_) {
         handle_search_input(ch);
-        return;
+        return true;
     }
 
     // Find-open-file query input / results overlay (issue #7)
     if (find_file_mode_) {
         handle_find_file_input(ch);
-        return;
+        return true;
     }
     if (find_results_visible_) {
         handle_find_results_input(ch);
-        return;
+        return true;
     }
 
     // Global keys
@@ -70,57 +70,57 @@ void TuiApp::handle_input(int ch) {
         case 'q':
         case 'Q':
             running_ = false;
-            return;
+            return true;
 
         case '?':
         case KEY_F(1):
             show_help_ = true;
             flushinp();  // Clear any pending input
             dialog_debounce_ = 5;  // Ignore input for 5 frames
-            return;
+            return true;
 
         case '/':
             search_mode_ = true;
             search_input_.clear();
-            return;
+            return true;
 
         case 'o':  // Find open file/handle (issue #7)
             find_file_mode_ = true;
             find_file_input_.clear();
-            return;
+            return true;
 
         case 'd':  // Dump (export) recorded history to CSV (issue #9)
             export_history();
-            return;
+            return true;
 
         case 'u':  // Show/hide kernel threads (issue #2)
             view_model_.process_list.show_kernel_threads =
                 !view_model_.process_list.show_kernel_threads;
-            return;
+            return true;
 
         case 'n':  // Next search match
             if (!view_model_.process_list.search_text.empty()) {
                 search_next();
             }
-            return;
+            return true;
 
         case 'N':  // Previous search match
             if (!view_model_.process_list.search_text.empty()) {
                 search_previous();
             }
-            return;
+            return true;
 
         case 's':  // Toggle system panel visibility
             view_model_.system_panel.is_visible = !view_model_.system_panel.is_visible;
             resize_windows();
-            return;
+            return true;
 
         case 'c':  // Toggle system panel expand/collapse (show all CPUs)
             if (view_model_.system_panel.is_visible) {
                 system_panel_expanded_ = !system_panel_expanded_;
                 resize_windows();
             }
-            return;
+            return true;
 
         case '\t':  // Tab - switch panel focus
             if (current_focus_ == PanelFocus::ProcessList) {
@@ -128,7 +128,7 @@ void TuiApp::handle_input(int ch) {
             } else {
                 current_focus_ = PanelFocus::ProcessList;
             }
-            return;
+            return true;
 
         case KEY_BTAB:  // Shift+Tab - reverse switch
             if (current_focus_ == PanelFocus::DetailsPanel) {
@@ -136,21 +136,23 @@ void TuiApp::handle_input(int ch) {
             } else {
                 current_focus_ = PanelFocus::DetailsPanel;
             }
-            return;
+            return true;
 
         case 'r':
         case KEY_F(5):
             data_store_->refresh_now();
             details_needs_refresh_ = true;  // Also refresh details panel
-            return;
+            return true;
 
         case 27:  // Escape - clear search
             view_model_.process_list.search_text.clear();
-            return;
+            return true;
 
         case KEY_MOUSE:
-            handle_mouse_event();
-            return;
+            // Gate the redraw on whether the mouse actually did something:
+            // pure motion (no button/wheel) must not force a repaint, or
+            // moving the mouse over the window spins the CPU.
+            return handle_mouse_event();
         default: ;
     }
 
@@ -160,6 +162,7 @@ void TuiApp::handle_input(int ch) {
     } else {
         handle_details_panel_input(ch);
     }
+    return true;
 }
 
 void TuiApp::handle_search_input(int ch) {
