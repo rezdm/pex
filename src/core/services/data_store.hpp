@@ -8,6 +8,7 @@
 #include "../model/system_info.hpp"
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <memory>
 #include <thread>
 #include <atomic>
@@ -169,6 +170,11 @@ private:
     };
     std::unordered_map<int, ProcCounters> previous_proc_counters_;
     std::chrono::steady_clock::time_point previous_snapshot_time_{};
+
+    // PIDs seen fork via the event feed that have not yet appeared in a
+    // snapshot; an exit for one of these is a genuinely short-lived process
+    // (issue #60). Collection thread only.
+    std::unordered_set<int> forked_unseen_pids_;
 
     // Callback
     std::function<void()> on_data_updated_;
