@@ -9,6 +9,7 @@
 
 #include <cerrno>
 #include <cstring>
+#include <algorithm>
 
 namespace pex {
 
@@ -163,31 +164,37 @@ void LinuxProcessEventSource::event_thread_func() {
             const auto* cn = static_cast<const cn_msg*>(NLMSG_DATA(nlh));
             if (cn->id.idx != CN_IDX_PROC || cn->id.val != CN_VAL_PROC) continue;
 
-            const auto* ev = reinterpret_cast<const proc_event*>(cn->data);
+            // cn->data sits at an offset that is not 8-byte aligned within the
+            // recv buffer, but proc_event contains a __u64 — dereferencing a
+            // proc_event* there is misaligned UB (UBSan aborts; strict-align
+            // targets fault). Copy it into a naturally-aligned local first.
+            proc_event ev{};
+            std::memcpy(&ev, cn->data, std::min(sizeof(ev), static_cast<size_t>(cn->len)));
+
             ProcessEvent out;
             out.timestamp = now;
 
-            switch (ev->what) {
+            switch (ev.what) {
                 case PROC_EVENT_FORK:
                     // Thread creation also reports FORK; a new *process* has
                     // child pid == child tgid.
-                    if (ev->event_data.fork.child_pid != ev->event_data.fork.child_tgid) continue;
+                    if (ev.event_data.fork.child_pid != ev.event_data.fork.child_tgid) continue;
                     out.type = ProcessEventType::Fork;
-                    out.pid = ev->event_data.fork.child_tgid;
-                    out.parent_pid = ev->event_data.fork.parent_tgid;
+                    out.pid = ev.event_data.fork.child_tgid;
+                    out.parent_pid = ev.event_data.fork.parent_tgid;
                     break;
                 case PROC_EVENT_EXEC:
-                    if (ev->event_data.exec.process_pid != ev->event_data.exec.process_tgid) continue;
+                    if (ev.event_data.exec.process_pid != ev.event_data.exec.process_tgid) continue;
                     out.type = ProcessEventType::Exec;
-                    out.pid = ev->event_data.exec.process_tgid;
+                    out.pid = ev.event_data.exec.process_tgid;
                     break;
                 case PROC_EVENT_EXIT:
                     // Thread exits report EXIT too; the process is gone only
                     // when the exiting task is the group leader.
-                    if (ev->event_data.exit.process_pid != ev->event_data.exit.process_tgid) continue;
+                    if (ev.event_data.exit.process_pid != ev.event_data.exit.process_tgid) continue;
                     out.type = ProcessEventType::Exit;
-                    out.pid = ev->event_data.exit.process_tgid;
-                    out.exit_code = static_cast<int>(ev->event_data.exit.exit_code);
+                    out.pid = ev.event_data.exit.process_tgid;
+                    out.exit_code = static_cast<int>(ev.event_data.exit.exit_code);
                     break;
                 default:
                     continue;  // ACK/UID/GID/SID/COMM/COREDUMP not needed
