@@ -7,19 +7,28 @@
 #include "../src/core/services/settings.hpp"
 #include "../src/core/services/snapshot_diff.hpp"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <sstream>
 #include <string>
 
-#include <unistd.h>
-
 namespace {
 
 int g_failures = 0;
 int g_checks = 0;
+
+// Portable environment set (setenv is POSIX-only; _putenv_s on Windows).
+void set_env(const char* name, const char* value) {
+#ifdef _WIN32
+    _putenv_s(name, value);
+#else
+    setenv(name, value, 1);
+#endif
+}
 
 void check(const bool ok, const char* expr, const char* file, const int line) {
     g_checks++;
@@ -57,7 +66,13 @@ void test_format_bytes() {
 }
 
 void test_settings_roundtrip(const std::string& tmpdir) {
-    setenv("XDG_CONFIG_HOME", tmpdir.c_str(), 1);
+    // Point Settings at tmpdir via the config-dir env var it reads per
+    // platform (APPDATA on Windows, XDG_CONFIG_HOME elsewhere).
+#ifdef _WIN32
+    set_env("APPDATA", tmpdir.c_str());
+#else
+    set_env("XDG_CONFIG_HOME", tmpdir.c_str());
+#endif
 
     {
         pex::Settings s;
@@ -233,14 +248,19 @@ void test_snapshot_diff() {
 } // namespace
 
 int main() {
-    // Private scratch area for files the tests create
-    char tmpl[] = "/tmp/pex-tests-XXXXXX";
-    const char* tmpdir_c = mkdtemp(tmpl);
-    if (!tmpdir_c) {
-        std::fprintf(stderr, "FATAL: mkdtemp failed\n");
+    // Private scratch area for files the tests create (portable: no mkdtemp,
+    // which is POSIX-only and rooted at /tmp).
+    namespace fs = std::filesystem;
+    const auto unique =
+        std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    const std::string tmpdir =
+        (fs::temp_directory_path() / ("pex-tests-" + std::to_string(unique))).string();
+    std::error_code ec;
+    fs::create_directories(tmpdir, ec);
+    if (ec) {
+        std::fprintf(stderr, "FATAL: cannot create temp dir %s\n", tmpdir.c_str());
         return 2;
     }
-    const std::string tmpdir = tmpdir_c;
 
     test_format_bytes();
     test_settings_roundtrip(tmpdir);
