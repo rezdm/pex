@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <algorithm>
 #include <vector>
 
 namespace pex {
@@ -114,6 +115,21 @@ void FreeBSDProcessEventSource::event_thread_func() {
         }
         const auto now = std::chrono::steady_clock::now();
 
+        // Accumulate this kevent() wakeup's edges locally and publish them
+        // under one lock, rather than locking events_mutex_ per edge (a
+        // 64-event batch can emit up to ~192 edges, all contending drain()).
+        std::vector<ProcessEvent> batch;
+        auto emit = [&](const ProcessEventType type, const int pid,
+                        const int parent, const int code) {
+            ProcessEvent out;
+            out.type = type;
+            out.pid = pid;
+            out.parent_pid = parent;
+            out.exit_code = code;
+            out.timestamp = now;
+            batch.push_back(out);
+        };
+
         for (int i = 0; i < n; ++i) {
             const struct kevent& kev = kevs[i];
             if (kev.filter == EVFILT_USER) {
@@ -125,22 +141,6 @@ void FreeBSDProcessEventSource::event_thread_func() {
             // One knote event can carry several fflags; emit each edge.
             // NOTE_FORK on the parent is ignored — the child's NOTE_CHILD
             // carries both PIDs of the fork edge.
-            auto emit = [&](const ProcessEventType type, const int pid,
-                            const int parent, const int code) {
-                ProcessEvent out;
-                out.type = type;
-                out.pid = pid;
-                out.parent_pid = parent;
-                out.exit_code = code;
-                out.timestamp = now;
-                std::lock_guard lock(events_mutex_);
-                if (events_.size() >= kMaxBufferedEvents) {
-                    events_.erase(events_.begin(),
-                                  events_.begin() + static_cast<long>(kMaxBufferedEvents / 10));
-                }
-                events_.push_back(out);
-            };
-
             const int pid = static_cast<int>(kev.ident);
             if (kev.fflags & NOTE_CHILD) {
                 emit(ProcessEventType::Fork, pid, static_cast<int>(kev.data), 0);
@@ -153,6 +153,18 @@ void FreeBSDProcessEventSource::event_thread_func() {
             }
             // NOTE_TRACKERR: a child could not be auto-attached; nothing to
             // report — that subtree degrades to poll-only coverage.
+        }
+
+        if (!batch.empty()) {
+            std::lock_guard lock(events_mutex_);
+            // Bound the buffer: drop the oldest to make room. drain() empties
+            // this every tick, so the cap only trips under an extreme storm.
+            if (events_.size() + batch.size() > kMaxBufferedEvents) {
+                const size_t overflow = events_.size() + batch.size() - kMaxBufferedEvents;
+                events_.erase(events_.begin(),
+                              events_.begin() + static_cast<long>(std::min(overflow, events_.size())));
+            }
+            events_.insert(events_.end(), batch.begin(), batch.end());
         }
     }
 }
