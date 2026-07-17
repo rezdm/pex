@@ -162,6 +162,34 @@ std::string query_object_string(HANDLE dup, const ULONG info_class) {
     return narrow(s.c_str());
 }
 
+// Read the real command line (with arguments) from the target's PEB. Needs a
+// handle opened with PROCESS_VM_READ. CommandLine is a documented member of
+// RTL_USER_PROCESS_PARAMETERS, so no undocumented offsets are involved.
+std::string read_command_line(HANDLE h) {
+    if (!nt().QueryInformationProcess) return {};
+
+    PROCESS_BASIC_INFORMATION pbi{};
+    ULONG ret = 0;
+    if (nt().QueryInformationProcess(h, 0 /*ProcessBasicInformation*/, &pbi, sizeof(pbi), &ret) != 0
+        || !pbi.PebBaseAddress) {
+        return {};
+    }
+    PEB peb{};
+    if (!ReadProcessMemory(h, pbi.PebBaseAddress, &peb, sizeof(peb), nullptr) ||
+        !peb.ProcessParameters) {
+        return {};
+    }
+    RTL_USER_PROCESS_PARAMETERS params{};
+    if (!ReadProcessMemory(h, peb.ProcessParameters, &params, sizeof(params), nullptr)) {
+        return {};
+    }
+    const UNICODE_STRING& cmd = params.CommandLine;
+    if (!cmd.Buffer || cmd.Length == 0 || cmd.Length > 64 * 1024) return {};
+    std::wstring w(cmd.Length / sizeof(wchar_t), L'\0');
+    if (!ReadProcessMemory(h, cmd.Buffer, w.data(), cmd.Length, nullptr)) return {};
+    return narrow(w.c_str());
+}
+
 } // namespace
 
 WindowsProcessDataProvider::WindowsProcessDataProvider() = default;
@@ -259,6 +287,16 @@ void WindowsProcessDataProvider::fill_process_details(ProcessInfo& info, void* p
 
     info.user_name = get_username_for_pid(h);
     info.priority = static_cast<int>(GetPriorityClass(h));
+
+    // Real command line from the PEB. Reading it needs PROCESS_VM_READ, which
+    // the caller's PROCESS_QUERY_LIMITED_INFORMATION handle lacks, so open a
+    // separate best-effort handle — a failure here (e.g. an elevated process)
+    // leaves command_line empty and get_all_processes falls back to the path.
+    if (HANDLE hv = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE,
+                                static_cast<DWORD>(info.pid))) {
+        info.command_line = read_command_line(hv);
+        CloseHandle(hv);
+    }
 }
 
 std::vector<ProcessInfo> WindowsProcessDataProvider::get_all_processes(int64_t total_memory) {
