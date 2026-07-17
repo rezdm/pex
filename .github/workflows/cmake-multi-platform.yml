@@ -87,6 +87,109 @@ jobs:
     - name: ccache stats
       run: ccache --show-stats
 
+  # Clang build: catches GCC-isms and surfaces a different set of -Wall
+  # -Wextra -Wpedantic diagnostics than the GCC jobs. Uses the system
+  # libstdc++, so std::format etc. come from GCC's standard library.
+  build-clang:
+    name: Ubuntu (clang)
+    runs-on: ubuntu-latest
+    env:
+      CC: clang
+      CXX: clang++
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake clang \
+          libgl-dev libglfw3-dev \
+          libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+          libwayland-dev libxkbcommon-dev wayland-protocols libdecor-0-dev \
+          libncurses-dev
+
+    - name: Set up ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: ubuntu-clang
+
+    - name: Configure
+      run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+    - name: Build
+      run: cmake --build build -j$(nproc)
+
+    - name: Verify binaries
+      run: |
+        test -f build/pex && echo "pex: OK"
+        test -f build/pexc && echo "pexc: OK"
+
+    - name: Run unit tests
+      run: ./build/pex_tests
+
+    - name: ccache stats
+      run: ccache --show-stats
+
+  # Oldest toolchain the C++23 code is expected to build on. std::format in
+  # libstdc++ landed in GCC 13.1, so 13 is the presumed floor; if this job
+  # fails, the real minimum is higher and this pin should be bumped.
+  build-gcc-floor:
+    name: GCC 13 (C++23 floor)
+    runs-on: ubuntu-latest
+    env:
+      CC: gcc-13
+      CXX: g++-13
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          cmake gcc-13 g++-13 \
+          libgl-dev libglfw3-dev \
+          libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+          libwayland-dev libxkbcommon-dev wayland-protocols libdecor-0-dev \
+          libncurses-dev
+
+    - name: Configure
+      run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build
+      run: cmake --build build -j$(nproc)
+
+    - name: Verify binaries
+      run: |
+        test -f build/pex && echo "pex: OK"
+        test -f build/pexc && echo "pexc: OK"
+
+    - name: Run unit tests
+      run: ./build/pex_tests
+
+  # musl libc portability (TUI + core only; the GL stack is skipped). Built
+  # inside an Alpine container via docker run so actions/checkout still runs
+  # on the glibc host — GitHub's bundled node cannot execute under musl.
+  build-alpine-musl:
+    name: Alpine (musl, TUI)
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Build and test in Alpine
+      run: |
+        docker run --rm -v "$PWD:/src" -w /src alpine:latest sh -c '
+          set -e
+          apk add --no-cache build-base cmake git linux-headers ncurses-dev
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_GUI=OFF
+          cmake --build build -j$(nproc)
+          test -f build/pexc && echo "pexc: OK"
+          ./build/pex_tests
+        '
+
   build-freebsd:
     name: FreeBSD (latest)
     runs-on: ubuntu-latest
