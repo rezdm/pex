@@ -55,6 +55,7 @@ bool LinuxProcessEventSource::start() {
     }
 
     running_ = true;
+    active_ = true;
     set_mcast_listen(true);
     event_thread_ = std::thread(&LinuxProcessEventSource::event_thread_func, this);
     return true;
@@ -81,7 +82,10 @@ void LinuxProcessEventSource::stop() {
 }
 
 bool LinuxProcessEventSource::is_active() const {
-    return running_;
+    // Health, not lifecycle: false once the event thread has exited (including
+    // an abnormal recv()/poll() failure), so DataStore stops advertising the
+    // feed as live and the churn line disappears instead of freezing at zero.
+    return active_;
 }
 
 std::vector<ProcessEvent> LinuxProcessEventSource::drain() {
@@ -119,6 +123,14 @@ void LinuxProcessEventSource::set_mcast_listen(const bool enable) const {
 }
 
 void LinuxProcessEventSource::event_thread_func() {
+    // Clear the health flag on every exit path (normal stop or a fatal
+    // socket error), so is_active() reflects a dead feed. running_ stays as
+    // the lifecycle flag so stop() still joins this thread exactly once.
+    struct ClearActiveOnExit {
+        std::atomic<bool>& flag;
+        ~ClearActiveOnExit() { flag = false; }
+    } clear_active{active_};
+
     // Large enough for a batch of netlink messages
     alignas(NLMSG_ALIGNTO) char buffer[16 * 1024];
 

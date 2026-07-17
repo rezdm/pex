@@ -34,7 +34,8 @@ private:
 
     int kq_ = -1;
     std::thread event_thread_;
-    std::atomic<bool> running_{false};
+    std::atomic<bool> running_{false};  // Lifecycle: gates the loop and stop()'s join
+    std::atomic<bool> active_{false};   // Health: false once the thread leaves its loop
 
     std::mutex events_mutex_;
     std::vector<ProcessEvent> events_;

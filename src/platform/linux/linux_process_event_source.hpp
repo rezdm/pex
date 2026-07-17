@@ -32,7 +32,8 @@ private:
     int netlink_fd_ = -1;
     int wake_pipe_[2] = {-1, -1};  // Self-pipe to unblock poll() on stop
     std::thread event_thread_;
-    std::atomic<bool> running_{false};
+    std::atomic<bool> running_{false};  // Lifecycle: gates the loop and stop()'s join
+    std::atomic<bool> active_{false};   // Health: false once the thread leaves its loop
 
     std::mutex events_mutex_;
     std::vector<ProcessEvent> events_;
