@@ -1,8 +1,10 @@
 #include "windows_process_data_provider.hpp"
+#include "../../core/format_utils.hpp"
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <winternl.h>   // PROCESS_BASIC_INFORMATION, PEB, UNICODE_STRING
 #include <tlhelp32.h>
 #include <psapi.h>
 #include <iphlpapi.h>
@@ -10,6 +12,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cwchar>
 #include <format>
 
 namespace pex {
@@ -67,6 +70,92 @@ std::string ipv6_endpoint(const UCHAR* addr, const DWORD port_be) {
     memcpy(&in, addr, sizeof(in));
     inet_ntop(AF_INET6, &in, ip, sizeof(ip));
     return std::format("[{}]:{}", ip, ntohs(static_cast<u_short>(port_be)));
+}
+
+// ---- ntdll entry points ----------------------------------------------------
+// ntdll is linked, but these functions/classes are not all in the mingw
+// headers, so resolve them once at runtime (same pattern as RtlGetVersion).
+using NtQuerySystemInformation_t = LONG(NTAPI*)(ULONG, PVOID, ULONG, PULONG);
+using NtQueryObject_t = LONG(NTAPI*)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+using NtQueryInformationProcess_t = LONG(NTAPI*)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+
+struct NtApi {
+    NtQuerySystemInformation_t QuerySystemInformation = nullptr;
+    NtQueryObject_t QueryObject = nullptr;
+    NtQueryInformationProcess_t QueryInformationProcess = nullptr;
+};
+
+const NtApi& nt() {
+    static const NtApi api = [] {
+        NtApi a;
+        if (HMODULE h = GetModuleHandleW(L"ntdll.dll")) {
+            a.QuerySystemInformation = reinterpret_cast<NtQuerySystemInformation_t>(
+                reinterpret_cast<void*>(GetProcAddress(h, "NtQuerySystemInformation")));
+            a.QueryObject = reinterpret_cast<NtQueryObject_t>(
+                reinterpret_cast<void*>(GetProcAddress(h, "NtQueryObject")));
+            a.QueryInformationProcess = reinterpret_cast<NtQueryInformationProcess_t>(
+                reinterpret_cast<void*>(GetProcAddress(h, "NtQueryInformationProcess")));
+        }
+        return a;
+    }();
+    return api;
+}
+
+constexpr ULONG kSystemExtendedHandleInformation = 64;
+constexpr ULONG kObjectNameInformation = 1;
+constexpr ULONG kObjectTypeInformation = 2;
+constexpr LONG  kStatusInfoLengthMismatch = static_cast<LONG>(0xC0000004);
+// Handles with exactly this granted access can deadlock NtQueryObject (the
+// classic synchronous-pipe hang); skip the name query for them.
+constexpr ULONG kHangProneAccess = 0x0012019F;
+
+struct SYSTEM_HANDLE_ENTRY_EX {
+    PVOID Object;
+    ULONG_PTR UniqueProcessId;
+    PVOID HandleValue;
+    ULONG GrantedAccess;
+    USHORT CreatorBackTraceIndex;
+    USHORT ObjectTypeIndex;
+    ULONG HandleAttributes;
+    ULONG Reserved;
+};
+struct SYSTEM_HANDLE_INFORMATION_EX {
+    ULONG_PTR NumberOfHandles;
+    ULONG_PTR Reserved;
+    SYSTEM_HANDLE_ENTRY_EX Handles[1];
+};
+
+// Convert an NT device path (\Device\HarddiskVolumeN\...) to a DOS path
+// (C:\...) using the drive-letter -> device mapping; leaves it unchanged if
+// no mapping matches (e.g. named pipes, sockets).
+std::string nt_path_to_dos(const std::string& nt_path) {
+    wchar_t drives[512];
+    const DWORD n = GetLogicalDriveStringsW(511, drives);
+    for (wchar_t* d = drives; *d && (d - drives) < static_cast<ptrdiff_t>(n); d += wcslen(d) + 1) {
+        wchar_t drive[3] = { d[0], L':', L'\0' };
+        wchar_t device[MAX_PATH];
+        if (QueryDosDeviceW(drive, device, MAX_PATH) > 0) {
+            const std::string dev = narrow(device);  // e.g. \Device\HarddiskVolume3
+            if (!dev.empty() && nt_path.rfind(dev, 0) == 0) {
+                return narrow(drive) + nt_path.substr(dev.size());
+            }
+        }
+    }
+    return nt_path;
+}
+
+// Query a UNICODE_STRING-headed object info class into a UTF-8 string.
+std::string query_object_string(HANDLE dup, const ULONG info_class) {
+    ULONG len = 0;
+    nt().QueryObject(dup, info_class, nullptr, 0, &len);
+    if (len == 0 || len > 64 * 1024) return {};
+    std::vector<char> buf(len);
+    if (nt().QueryObject(dup, info_class, buf.data(), len, &len) != 0) return {};
+    const auto* us = reinterpret_cast<const UNICODE_STRING*>(buf.data());
+    if (!us->Buffer || us->Length == 0) return {};
+    // UNICODE_STRING is not guaranteed NUL-terminated; bound by Length.
+    const std::wstring s(us->Buffer, us->Length / sizeof(wchar_t));
+    return narrow(s.c_str());
 }
 
 } // namespace
@@ -254,8 +343,72 @@ std::string WindowsProcessDataProvider::get_thread_stack(int, int) {
     return "";  // Would need StackWalk64 + symbols (Phase 2+)
 }
 
-std::vector<FileHandleInfo> WindowsProcessDataProvider::get_file_handles(int) {
-    return {};  // Phase 2: NtQuerySystemInformation(SystemHandleInformation)
+std::vector<FileHandleInfo> WindowsProcessDataProvider::get_file_handles(const int pid) {
+    std::vector<FileHandleInfo> handles;
+    if (!nt().QuerySystemInformation || !nt().QueryObject) return handles;
+
+    // Enumerate every handle system-wide, then filter to this PID. The buffer
+    // size fluctuates as handles open/close, so retry on length mismatch.
+    ULONG size = 1 << 20;  // 1 MiB initial guess
+    std::vector<char> buf;
+    LONG status = 0;
+    for (int attempt = 0; attempt < 6; ++attempt) {
+        buf.resize(size);
+        ULONG needed = 0;
+        status = nt().QuerySystemInformation(kSystemExtendedHandleInformation,
+                                             buf.data(), size, &needed);
+        if (status == 0) break;
+        if (status == kStatusInfoLengthMismatch) {
+            size = needed ? needed + (64 * 1024) : size * 2;
+            continue;
+        }
+        return handles;  // Unexpected error
+    }
+    if (status != 0) return handles;
+
+    const auto* info = reinterpret_cast<const SYSTEM_HANDLE_INFORMATION_EX*>(buf.data());
+
+    // A handle to the owning process, to duplicate its handles into ours.
+    HANDLE target = OpenProcess(PROCESS_DUP_HANDLE, FALSE, static_cast<DWORD>(pid));
+    if (!target) return handles;
+
+    const HANDLE self = GetCurrentProcess();
+    for (ULONG_PTR i = 0; i < info->NumberOfHandles; ++i) {
+        const SYSTEM_HANDLE_ENTRY_EX& e = info->Handles[i];
+        if (e.UniqueProcessId != static_cast<ULONG_PTR>(pid)) continue;
+
+        HANDLE dup = nullptr;
+        if (!DuplicateHandle(target, static_cast<HANDLE>(e.HandleValue), self, &dup,
+                             0, FALSE, DUPLICATE_SAME_ACCESS) || !dup) {
+            continue;
+        }
+
+        // Type never hangs; name can (synchronous pipes with the classic
+        // access mask), so skip the name query for those.
+        const std::string type = query_object_string(dup, kObjectTypeInformation);
+        if (type == "File") {
+            std::string path;
+            if (e.GrantedAccess != kHangProneAccess) {
+                path = nt_path_to_dos(query_object_string(dup, kObjectNameInformation));
+            }
+            FileHandleInfo fh;
+            fh.fd = static_cast<int>(reinterpret_cast<uintptr_t>(e.HandleValue));
+            // \Device\NamedPipe\... and \Device\Afd (sockets) also surface as
+            // type "File"; classify by the resolved name.
+            if (path.rfind("\\Device\\NamedPipe", 0) == 0) fh.type = "pipe";
+            else if (path.rfind("\\Device\\Afd", 0) == 0)  fh.type = "socket";
+            else                                            fh.type = "file";
+            fh.path = path.empty() ? "(name unavailable)" : path;
+            handles.push_back(std::move(fh));
+        }
+        CloseHandle(dup);
+    }
+    CloseHandle(target);
+
+    std::ranges::sort(handles, [](const FileHandleInfo& a, const FileHandleInfo& b) {
+        return a.fd < b.fd;
+    });
+    return handles;
 }
 
 std::vector<NetworkConnectionInfo> WindowsProcessDataProvider::get_network_connections(const int pid) {
@@ -351,12 +504,138 @@ std::vector<NetworkConnectionInfo> WindowsProcessDataProvider::get_network_conne
     return connections;
 }
 
-std::vector<MemoryMapInfo> WindowsProcessDataProvider::get_memory_maps(int) {
-    return {};  // Phase 2: VirtualQueryEx walk
+std::vector<MemoryMapInfo> WindowsProcessDataProvider::get_memory_maps(const int pid) {
+    std::vector<MemoryMapInfo> maps;
+
+    HANDLE h = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE,
+                           static_cast<DWORD>(pid));
+    if (!h) return maps;
+
+    MEMORY_BASIC_INFORMATION mbi{};
+    uintptr_t addr = 0;
+    while (VirtualQueryEx(h, reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi)) == sizeof(mbi)) {
+        const auto base = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+        const uintptr_t next = base + mbi.RegionSize;
+
+        if (mbi.State == MEM_COMMIT) {
+            MemoryMapInfo m;
+            m.address = std::format("{:016x}-{:016x}", base, next);
+            m.size_bytes = static_cast<uint64_t>(mbi.RegionSize);
+            m.size = format_bytes(static_cast<int64_t>(m.size_bytes), false);
+
+            // Page protection -> rwx string (low byte holds the base protection;
+            // PAGE_GUARD/PAGE_NOCACHE live in the high bits and are ignored).
+            const DWORD p = mbi.Protect & 0xFF;
+            const bool r = p & (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY |
+                                PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY);
+            const bool w = p & (PAGE_READWRITE | PAGE_WRITECOPY |
+                                PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY);
+            const bool x = p & (PAGE_EXECUTE | PAGE_EXECUTE_READ |
+                                PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY);
+            std::string perms;
+            perms += r ? 'r' : '-';
+            perms += w ? 'w' : '-';
+            perms += x ? 'x' : '-';
+            perms += (mbi.Type == MEM_PRIVATE) ? 'p' : 's';
+            m.permissions = perms;
+
+            wchar_t name[MAX_PATH];
+            if (GetMappedFileNameW(h, mbi.BaseAddress, name, MAX_PATH) > 0) {
+                m.pathname = nt_path_to_dos(narrow(name));
+            } else if (mbi.Type == MEM_IMAGE) {
+                m.pathname = "[image]";
+            } else if (mbi.Type == MEM_MAPPED) {
+                m.pathname = "[mapped]";
+            } else {
+                m.pathname = "[private]";
+            }
+
+            maps.push_back(std::move(m));
+        }
+
+        if (next <= addr) break;  // No forward progress / address wrap
+        addr = next;
+    }
+    CloseHandle(h);
+    return maps;
 }
 
-std::vector<EnvironmentVariable> WindowsProcessDataProvider::get_environment_variables(int) {
-    return {};  // Phase 2: remote PEB read
+std::vector<EnvironmentVariable> WindowsProcessDataProvider::get_environment_variables(const int pid) {
+    std::vector<EnvironmentVariable> env;
+    if (!nt().QueryInformationProcess) return env;
+
+    HANDLE h = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE,
+                           static_cast<DWORD>(pid));
+    if (!h) return env;
+
+    // Walk PEB -> ProcessParameters -> Environment in the target's address space.
+    PROCESS_BASIC_INFORMATION pbi{};
+    ULONG ret = 0;
+    if (nt().QueryInformationProcess(h, 0 /*ProcessBasicInformation*/, &pbi, sizeof(pbi), &ret) != 0
+        || !pbi.PebBaseAddress) {
+        CloseHandle(h);
+        return env;
+    }
+
+    PEB peb{};
+    if (!ReadProcessMemory(h, pbi.PebBaseAddress, &peb, sizeof(peb), nullptr) ||
+        !peb.ProcessParameters) {
+        CloseHandle(h);
+        return env;
+    }
+
+    // The Environment pointer lives past the documented head of
+    // RTL_USER_PROCESS_PARAMETERS (offset 0x80 on x64). winternl's struct omits
+    // it, so read the pointer directly. (64-bit pex reading a 64-bit process;
+    // 32-bit targets under WOW64 are best-effort.)
+    constexpr uintptr_t kEnvPtrOffset = 0x80;
+    void* env_addr = nullptr;
+    const auto params = reinterpret_cast<uintptr_t>(peb.ProcessParameters);
+    if (ReadProcessMemory(h, reinterpret_cast<LPCVOID>(params + kEnvPtrOffset),
+                          &env_addr, sizeof(env_addr), nullptr) && env_addr) {
+        // Read the block (NUL-separated NAME=VALUE entries, double-NUL end) in
+        // chunks until the terminator or a sane cap.
+        std::wstring block;
+        constexpr size_t kCapWChars = 128 * 1024;
+        auto cur = reinterpret_cast<uintptr_t>(env_addr);
+        bool done = false;
+        while (!done && block.size() < kCapWChars) {
+            wchar_t buf[2048];
+            SIZE_T got = 0;
+            if (!ReadProcessMemory(h, reinterpret_cast<LPCVOID>(cur), buf, sizeof(buf), &got) ||
+                got < sizeof(wchar_t)) {
+                break;
+            }
+            const size_t count = got / sizeof(wchar_t);
+            for (size_t i = 0; i < count; ++i) {
+                if (buf[i] == L'\0' && !block.empty() && block.back() == L'\0') { done = true; break; }
+                block.push_back(buf[i]);
+            }
+            cur += count * sizeof(wchar_t);
+        }
+
+        for (size_t start = 0; start < block.size();) {
+            size_t nul = block.find(L'\0', start);
+            if (nul == std::wstring::npos) nul = block.size();
+            if (nul > start) {
+                const std::wstring entry = block.substr(start, nul - start);
+                // Skip Windows' "=C:=..." drive-cwd pseudo-vars (name is empty).
+                if (const size_t eq = entry.find(L'='); eq != std::wstring::npos && eq > 0) {
+                    EnvironmentVariable ev;
+                    ev.name = narrow(entry.substr(0, eq).c_str());
+                    ev.value = narrow(entry.substr(eq + 1).c_str());
+                    env.push_back(std::move(ev));
+                }
+            }
+            start = nul + 1;
+        }
+    }
+    CloseHandle(h);
+
+    std::ranges::sort(env, [](const EnvironmentVariable& a, const EnvironmentVariable& b) {
+        return a.name < b.name;
+    });
+    return env;
 }
 
 std::vector<LibraryInfo> WindowsProcessDataProvider::get_libraries(const int pid) {
