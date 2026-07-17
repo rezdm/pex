@@ -270,9 +270,9 @@ void TuiApp::render_process_tree() {
     // copied ProcessInfo — the live nodes are gone — so CPU/IO columns are
     // blank and the rows are not selectable.
     std::vector<const ProcessInfo*> ghosts;
-    for (const auto& info : snapshot_diff_.exited_processes) {
-        if (!view_model_.process_list.show_kernel_threads && info.is_kernel_thread) continue;
-        ghosts.push_back(&info);
+    for (const ProcessInfo* info : snapshot_diff_.exited_processes) {
+        if (!view_model_.process_list.show_kernel_threads && info->is_kernel_thread) continue;
+        ghosts.push_back(info);
     }
     constexpr int kMaxGhostRows = 3;
     const int ghost_count = std::min<int>(kMaxGhostRows, static_cast<int>(ghosts.size()));

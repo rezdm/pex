@@ -155,6 +155,11 @@ void LinuxProcessEventSource::event_thread_func() {
         }
         const auto now = std::chrono::steady_clock::now();
 
+        // Accumulate this recv() batch locally and publish it under one lock,
+        // rather than locking events_mutex_ once per event (a fork storm can
+        // deliver thousands per wakeup, all contending with drain()).
+        std::vector<ProcessEvent> batch;
+
         // NLMSG_OK/NLMSG_NEXT consume 'len' as they walk the batch
         auto len = static_cast<unsigned int>(received);
         for (nlmsghdr* nlh = reinterpret_cast<nlmsghdr*>(buffer);
@@ -200,12 +205,20 @@ void LinuxProcessEventSource::event_thread_func() {
                     continue;  // ACK/UID/GID/SID/COMM/COREDUMP not needed
             }
 
+            batch.push_back(out);
+        }
+
+        if (!batch.empty()) {
             std::lock_guard lock(events_mutex_);
-            if (events_.size() >= kMaxBufferedEvents) {
+            // Bound the buffer: drop the oldest events to make room for the
+            // batch. drain() empties this every tick, so the cap only trips
+            // under an extreme storm.
+            if (events_.size() + batch.size() > kMaxBufferedEvents) {
+                const size_t overflow = events_.size() + batch.size() - kMaxBufferedEvents;
                 events_.erase(events_.begin(),
-                              events_.begin() + static_cast<long>(kMaxBufferedEvents / 10));
+                              events_.begin() + static_cast<long>(std::min(overflow, events_.size())));
             }
-            events_.push_back(out);
+            events_.insert(events_.end(), batch.begin(), batch.end());
         }
     }
 }

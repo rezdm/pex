@@ -94,13 +94,9 @@ void TuiApp::render_system_panel() const {
 
             // Per-tick process churn (kernel event feed, issue #60)
             if (sp.events_active) {
-                std::ostringstream churn;
-                churn << "Churn: +" << sp.fork_events << "/-" << sp.exit_events;
-                if (sp.short_lived_exits > 0) {
-                    churn << " (" << sp.short_lived_exits << " unseen)";
-                }
+                const std::string churn = format_churn_compact(sp);
                 int churn_x = uptime_x + static_cast<int>(uptime.str().length()) + 4;
-                mvwprintw(system_win_, row, churn_x, "%s", churn.str().c_str());
+                mvwprintw(system_win_, row, churn_x, "%s", churn.c_str());
             }
 
             // Collapse hint

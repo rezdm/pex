@@ -142,7 +142,7 @@ void TuiApp::run() {
                 // Diff against the outgoing snapshot (issue #61); highlights
                 // are then valid until the next swap = one refresh interval
                 snapshot_diff_ = diff_highlight_enabled_
-                    ? compute_snapshot_diff(current_data_.get(), new_data.get())
+                    ? compute_snapshot_diff(current_data_, new_data.get())
                     : SnapshotDiff{};
                 current_data_ = new_data;
                 view_model_.update_from_snapshot(current_data_);

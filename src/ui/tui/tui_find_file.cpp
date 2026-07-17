@@ -1,26 +1,15 @@
 #include "tui_app.hpp"
 #include "tui_colors.hpp"
 #include "../../core/services/history_store.hpp"
+#include "../../core/string_utils.hpp"
 #include "../../platform/platform_factory.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <cstdlib>
 #include <ctime>
 #include <format>
 
 namespace pex {
-
-namespace {
-
-std::string lower_copy(const std::string& s) {
-    std::string result = s;
-    std::ranges::transform(result, result.begin(),
-                           [](unsigned char c) { return std::tolower(c); });
-    return result;
-}
-
-} // namespace
 
 // ---------------------------------------------------------------------------
 // History export (issue #9)
@@ -67,7 +56,7 @@ void TuiApp::start_find_scan() {
     if (!current_data_) return;
     stop_find_scan();  // Join any previous worker
 
-    const std::string query = lower_copy(find_file_input_);
+    const std::string query = to_lower_copy(find_file_input_);
     if (query.empty()) return;
 
     if (!find_provider_) {
@@ -103,12 +92,12 @@ void TuiApp::start_find_scan() {
             std::vector<FindFileResult> batch;
 
             for (const auto& fh : find_provider_->get_file_handles(pid)) {
-                if (lower_copy(fh.path).find(query) != std::string::npos) {
+                if (to_lower_copy(fh.path).find(query) != std::string::npos) {
                     batch.push_back({pid, name, fh.type, fh.path});
                 }
             }
             for (const auto& lib : find_provider_->get_libraries(pid)) {
-                if (lower_copy(lib.path).find(query) != std::string::npos) {
+                if (to_lower_copy(lib.path).find(query) != std::string::npos) {
                     batch.push_back({pid, name, "library", lib.path});
                 }
             }

@@ -58,25 +58,6 @@ bool is_same_process(int pid, const timestruc_t& expected_start) {
            psinfo.pr_start.tv_nsec == expected_start.tv_nsec;
 }
 
-// Returns a failure result if the PID no longer refers to the process
-// instance identified by 'token' (recycled or gone); nullopt = OK to kill.
-std::optional<KillResult> check_token(SolarisProcessKiller& killer, int pid,
-                                      const std::optional<uint64_t>& token) {
-    if (!token) return std::nullopt;
-    KillResult result;
-    const auto current = killer.process_start_token(pid);
-    if (!current) {
-        result.error_message = "Process not found. It may have already terminated.";
-        return result;
-    }
-    if (*current != *token) {
-        result.error_message =
-            "PID was reused by a different process since the dialog opened. Kill aborted.";
-        return result;
-    }
-    return std::nullopt;
-}
-
 } // anonymous namespace
 
 std::optional<uint64_t> SolarisProcessKiller::process_start_token(int pid) {
@@ -102,7 +83,7 @@ KillResult SolarisProcessKiller::kill_process(int pid, bool force,
         return result;
     }
 
-    if (auto refusal = check_token(*this, pid, expected_token)) {
+    if (auto refusal = check_kill_token(*this, pid, expected_token)) {
         return *refusal;
     }
 
@@ -148,7 +129,7 @@ KillResult SolarisProcessKiller::kill_process_tree(int pid, bool force,
     }
     // The tree is rebuilt from *current* /proc state, so a recycled root PID
     // would otherwise target an unrelated process's whole tree.
-    if (auto refusal = check_token(*this, pid, expected_token)) {
+    if (auto refusal = check_kill_token(*this, pid, expected_token)) {
         return *refusal;
     }
     // Collect all descendant PIDs by reading /proc

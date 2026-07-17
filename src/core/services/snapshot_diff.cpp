@@ -2,10 +2,12 @@
 #include "data_store.hpp"
 
 #include <algorithm>
+#include <utility>
 
 namespace pex {
 
-SnapshotDiff compute_snapshot_diff(const DataSnapshot* previous, const DataSnapshot* current) {
+SnapshotDiff compute_snapshot_diff(std::shared_ptr<const DataSnapshot> previous,
+                                   const DataSnapshot* current) {
     SnapshotDiff diff;
     if (!previous || !current) return diff;
 
@@ -23,13 +25,14 @@ SnapshotDiff compute_snapshot_diff(const DataSnapshot* previous, const DataSnaps
 
     for (const auto& [pid, node] : previous->process_map) {
         if (!current->process_map.contains(pid)) {
-            diff.exited_processes.push_back(node->info);
+            diff.exited_processes.push_back(&node->info);
         }
     }
     // process_map iteration order is unstable; keep ghost rows deterministic
     std::ranges::sort(diff.exited_processes,
-                      [](const ProcessInfo& a, const ProcessInfo& b) { return a.pid < b.pid; });
+                      [](const ProcessInfo* a, const ProcessInfo* b) { return a->pid < b->pid; });
 
+    diff.previous_snapshot = std::move(previous);
     return diff;
 }
 

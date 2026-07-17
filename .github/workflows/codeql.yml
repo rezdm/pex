@@ -69,15 +69,10 @@ jobs:
       with:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
-        # NOTE: for compiled languages this config paths-ignore does NOT
-        # filter results (extraction follows the build); it is kept as a
-        # statement of intent. The actual exclusion of vendored FetchContent
-        # checkouts (stb, ImGui, GLFW under _codeql_build_dir/_deps) happens
-        # in the filter-sarif step below.
-        config: |
-          paths-ignore:
-            - '**/_deps'
-            - '_codeql_build_dir'
+        # Vendored FetchContent checkouts (stb, ImGui, GLFW) are excluded from
+        # results in the filter-sarif step below, NOT here: for compiled
+        # languages a config paths-ignore does not filter results (extraction
+        # follows the build), so the filter step is the single source of truth.
         # If you wish to specify custom queries, you can do so here or in a config file.
         # By default, queries listed here will override any specified in a config file.
         # Prefix the list here with "+" to use these queries and those in the config file.
