@@ -199,6 +199,14 @@ void test_snapshot_diff() {
     CHECK(first.new_pids.empty());
     CHECK(first.exited_processes.empty());
 
+    // Empty (but non-null) previous snapshot: the DataStore ctor publishes
+    // one before the first scan; diffing against it must not flag everything
+    // as new (launch green-flash guard).
+    const auto empty_prev = make_pid_snapshot({});
+    const auto vs_empty = pex::compute_snapshot_diff(&empty_prev, &newer);
+    CHECK(vs_empty.new_pids.empty());
+    CHECK(vs_empty.exited_processes.empty());
+
     // Exited ghosts are sorted by PID for deterministic rendering
     const auto empty_now = make_pid_snapshot({});
     const auto all_gone = pex::compute_snapshot_diff(&newer, &empty_now);
