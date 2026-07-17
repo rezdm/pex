@@ -238,7 +238,9 @@ std::string WindowsProcessDataProvider::get_username_for_pid(void* process_handl
                                   domain, &domain_len, &use)) {
                 result = narrow(name);
             }
-            if (!sid_key.empty()) {
+            // Only cache a successful lookup: caching an empty result would
+            // poison this SID's name permanently after one transient failure.
+            if (!sid_key.empty() && !result.empty()) {
                 std::lock_guard lock(username_cache_mutex_);
                 username_cache_[sid_key] = result;
             }
@@ -718,10 +720,20 @@ std::vector<LibraryInfo> WindowsProcessDataProvider::get_libraries(const int pid
                            static_cast<DWORD>(pid));
     if (!h) return libraries;
 
-    HMODULE modules[1024];
+    // Size the module array from what the process actually has: a fixed cap
+    // would silently drop modules from a process that loads more than it.
+    std::vector<HMODULE> modules(1024);
     DWORD needed = 0;
-    if (EnumProcessModulesEx(h, modules, sizeof(modules), &needed, LIST_MODULES_ALL)) {
-        const size_t count = std::min<size_t>(needed / sizeof(HMODULE), 1024);
+    if (EnumProcessModulesEx(h, modules.data(),
+                             static_cast<DWORD>(modules.size() * sizeof(HMODULE)),
+                             &needed, LIST_MODULES_ALL)) {
+        if (needed > modules.size() * sizeof(HMODULE)) {
+            modules.resize(needed / sizeof(HMODULE));
+            EnumProcessModulesEx(h, modules.data(),
+                                 static_cast<DWORD>(modules.size() * sizeof(HMODULE)),
+                                 &needed, LIST_MODULES_ALL);
+        }
+        const size_t count = std::min<size_t>(needed / sizeof(HMODULE), modules.size());
         for (size_t i = 0; i < count; i++) {
             wchar_t path[MAX_PATH];
             if (!GetModuleFileNameExW(h, modules[i], path, MAX_PATH)) continue;
