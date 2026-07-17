@@ -1,14 +1,23 @@
 #include "name_resolver.hpp"
 #include <fstream>
 #include <sstream>
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#endif
 
 namespace pex {
 
 NameResolver::NameResolver() {
+#ifdef _WIN32
+    WSADATA wsa_data;
+    WSAStartup(MAKEWORD(2, 2), &wsa_data);  // Required before getnameinfo/inet_pton
+#endif
     load_services();
 }
 
@@ -43,7 +52,11 @@ void NameResolver::set_on_resolved(std::function<void()> callback) {
 }
 
 void NameResolver::load_services() {
+#ifdef _WIN32
+    std::ifstream file("C:\\Windows\\System32\\drivers\\etc\\services");
+#else
     std::ifstream file("/etc/services");
+#endif
     if (!file) return;
 
     std::string line;

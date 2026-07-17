@@ -6,15 +6,27 @@
 #include <cstring>
 #include <chrono>
 #include <thread>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 namespace pex {
 
+#ifndef _WIN32
 // Signal handler for terminal resize - use sig_atomic_t for signal safety
+// (Windows/PDCurses delivers resizes as KEY_RESIZE through getch instead)
 static volatile sig_atomic_t g_resize_requested = 0;
 
 static void handle_resize([[maybe_unused]] int sig) {
     g_resize_requested = 1;
 }
+#endif
 
 TuiApp::TuiApp(DataStore* data_store,
                ISystemDataProvider* system_provider,
@@ -59,16 +71,38 @@ void TuiApp::run() {
     timeout(50);  // Blocking input with 50 ms timeout (paces the main loop)
     mouseinterval(200);  // Double-click timeout in milliseconds
 
-    // Enable mouse support (button presses and scroll wheel, not movement tracking)
-    mousemask(ALL_MOUSE_EVENTS, nullptr);
-    printf("\033[?1000h");
-    fflush(stdout);
+    // Enable mouse support: only the button/wheel events we act on, never
+    // movement reporting (would flood the input queue).
+    mmask_t wanted = BUTTON1_PRESSED | BUTTON1_RELEASED | BUTTON1_CLICKED |
+                     BUTTON1_DOUBLE_CLICKED | BUTTON4_PRESSED;
+#ifdef BUTTON5_PRESSED
+    wanted |= BUTTON5_PRESSED;
+#endif
+    mousemask(wanted, nullptr);
+
+#ifdef _WIN32
+    // Disable console QuickEdit mode: with it on (the Windows default), a
+    // stray click/drag puts the console into text-selection mode, which
+    // FREEZES the application until Esc/Enter. Keep mouse + window input.
+    if (HANDLE hin = GetStdHandle(STD_INPUT_HANDLE); hin != INVALID_HANDLE_VALUE) {
+        DWORD mode = 0;
+        if (GetConsoleMode(hin, &mode)) {
+            mode &= ~ENABLE_QUICK_EDIT_MODE;
+            mode |= ENABLE_EXTENDED_FLAGS | ENABLE_MOUSE_INPUT | ENABLE_WINDOW_INPUT;
+            SetConsoleMode(hin, mode);
+        }
+    }
+#endif
 
     // Initialize colors
     init_colors();
 
     // Set terminal title (like GUI version: "PEX: uname-info")
     const std::string title = "PEX: " + system_provider_->get_system_info_string();
+#ifdef _WIN32
+    SetConsoleTitleA(title.c_str());
+#else
+    printf("\033[?1000h");  // xterm mouse tracking (ncurses path)
     printf("\033]0;%s\007", title.c_str());
     fflush(stdout);
 
@@ -78,6 +112,7 @@ void TuiApp::run() {
     sigemptyset(&sa_resize.sa_mask);
     sa_resize.sa_flags = SA_RESTART;
     sigaction(SIGWINCH, &sa_resize, nullptr);
+#endif
 
     // Clear and refresh stdscr first to initialize the screen properly
     clear();
@@ -100,9 +135,11 @@ void TuiApp::run() {
 
     if (!current_data_ || current_data_->process_count == 0) {
         // Restore terminal state before exiting
+#ifndef _WIN32
         printf("\033[?1000l");  // Disable mouse tracking
         printf("\033]0;\007");   // Reset terminal title
         fflush(stdout);
+#endif
         endwin();
         data_store_->stop();
         name_resolver_.stop();
@@ -119,7 +156,8 @@ void TuiApp::run() {
     bool needs_render = true;  // Initial paint
 
     while (running_) {
-        // Handle terminal resize
+#ifndef _WIN32
+        // Handle terminal resize (SIGWINCH path)
         if (g_resize_requested) {
             g_resize_requested = 0;
             endwin();
@@ -127,11 +165,29 @@ void TuiApp::run() {
             resize_windows();
             needs_render = true;
         }
+#endif
 
-        // Handle input (blocks up to 50 ms, which paces the loop)
-        if (const int ch = getch(); ch != ERR) {
-            handle_input(ch);
-            needs_render = true;
+        // Read input: getch() blocks up to 50 ms (idle pacing). If a key
+        // arrives, DRAIN the whole pending backlog with a non-blocking read
+        // before rendering once - otherwise, when events (e.g. mouse) arrive
+        // faster than a full-screen repaint completes, the console input
+        // queue grows without bound and keypresses lag then appear dead.
+        if (int ch = getch(); ch != ERR) {
+            timeout(0);  // non-blocking for the drain
+            int drained = 0;
+            do {
+                if (ch == KEY_RESIZE) {
+                    resize_term(0, 0);
+                    resize_windows();
+                    needs_render = true;
+                } else if (handle_input(ch)) {
+                    // Only repaint for events that changed something. Pure
+                    // mouse motion returns false, so moving the mouse over the
+                    // window drains cheaply instead of spinning repaints.
+                    needs_render = true;
+                }
+            } while (++drained < 512 && (ch = getch()) != ERR);
+            timeout(50);  // restore idle-pacing block
         }
 
         // Update data periodically
@@ -176,15 +232,19 @@ void TuiApp::run() {
     name_resolver_.stop();
     cleanup_windows();
 
+#ifndef _WIN32
     // Disable mouse tracking
     printf("\033[?1000l");
     fflush(stdout);
+#endif
 
     endwin();
 
+#ifndef _WIN32
     // Reset terminal title
     printf("\033]0;\007");
     fflush(stdout);
+#endif
 }
 
 void TuiApp::render() {
@@ -212,13 +272,16 @@ void TuiApp::render() {
     render_details_panel();
     render_status_bar();
 
-    // Refresh all windows
-    if (system_win_) wrefresh(system_win_);
-    wrefresh(process_win_);
-    wrefresh(details_win_);
-    wrefresh(status_win_);
+    // Stage all windows into the virtual screen; the single doupdate() below
+    // pushes one batched diff to the terminal. Calling wrefresh() per window
+    // did one physical update each - 4-6 full transfers per frame, which is
+    // very visible on large terminals (especially on Windows consoles).
+    if (system_win_) wnoutrefresh(system_win_);
+    wnoutrefresh(process_win_);
+    wnoutrefresh(details_win_);
+    wnoutrefresh(status_win_);
 
-    // Render overlays AFTER main window refresh
+    // Overlays stage on top of the main windows (they also use wnoutrefresh)
     if (view_model_.kill_dialog.is_visible) {
         render_kill_dialog();
     }
@@ -238,6 +301,9 @@ void TuiApp::render() {
     if (find_results_visible_) {
         render_find_results_overlay();
     }
+
+    // Single physical screen update for everything staged above
+    doupdate();
 }
 
 } // namespace pex

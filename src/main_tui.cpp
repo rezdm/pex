@@ -8,12 +8,14 @@
 #include <memory>
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
+#ifndef _WIN32
     // Ignore SIGCHLD to avoid zombies when killing processes
     struct sigaction sa{};
     sa.sa_handler = SIG_IGN;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_NOCLDWAIT;
     sigaction(SIGCHLD, &sa, nullptr);
+#endif
 
     try {
         // Create platform-specific providers (owned here in main).
@@ -40,13 +42,14 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
         return 0;
     } catch (const std::exception& e) {
         // Make sure we restore terminal state before printing error
-        // Only call endwin() if ncurses was initialized
+        // Only call endwin() if curses was initialized
         if (stdscr != nullptr) {
-            // Disable mouse tracking
+#ifndef _WIN32
+            // Disable mouse tracking + reset terminal title
             std::printf("\033[?1000l");
-            // Reset terminal title
             std::printf("\033]0;\007");
             std::fflush(stdout);
+#endif
             endwin();
         }
         std::cerr << "Error: " << e.what() << std::endl;

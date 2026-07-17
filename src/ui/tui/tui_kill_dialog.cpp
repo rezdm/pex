@@ -78,7 +78,7 @@ void TuiApp::render_kill_dialog() const {
     }
 
     // Refresh dialog
-    wrefresh(dialog_win);
+    wnoutrefresh(dialog_win);
 
     // Delete temporary window (but leave content on screen until next render)
     delwin(dialog_win);
@@ -171,7 +171,7 @@ void TuiApp::render_help_overlay() {
     mvwprintw(help_win, help_height - 2, (help_width - 20) / 2, " Press any key to close ");
     wattroff(help_win, COLOR_PAIR(COLOR_PAIR_DIALOG_BUTTON));
 
-    wrefresh(help_win);
+    wnoutrefresh(help_win);
     delwin(help_win);
 }
 
@@ -231,7 +231,7 @@ void TuiApp::render_search_bar() const {
     curs_set(1);
     wmove(search_win, 1, 3 + search_input_.length());
 
-    wrefresh(search_win);
+    wnoutrefresh(search_win);
     delwin(search_win);
 }
 

@@ -10,6 +10,13 @@ namespace fs = std::filesystem;
 namespace pex {
 
 Settings::Settings() {
+#ifdef _WIN32
+    if (const char* appdata = std::getenv("APPDATA"); appdata && *appdata) {
+        path_ = std::string(appdata) + "\\pex\\pex.conf";
+    } else {
+        path_ = "pex.conf";  // Last resort: current directory
+    }
+#else
     if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg) {
         path_ = std::string(xdg) + "/pex/pex.conf";
     } else if (const char* home = std::getenv("HOME"); home && *home) {
@@ -17,6 +24,7 @@ Settings::Settings() {
     } else {
         path_ = "pex.conf";  // Last resort: current directory
     }
+#endif
 }
 
 void Settings::load() {

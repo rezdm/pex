@@ -183,7 +183,11 @@ std::vector<float> HistoryStore::get_metric_series(const int pid, const HistoryM
 static std::string format_wall_time(const std::chrono::system_clock::time_point tp) {
     const auto time = std::chrono::system_clock::to_time_t(tp);
     std::tm tm_val{};
+#ifdef _WIN32
+    localtime_s(&tm_val, &time);
+#else
     localtime_r(&time, &tm_val);
+#endif
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         tp.time_since_epoch()).count() % 1000;
     return std::format("{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}",

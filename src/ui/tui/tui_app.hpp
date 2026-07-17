@@ -15,7 +15,7 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <ncurses.h>
+#include "curses_compat.hpp"
 
 namespace pex {
 
@@ -73,13 +73,15 @@ private:
     void render_libraries_tab() const;
 
     // Input handling
-    void handle_input(int ch);
+    // Returns whether the event warrants a redraw (false for no-op mouse
+    // motion, so moving the mouse over the window doesn't spin repaints).
+    bool handle_input(int ch);
     void handle_process_list_input(int ch);
     void handle_details_panel_input(int ch);
     void handle_search_input(int ch);
     void handle_kill_dialog_input(int ch);
     void handle_help_input(int ch);
-    void handle_mouse_event();
+    bool handle_mouse_event();  // Returns true if it acted (wheel/click); false for motion
 
     // Navigation helpers
     [[nodiscard]] std::vector<ProcessNode*> get_visible_items() const;

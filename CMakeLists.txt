@@ -21,11 +21,18 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     set(PEX_PLATFORM_DEFAULT "freebsd")
 elseif(CMAKE_SYSTEM_NAME STREQUAL "SunOS")
     set(PEX_PLATFORM_DEFAULT "solaris")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(PEX_PLATFORM_DEFAULT "windows")
 else()
-    message(FATAL_ERROR "Unsupported platform: ${CMAKE_SYSTEM_NAME}. Supported: Linux, FreeBSD, SunOS (Solaris).")
+    message(FATAL_ERROR "Unsupported platform: ${CMAKE_SYSTEM_NAME}. Supported: Linux, FreeBSD, SunOS (Solaris), Windows.")
 endif()
-set(PEX_PLATFORM "${PEX_PLATFORM_DEFAULT}" CACHE STRING "Platform backend (linux, freebsd, solaris)")
-set_property(CACHE PEX_PLATFORM PROPERTY STRINGS linux freebsd solaris)
+set(PEX_PLATFORM "${PEX_PLATFORM_DEFAULT}" CACHE STRING "Platform backend (linux, freebsd, solaris, windows)")
+set_property(CACHE PEX_PLATFORM PROPERTY STRINGS linux freebsd solaris windows)
+
+# Windows is TUI-only (issue #43): Process Explorer already owns the GUI niche
+if(PEX_PLATFORM STREQUAL "windows")
+    set(BUILD_GUI OFF CACHE BOOL "" FORCE)
+endif()
 
 message(STATUS "PEX platform: ${PEX_PLATFORM}")
 
@@ -119,19 +126,32 @@ endif()
 # =============================================================================
 # pex_core - Core library (model + services)
 # =============================================================================
-add_library(pex_core STATIC
+set(PEX_CORE_SOURCES
     src/core/services/data_store.cpp
     src/core/services/history_store.cpp
     src/core/services/name_resolver.cpp
     src/core/services/settings.cpp
-    src/core/services/single_instance.cpp
     src/core/services/snapshot_diff.cpp
     src/core/model/system_info.cpp
 )
+if(NOT PEX_PLATFORM STREQUAL "windows")
+    # SingleInstance (unix domain sockets) is used by the GUI only
+    list(APPEND PEX_CORE_SOURCES src/core/services/single_instance.cpp)
+endif()
+add_library(pex_core STATIC ${PEX_CORE_SOURCES})
 target_include_directories(pex_core PUBLIC src)
-target_compile_options(pex_core PUBLIC -Wall -Wextra -Wpedantic)
+if(MSVC)
+    # PUBLIC: propagates to everything that links pex_core
+    target_compile_options(pex_core PUBLIC /W4 /utf-8)
+    target_compile_definitions(pex_core PUBLIC _CRT_SECURE_NO_WARNINGS NOMINMAX)
+else()
+    target_compile_options(pex_core PUBLIC -Wall -Wextra -Wpedantic)
+endif()
 find_package(Threads REQUIRED)
 target_link_libraries(pex_core PUBLIC Threads::Threads)
+if(PEX_PLATFORM STREQUAL "windows")
+    target_link_libraries(pex_core PUBLIC ws2_32)  # NameResolver uses Winsock
+endif()
 
 # =============================================================================
 # pex_platform - Platform-specific library
@@ -179,12 +199,24 @@ elseif(PEX_PLATFORM STREQUAL "solaris")
         # GLFW needs rt on Solaris
         target_link_libraries(glfw PUBLIC rt)
     endif()
+elseif(PEX_PLATFORM STREQUAL "windows")
+    set(PEX_PLATFORM_SOURCES
+        src/platform/windows/windows_process_data_provider.cpp
+        src/platform/windows/windows_system_data_provider.cpp
+        src/platform/windows/windows_process_killer.cpp
+        src/platform/windows/platform_factory_windows.cpp
+    )
+    set(PEX_PLATFORM_DEFINE "PEX_PLATFORM_WINDOWS")
+    set(PEX_PLATFORM_LIBS psapi iphlpapi ws2_32 ntdll advapi32)
 else()
-    message(FATAL_ERROR "Unknown PEX_PLATFORM: ${PEX_PLATFORM}. Use 'linux', 'freebsd', or 'solaris'.")
+    message(FATAL_ERROR "Unknown PEX_PLATFORM: ${PEX_PLATFORM}. Use 'linux', 'freebsd', 'solaris', or 'windows'.")
 endif()
 
 add_library(pex_platform STATIC ${PEX_PLATFORM_SOURCES})
 target_include_directories(pex_platform PUBLIC src)
+if(PEX_PLATFORM STREQUAL "windows")
+    target_compile_definitions(pex_platform PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
 target_compile_definitions(pex_core PUBLIC ${PEX_PLATFORM_DEFINE})
 target_link_libraries(pex_platform PUBLIC pex_core)
 if(PEX_PLATFORM_LIBS)
@@ -234,7 +266,35 @@ option(BUILD_NCURSES "Build ncurses from source if not found" OFF)
 
 # Allow manual override of curses paths, otherwise use find_package
 set(NCURSES_FOUND FALSE)
-if(CURSES_INCLUDE_DIR AND CURSES_LIBRARY)
+if(PEX_PLATFORM STREQUAL "windows" AND BUILD_TUI)
+    # Windows: PDCursesMod (curses API, WinCon backend) built from source.
+    # SOURCE_SUBDIR points at a non-existent dir so MakeAvailable only
+    # populates the sources without running PDCursesMod's own CMake.
+    enable_language(C)
+    include(FetchContent)
+    FetchContent_Declare(
+        pdcursesmod
+        GIT_REPOSITORY https://github.com/Bill-Gray/PDCursesMod.git
+        GIT_TAG v4.5.4
+        SOURCE_SUBDIR cmake-not-used
+    )
+    FetchContent_MakeAvailable(pdcursesmod)
+
+    file(GLOB PDCURSES_SOURCES
+        ${pdcursesmod_SOURCE_DIR}/pdcurses/*.c
+        ${pdcursesmod_SOURCE_DIR}/wincon/*.c
+    )
+    add_library(pdcurses STATIC ${PDCURSES_SOURCES})
+    target_include_directories(pdcurses PUBLIC ${pdcursesmod_SOURCE_DIR})
+    # Wide-char + UTF-8 output so ACS box-drawing renders in Windows Terminal
+    target_compile_definitions(pdcurses PUBLIC PDC_WIDE PDC_FORCE_UTF8)
+    target_link_libraries(pdcurses PUBLIC winmm)
+
+    set(CURSES_FOUND TRUE)
+    set(NCURSES_FOUND TRUE)
+    set(CURSES_INCLUDE_DIR "")     # Comes via the pdcurses target
+    set(CURSES_LIBRARIES pdcurses)
+elseif(CURSES_INCLUDE_DIR AND CURSES_LIBRARY)
     message(STATUS "Using manually specified curses: ${CURSES_INCLUDE_DIR}, ${CURSES_LIBRARY}")
     set(CURSES_FOUND TRUE)
     set(NCURSES_FOUND TRUE)

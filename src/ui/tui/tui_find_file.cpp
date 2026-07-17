@@ -22,10 +22,18 @@ void TuiApp::export_history() {
         return;
     }
 
+#ifdef _WIN32
+    const char* home = std::getenv("USERPROFILE");
+#else
     const char* home = std::getenv("HOME");
+#endif
     const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     std::tm tm_val{};
+#ifdef _WIN32
+    localtime_s(&tm_val, &now);
+#else
     localtime_r(&now, &tm_val);
+#endif
     char stamp[32];
     std::strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", &tm_val);
 
@@ -254,7 +262,7 @@ void TuiApp::render_find_file_bar() const {
     curs_set(1);
     wmove(win, 1, 4 + static_cast<int>(find_file_input_.length()));
 
-    wrefresh(win);
+    wnoutrefresh(win);
     delwin(win);
 }
 
@@ -317,7 +325,7 @@ void TuiApp::render_find_results_overlay() {
               find_running_.load() ? "Cancel scan" : "Close");
     wattroff(win, COLOR_PAIR(COLOR_PAIR_DIALOG_BUTTON));
 
-    wrefresh(win);
+    wnoutrefresh(win);
     delwin(win);
 }
 
