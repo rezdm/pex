@@ -133,7 +133,6 @@ std::vector<ProcessInfo> FreeBSDProcessDataProvider::get_all_processes(int64_t t
         info.state_char = map_state(kp[i].ki_stat);
         info.is_kernel_thread = (kp[i].ki_flag & P_KPROC) != 0;
         info.user_name = get_username(kp[i].ki_uid);
-        info.executable_path = get_executable_path(info.pid);
         info.priority = kp[i].ki_pri.pri_level;
         info.thread_count = kp[i].ki_numthreads;
 
@@ -154,10 +153,18 @@ std::vector<ProcessInfo> FreeBSDProcessDataProvider::get_all_processes(int64_t t
         auto start_sec = std::chrono::seconds(kp[i].ki_start.tv_sec);
         info.start_time = std::chrono::system_clock::time_point(start_sec);
 
+        info.executable_path = get_executable_path(info.pid);
+
         processes.push_back(std::move(info));
     }
 
-    // Fetch command lines in bulk using a single procstat handle
+    // Fetch command lines every tick from a single procstat handle. This is
+    // NOT cached: a process can rewrite its argv at runtime via
+    // setproctitle() (sshd/postgres/sendmail do so constantly) with its comm
+    // and start time unchanged, so any (pid, start, comm)-keyed cache would
+    // freeze the command line at its first-observed value for the whole
+    // process lifetime. The argv fetch is the work that must run each tick
+    // for the column to stay live.
     struct procstat* ps = procstat_open_sysctl();
     if (ps) {
         for (auto& info : processes) {

@@ -60,6 +60,7 @@ void ImGuiApp::run() {
     view_model_.process_list.is_tree_view = settings_.get_bool("gui.tree_view", true);
     view_model_.process_list.show_kernel_threads = settings_.get_bool("show_kernel_threads", true);
     view_model_.system_panel.is_visible = settings_.get_bool("gui.system_panel", true);
+    diff_highlight_enabled_ = settings_.get_bool("diff_highlight", true);
 
     // Initialize GLFW
     glfwSetErrorCallback([](int code, const char* desc) {
@@ -80,8 +81,14 @@ void ImGuiApp::run() {
     // Build window title with platform info
     const std::string window_title = "PEX: " + system_provider_->get_system_info_string();
 
-    // Create window
-    window_ = glfwCreateWindow(win_w, win_h, window_title.c_str(), nullptr, nullptr);
+    // Create window (published under the mutex: the single-instance listener
+    // thread may already be calling post_empty_event_debounced via
+    // request_focus)
+    GLFWwindow* window = glfwCreateWindow(win_w, win_h, window_title.c_str(), nullptr, nullptr);
+    {
+        std::lock_guard lock(event_debounce_mutex_);
+        window_ = window;
+    }
     if (!window_) {
         glfwTerminate();
         throw std::runtime_error("Failed to create GLFW window");
@@ -146,6 +153,13 @@ void ImGuiApp::run() {
         const auto new_data = data_store_->get_snapshot();
         const bool data_changed = !current_data_ ||
             (new_data && new_data->timestamp != current_data_->timestamp);
+        if (data_changed) {
+            // Diff against the outgoing snapshot (issue #61); highlights are
+            // then valid until the next swap = one refresh interval
+            snapshot_diff_ = diff_highlight_enabled_
+                ? compute_snapshot_diff(current_data_, new_data.get())
+                : SnapshotDiff{};
+        }
         current_data_ = new_data;
 
         // Apply UI state (collapsed nodes) to the data
@@ -158,6 +172,9 @@ void ImGuiApp::run() {
         // Refresh details when data updates
         if (data_changed) {
             refresh_selected_details();
+            // Cached for render(): fetching copies a vector under a mutex,
+            // which is wasted work on frames without new data
+            recent_errors_cache_ = data_store_->get_recent_errors();
         }
 
         // Start the Dear ImGui frame
@@ -191,6 +208,7 @@ void ImGuiApp::run() {
         settings_.set_bool("gui.tree_view", view_model_.process_list.is_tree_view);
         settings_.set_bool("show_kernel_threads", view_model_.process_list.show_kernel_threads);
         settings_.set_bool("gui.system_panel", view_model_.system_panel.is_visible);
+        settings_.set_bool("diff_highlight", diff_highlight_enabled_);
         settings_.save();
     }
 
@@ -205,6 +223,13 @@ void ImGuiApp::run() {
     ImGui::DestroyContext();
 
     glfwDestroyWindow(window_);
+    {
+        // The single-instance listener may still call request_focus() until
+        // main() detaches its callback; null under the same mutex that
+        // post_empty_event_debounced() checks it under.
+        std::lock_guard lock(event_debounce_mutex_);
+        window_ = nullptr;
+    }
     glfwTerminate();
 }
 
@@ -235,9 +260,9 @@ void ImGuiApp::export_history() {
 }
 
 void ImGuiApp::post_empty_event_debounced() {
+    std::lock_guard lock(event_debounce_mutex_);
     if (!window_) return;
 
-    std::lock_guard lock(event_debounce_mutex_);
     const auto now = std::chrono::steady_clock::now();
     if (now - last_event_post_time_ >= kEventDebounceInterval) {
         last_event_post_time_ = now;
@@ -303,9 +328,9 @@ void ImGuiApp::render() {
         ImGui::TextWrapped("%s", status_message_.c_str());
         ImGui::PopStyleColor();
     }
-    if (const auto errors = data_store_->get_recent_errors(); !errors.empty()) {
+    if (!recent_errors_cache_.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.2f, 1.0f));
-        ImGui::Text("[!] %s", errors.back().message.c_str());
+        ImGui::Text("[!] %s", recent_errors_cache_.back().message.c_str());
         ImGui::PopStyleColor();
         ImGui::SameLine();
         ImGui::TextDisabled("|");

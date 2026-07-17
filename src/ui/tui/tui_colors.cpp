@@ -52,6 +52,10 @@ void init_colors() {
 
     // Tree lines
     init_pair(COLOR_PAIR_TREE_LINE, COLOR_BLUE, -1);
+
+    // Difference highlighting (issue #61)
+    init_pair(COLOR_PAIR_ROW_NEW, COLOR_BLACK, COLOR_GREEN);
+    init_pair(COLOR_PAIR_ROW_EXITED, COLOR_WHITE, COLOR_RED);
 }
 
 int get_state_color(char state) {

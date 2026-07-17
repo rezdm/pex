@@ -209,6 +209,9 @@ void TuiApp::request_kill_process(int pid, const std::string& name, bool is_tree
     view_model_.kill_dialog.is_visible = true;
     view_model_.kill_dialog.target_pid = pid;
     view_model_.kill_dialog.target_name = name;
+    // Capture the start-time token now: the dialog can stay open indefinitely
+    // and the killer refuses to signal a recycled PID.
+    view_model_.kill_dialog.target_token = killer_->process_start_token(pid);
     view_model_.kill_dialog.is_tree_kill = is_tree;
     view_model_.kill_dialog.error_message.clear();
     view_model_.kill_dialog.show_force_option = false;
@@ -219,11 +222,20 @@ void TuiApp::request_kill_process(int pid, const std::string& name, bool is_tree
 void TuiApp::execute_kill(bool force) {
     auto& kd = view_model_.kill_dialog;
 
+    // No start-time token means the process was already gone (or unreadable)
+    // when the dialog opened; signaling now could hit a recycled PID
+    // unverified, so refuse rather than let the killer skip the check.
+    if (!kd.target_token) {
+        kd.error_message = "Process no longer exists (PID may be reused)";
+        kd.show_force_option = false;
+        return;
+    }
+
     KillResult result;
     if (kd.is_tree_kill) {
-        result = killer_->kill_process_tree(kd.target_pid, force);
+        result = killer_->kill_process_tree(kd.target_pid, force, kd.target_token);
     } else {
-        result = killer_->kill_process(kd.target_pid, force);
+        result = killer_->kill_process(kd.target_pid, force, kd.target_token);
     }
 
     if (result.success) {

@@ -3,12 +3,14 @@
 pex works without any special privileges: you always get the full process tree
 with CPU and memory for every process. Elevation is only needed to see the
 *details* of **other users' processes** (open files, network, environment,
-memory maps, I/O) and to kill them. Without it those panels just show
-"access denied" / stay empty for foreign processes.
+memory maps, I/O), to kill them, and — on Linux — to subscribe to the kernel
+process-event feed behind the "Churn" line. Without it those panels just show
+"access denied" / stay empty for foreign processes, and pex collects data by
+polling only.
 
 | OS | Mechanism | Scope of elevation | GUI-friendly |
 |---|---|---|---|
-| Linux | file capabilities (`setcap`) | 3 capabilities, this binary only | yes — works on Wayland, unlike sudo |
+| Linux | file capabilities (`setcap`) | 4 capabilities, this binary only | yes — works on Wayland, unlike sudo |
 | Solaris | RBAC profile + `pfexec` | 3 privileges, this binary + assigned users only | yes |
 | FreeBSD | `sudo` / `doas` | full root for the session | X11 only, see caveat |
 
@@ -28,6 +30,11 @@ Capabilities used:
 * `cap_dac_read_search` — bypass file-permission checks on procfs entries
 * `cap_kill` — send signals to other users' processes. **Optional**: drop it
   from the commands below if you only want to observe, never kill.
+* `cap_net_admin` — subscribe to the kernel process-event feed (proc
+  connector), which powers the "Churn" line in the system panel and counts
+  short-lived processes that polling never sees. **Optional**: drop it from
+  the commands below if you don't want the event feed; pex then runs
+  poll-only.
 
 > Why not `sudo pex`? On GNOME/Wayland root GUI clients are blocked or
 > fragile, and sudo would write root-owned files into your `~/.config/pex`
@@ -37,13 +44,13 @@ Capabilities used:
 
 1. Set the capabilities:
    ```bash
-   sudo setcap 'cap_sys_ptrace,cap_dac_read_search,cap_kill+ep' /opt/pex/pex
-   sudo setcap 'cap_sys_ptrace,cap_dac_read_search,cap_kill+ep' /opt/pex/pexc   # if you use the TUI
+   sudo setcap 'cap_sys_ptrace,cap_dac_read_search,cap_kill,cap_net_admin+ep' /opt/pex/pex
+   sudo setcap 'cap_sys_ptrace,cap_dac_read_search,cap_kill,cap_net_admin+ep' /opt/pex/pexc   # if you use the TUI
    ```
 2. Verify:
    ```bash
    getcap /opt/pex/pex
-   # /opt/pex/pex cap_dac_read_search,cap_kill,cap_sys_ptrace=ep
+   # /opt/pex/pex cap_dac_read_search,cap_kill,cap_net_admin,cap_sys_ptrace=ep
    ```
 3. Run `pex` normally (no sudo). Select a root-owned process — the Files /
    Network / Environment tabs should now be populated.
@@ -69,7 +76,7 @@ Note: `setcap` must be re-applied after every rebuild/reinstall of the binary
    ```
 4. Set the capabilities (same as Option 1):
    ```bash
-   sudo setcap 'cap_sys_ptrace,cap_dac_read_search,cap_kill+ep' /opt/pex/pex
+   sudo setcap 'cap_sys_ptrace,cap_dac_read_search,cap_kill,cap_net_admin+ep' /opt/pex/pex
    ```
 5. Verify: `pex` runs and shows foreign-process details for you; another
    (non-member) user gets "Permission denied" when executing it.
@@ -204,7 +211,7 @@ is then held by code that was never written to be privilege-safe:
 * **Mesa/GL drivers + GLFW + ImGui** (GUI) — a huge attack surface, and the
   same root-on-Wayland problems as sudo anyway.
 
-A compromise of a `setcap` pex yields three capabilities; a compromise of a
+A compromise of a `setcap` pex yields four capabilities; a compromise of a
 setuid pex yields the machine. On Linux and Solaris setuid buys *zero*
 functionality over the recipes above — only blast radius. The only place it
 is even arguable is FreeBSD (no finer mechanism exists), and there:

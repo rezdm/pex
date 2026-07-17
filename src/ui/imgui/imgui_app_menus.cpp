@@ -28,6 +28,14 @@ void ImGuiApp::render_menu_bar() {
                 history_view_visible_ = true;
             }
             ImGui::MenuItem("Show Kernel Threads", nullptr, &view_model_.process_list.show_kernel_threads);
+            if (ImGui::MenuItem("Difference Highlighting", nullptr, &diff_highlight_enabled_)) {
+                if (!diff_highlight_enabled_) {
+                    snapshot_diff_ = {};  // Drop current highlights immediately
+                }
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("New processes flash green, exited processes linger red\nfor one refresh interval (Process Explorer style)");
+            }
             ImGui::Separator();
             if (ImGui::MenuItem("Refresh Now", "F5")) {
                 details_force_refresh_ = true;

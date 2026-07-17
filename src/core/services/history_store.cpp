@@ -221,8 +221,15 @@ bool HistoryStore::export_csv(const std::string& base_path, std::string& error) 
             if (const auto it = process_names_.find(ps.pid); it != process_names_.end()) {
                 name = it->second;
             }
-            // CSV-quote the name (it may contain commas/quotes)
+            // CSV-quote the name (it may contain commas/quotes). Process
+            // names are attacker-controlled; neutralize leading formula
+            // characters so spreadsheets don't evaluate them (CSV injection).
             std::string quoted = "\"";
+            if (!name.empty() && (name[0] == '=' || name[0] == '+' ||
+                                  name[0] == '-' || name[0] == '@' ||
+                                  name[0] == '\t' || name[0] == '\r')) {
+                quoted += '\'';
+            }
             for (char ch : name) {
                 if (ch == '"') quoted += '"';
                 quoted += ch;

@@ -146,7 +146,9 @@ long WindowsSystemDataProvider::get_clock_ticks_per_second() const {
     return 10'000'000;  // FILETIME unit: 100 ns
 }
 
-uint64_t WindowsSystemDataProvider::get_boot_time_ticks() const {
+uint64_t WindowsSystemDataProvider::get_boot_time_seconds() const {
+    // Epoch seconds of boot: now minus uptime. (Value was already seconds;
+    // renamed to match the interface's unified units.)
     return static_cast<uint64_t>(std::time(nullptr)) - GetTickCount64() / 1000;
 }
 

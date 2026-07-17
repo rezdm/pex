@@ -11,8 +11,12 @@
 #include <unistd.h>
 #include <cstring>
 #include <sys/utsname.h>
+#include <algorithm>
 #include <cstdio>
 #include <ctime>
+#include <map>
+#include <utility>
+#include <vector>
 
 namespace pex {
 
@@ -72,28 +76,52 @@ std::vector<CpuTimes> SolarisSystemDataProvider::get_per_cpu_times() {
 }
 
 void SolarisSystemDataProvider::get_per_cpu_times(std::vector<CpuTimes>& out) {
-    int ncpu = get_processor_count();
-    out.clear();
-    out.resize(ncpu);
-
     ensure_kstat();
-    if (!kc_) return;
+    if (!kc_) {
+        out.assign(cpu_slot_instances_.empty()
+                       ? static_cast<size_t>(get_processor_count())
+                       : cpu_slot_instances_.size(),
+                   CpuTimes{});
+        return;
+    }
 
+    // Collect the counters present this tick, keyed by kstat instance id.
+    std::map<int, CpuTimes> by_instance;
     for (kstat_t* ksp = kc_->kc_chain; ksp != nullptr; ksp = ksp->ks_next) {
         if (strcmp(ksp->ks_module, "cpu_stat") != 0) continue;
-
-        int cpu_id = ksp->ks_instance;
-        if (cpu_id < 0 || cpu_id >= ncpu) continue;
+        if (ksp->ks_instance < 0) continue;
 
         if (kstat_read(kc_, ksp, nullptr) < 0) continue;
 
         cpu_stat_t* cs = reinterpret_cast<cpu_stat_t*>(ksp->ks_data);
         if (!cs) continue;
 
-        out[cpu_id].user = cs->cpu_sysinfo.cpu[CPU_USER];
-        out[cpu_id].system = cs->cpu_sysinfo.cpu[CPU_KERNEL];
-        out[cpu_id].idle = cs->cpu_sysinfo.cpu[CPU_IDLE];
-        out[cpu_id].iowait = cs->cpu_sysinfo.cpu[CPU_WAIT];
+        CpuTimes times;
+        times.user = cs->cpu_sysinfo.cpu[CPU_USER];
+        times.system = cs->cpu_sysinfo.cpu[CPU_KERNEL];
+        times.idle = cs->cpu_sysinfo.cpu[CPU_IDLE];
+        times.iowait = cs->cpu_sysinfo.cpu[CPU_WAIT];
+        by_instance.emplace(ksp->ks_instance, times);
+    }
+
+    // Assign new instances to fresh slots (sorted, appended — never reordered),
+    // so an instance keeps its slot for the life of this provider. The delta
+    // math in DataStore compares out[i] this tick to out[i] last tick, so the
+    // slot for a given CPU must not move even as other CPUs come and go.
+    for (const auto& [instance, times] : by_instance) {
+        if (std::find(cpu_slot_instances_.begin(), cpu_slot_instances_.end(), instance)
+            == cpu_slot_instances_.end()) {
+            cpu_slot_instances_.push_back(instance);
+        }
+    }
+
+    // Emit one entry per known slot; a CPU absent this tick (offlined) yields
+    // zeros in its slot rather than shifting every later CPU down.
+    out.assign(cpu_slot_instances_.size(), CpuTimes{});
+    for (size_t slot = 0; slot < cpu_slot_instances_.size(); ++slot) {
+        if (const auto it = by_instance.find(cpu_slot_instances_[slot]); it != by_instance.end()) {
+            out[slot] = it->second;
+        }
     }
 }
 
@@ -168,39 +196,10 @@ LoadAverage SolarisSystemDataProvider::get_load_average() {
         la.fifteen_min = loadavg[2];
     }
 
-    // Count processes by iterating /proc
-    int total = 0;
-    int running = 0;
-
-    if (DIR* dir = opendir("/proc")) {
-        dirent* entry;
-        while ((entry = readdir(dir)) != nullptr) {
-            // Skip non-numeric entries
-            if (entry->d_name[0] < '0' || entry->d_name[0] > '9') continue;
-
-            char psinfo_path[64];
-            snprintf(psinfo_path, sizeof(psinfo_path), "/proc/%s/psinfo", entry->d_name);
-
-            int fd = open(psinfo_path, O_RDONLY);
-            if (fd < 0) continue;
-
-            psinfo_t psinfo;
-            ssize_t n = read(fd, &psinfo, sizeof(psinfo));
-            close(fd);
-
-            if (n == sizeof(psinfo)) {
-                total++;
-                // Check if running (O = on processor, R = runnable)
-                if (psinfo.pr_lwp.pr_sname == 'O' || psinfo.pr_lwp.pr_sname == 'R') {
-                    running++;
-                }
-            }
-        }
-        closedir(dir);
-    }
-
-    la.total_tasks = total;
-    la.running_tasks = running;
+    // total_tasks/running_tasks stay 0: nothing displays them, and counting
+    // them here re-read every /proc/<pid>/psinfo on every tick — a full
+    // second scan on top of get_all_processes. The snapshot already carries
+    // process_count/running_count computed from the process list.
 
     return la;
 }
@@ -237,7 +236,7 @@ long SolarisSystemDataProvider::get_clock_ticks_per_second() const {
     return sysconf(_SC_CLK_TCK);
 }
 
-uint64_t SolarisSystemDataProvider::get_boot_time_ticks() const {
+uint64_t SolarisSystemDataProvider::get_boot_time_seconds() const {
     uint64_t boot_time = 0;
 
     ensure_kstat();
@@ -247,7 +246,7 @@ uint64_t SolarisSystemDataProvider::get_boot_time_ticks() const {
             kstat_named_t* kn = reinterpret_cast<kstat_named_t*>(
                 kstat_data_lookup(ksp, const_cast<char*>("boot_time")));
             if (kn) {
-                boot_time = kn->value.ul * sysconf(_SC_CLK_TCK);
+                boot_time = kn->value.ul;
             }
         }
     }

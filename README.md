@@ -1,5 +1,8 @@
 # PEX - Process Explorer for Linux
 
+[![CMake Multi-Platform Build](https://github.com/rezdm/pex/actions/workflows/cmake-multi-platform.yml/badge.svg)](https://github.com/rezdm/pex/actions/workflows/cmake-multi-platform.yml)
+[![CodeQL](https://github.com/rezdm/pex/actions/workflows/codeql.yml/badge.svg)](https://github.com/rezdm/pex/actions/workflows/codeql.yml)
+
 A Linux process explorer similar to Windows Process Explorer. Also runs on FreeBSD and Solaris.
 
 ## Why
@@ -17,6 +20,8 @@ It started as AI generated code for a one-off need, then turned out to be useful
   * Process popup charts show the recorded past the moment you open them
   * **History – Top Consumers** view (GUI): rank processes by average CPU / memory / I/O over the last 1 min / 5 min / all recorded, with trend sparklines — including processes that have already exited
   * Export everything to CSV for offline analysis
+* **Difference highlighting** (Process Explorer style) — new processes flash green, exited processes linger as red ghost rows for one refresh interval. In the GUI the ghost stays *in place* (under its parent in tree view, in sorted position in list view); the TUI pins ghosts to the bottom of the process panel so they are visible regardless of scroll. Toggle in the GUI View menu (`diff_highlight` setting)
+* **Process churn from the kernel** — with the event feed active (Linux proc connector, needs `cap_net_admin`, see [PRIVILEGES.md](PRIVILEGES.md); FreeBSD kqueue `EVFILT_PROC`), the system panel counts forks/execs/exits per tick, including short-lived processes that live and die between refreshes — the ones polling never sees
 * **Find open file / handle** — search all processes for an open file, socket, pipe or loaded library by path substring (like Process Explorer's "Find Handle or DLL")
 * **Kill** process or whole process tree (SIGTERM, escalate to SIGKILL), with PID-reuse guards
 * **Search** by process name or command line, including processes under collapsed tree nodes
@@ -78,7 +83,29 @@ Being able to compile (C++23, CMake >= 3.20). Tested to run on:
 * Solaris 11.4, GNOME/X11
 * Solaris, Debian, FreeBSD: terminal
 
+## Continuous integration
+
+Every push and pull request builds across a matrix that varies OS, compiler and
+C library (see [`.github/workflows/cmake-multi-platform.yml`](.github/workflows/cmake-multi-platform.yml)):
+
+| Job | Covers |
+|---|---|
+| Ubuntu (latest) | GCC / glibc — primary Linux build (GUI + TUI) |
+| Debian (latest) | GCC / glibc — Debian container |
+| Ubuntu (clang) | Clang instead of GCC — catches GCC-isms and a different warning set |
+| GCC 13 (C++23 floor) | pins the minimum toolchain (libstdc++ `std::format` landed in GCC 13.1) |
+| Sanitizers (ASan+UBSan) | core + unit tests under Address/UndefinedBehavior sanitizers |
+| Alpine (musl, TUI) | musl libc portability — TUI + core, GL stack skipped |
+| FreeBSD (latest) | native build + tests in a FreeBSD VM |
+| Solaris x86 (latest) | native build + tests in a Solaris VM |
+
+Every job builds the binaries and runs the unit tests; a separate CodeQL
+workflow runs static analysis. **GCC 13 is the minimum supported compiler.**
+
 ## Building
+
+The build type defaults to `Release`; pass `-DCMAKE_BUILD_TYPE=Debug` for a
+debug build.
 
 ### Linux (works)
 ```bash
@@ -152,9 +179,9 @@ mkdir build && cd build && cmake .. && make -j$(nproc)
 ```
 Copy pex executable and pex.png to a folder of choice and set capabilities:
 ```bash
-sudo setcap 'cap_sys_ptrace,cap_dac_read_search,cap_kill+ep' {path-to-executable-location}/pex
+sudo setcap 'cap_sys_ptrace,cap_dac_read_search,cap_kill,cap_net_admin+ep' {path-to-executable-location}/pex
 ```
-pex runs fine without this — you just won't see details (files, network, environment, ...) of other users' processes. For the full story per OS (Linux capabilities incl. a group-restricted variant, Solaris RBAC/pfexec, FreeBSD sudo/doas), see **[PRIVILEGES.md](PRIVILEGES.md)**.
+pex runs fine without this — you just won't see details (files, network, environment, ...) of other users' processes, and the churn line stays hidden. `cap_kill` (kill others' processes) and `cap_net_admin` (kernel process-event feed) are optional — drop them if unwanted. For the full story per OS (Linux capabilities incl. a group-restricted variant, Solaris RBAC/pfexec, FreeBSD sudo/doas), see **[PRIVILEGES.md](PRIVILEGES.md)**.
 
 May be create .desktop file for GNOME:
 ```

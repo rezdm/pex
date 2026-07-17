@@ -56,6 +56,7 @@ void TuiApp::run() {
     view_model_.process_list.show_kernel_threads = settings_.get_bool("show_kernel_threads", true);
     view_model_.system_panel.is_visible = settings_.get_bool("tui.system_panel", true);
     system_panel_expanded_ = settings_.get_bool("tui.system_panel_expanded", false);
+    diff_highlight_enabled_ = settings_.get_bool("diff_highlight", true);
 
     // Initialize ncurses
     if (!initscr()) {
@@ -191,6 +192,11 @@ void TuiApp::run() {
         if (now - last_update >= update_interval) {
             const auto new_data = data_store_->get_snapshot();
             if (new_data && (!current_data_ || new_data->timestamp != current_data_->timestamp)) {
+                // Diff against the outgoing snapshot (issue #61); highlights
+                // are then valid until the next swap = one refresh interval
+                snapshot_diff_ = diff_highlight_enabled_
+                    ? compute_snapshot_diff(current_data_, new_data.get())
+                    : SnapshotDiff{};
                 current_data_ = new_data;
                 view_model_.update_from_snapshot(current_data_);
                 needs_render = true;
@@ -214,6 +220,7 @@ void TuiApp::run() {
     settings_.set_bool("show_kernel_threads", view_model_.process_list.show_kernel_threads);
     settings_.set_bool("tui.system_panel", view_model_.system_panel.is_visible);
     settings_.set_bool("tui.system_panel_expanded", system_panel_expanded_);
+    settings_.set_bool("diff_highlight", diff_highlight_enabled_);
     settings_.save();
 
     // Cleanup

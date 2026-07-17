@@ -52,17 +52,32 @@ KillResult terminate_one(const DWORD pid) {
 
 } // namespace
 
-KillResult WindowsProcessKiller::kill_process(const int pid, bool /*force*/) {
+std::optional<uint64_t> WindowsProcessKiller::process_start_token(const int pid) {
+    if (pid <= 0) return std::nullopt;
+    const uint64_t t = creation_time_of(static_cast<DWORD>(pid));
+    if (t == 0) return std::nullopt;
+    return t;
+}
+
+KillResult WindowsProcessKiller::kill_process(const int pid, bool /*force*/,
+                                              std::optional<uint64_t> expected_token) {
     if (pid <= 4) {  // Idle/System are not killable
         return {false, true, "This system process cannot be terminated."};
+    }
+    if (auto refusal = check_kill_token(*this, pid, expected_token)) {
+        return *refusal;
     }
     return terminate_one(static_cast<DWORD>(pid));
 }
 
-KillResult WindowsProcessKiller::kill_process_tree(const int pid, bool /*force*/) {
+KillResult WindowsProcessKiller::kill_process_tree(const int pid, bool /*force*/,
+                                                   std::optional<uint64_t> expected_token) {
     KillResult result;
     if (pid <= 4) {
         return {false, true, "This system process cannot be terminated."};
+    }
+    if (auto refusal = check_kill_token(*this, pid, expected_token)) {
+        return *refusal;
     }
     const auto root = static_cast<DWORD>(pid);
 

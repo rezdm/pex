@@ -125,13 +125,37 @@ std::string LinuxProcessKiller::get_kill_error_message(int err) {
     }
 }
 
-KillResult LinuxProcessKiller::kill_process(int pid, bool force) {
+// A zombie answers kill(pid, 0) but is already dead — without this check the
+// UI reports "may still be running" for processes that terminated but have
+// not been reaped yet.
+static bool is_zombie(const int pid) {
+    std::ifstream file("/proc/" + std::to_string(pid) + "/stat");
+    if (!file) return false;
+    std::string content;
+    std::getline(file, content);
+    const size_t comm_end = content.rfind(')');
+    if (comm_end == std::string::npos || comm_end + 2 >= content.size()) return false;
+    return content[comm_end + 2] == 'Z';
+}
+
+std::optional<uint64_t> LinuxProcessKiller::process_start_token(const int pid) {
+    ProcMeta meta;
+    if (pid <= 0 || !read_proc_meta(pid, meta)) return std::nullopt;
+    return meta.starttime;
+}
+
+KillResult LinuxProcessKiller::kill_process(int pid, bool force,
+                                            std::optional<uint64_t> expected_token) {
     KillResult result;
 
     if (pid <= 0) {
         result.success = false;
         result.error_message = "Invalid PID";
         return result;
+    }
+
+    if (auto refusal = check_kill_token(*this, pid, expected_token)) {
+        return *refusal;
     }
 
     const int signal = force ? SIGKILL : SIGTERM;
@@ -149,7 +173,7 @@ KillResult LinuxProcessKiller::kill_process(int pid, bool force) {
     // Give process a moment to terminate, then check if still alive
     if (!force) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        if (kill(pid, 0) == 0) {
+        if (kill(pid, 0) == 0 && !is_zombie(pid)) {
             // Still running
             result.success = true;
             result.process_still_running = true;
@@ -163,13 +187,20 @@ KillResult LinuxProcessKiller::kill_process(int pid, bool force) {
     return result;
 }
 
-KillResult LinuxProcessKiller::kill_process_tree(int pid, bool force) {
+KillResult LinuxProcessKiller::kill_process_tree(int pid, bool force,
+                                                 std::optional<uint64_t> expected_token) {
     KillResult result;
 
     if (pid <= 0) {
         result.success = false;
         result.error_message = "Invalid PID";
         return result;
+    }
+
+    // The tree is rebuilt from *current* /proc state, so a recycled root PID
+    // would otherwise target an unrelated process's whole tree.
+    if (auto refusal = check_kill_token(*this, pid, expected_token)) {
+        return *refusal;
     }
 
     // Build fresh parent -> children map and capture start times from /proc
@@ -236,7 +267,7 @@ KillResult LinuxProcessKiller::kill_process_tree(int pid, bool force) {
             result.error_message = get_kill_error_message(errno);
             return result;
         }
-        if (check == 0) {
+        if (check == 0 && !is_zombie(pid)) {
             // Process still exists - if we used SIGTERM, offer force kill
             if (!force) {
                 result.success = true;

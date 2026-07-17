@@ -92,6 +92,13 @@ void TuiApp::render_system_panel() const {
             int uptime_x = load_x + static_cast<int>(load.str().length()) + 4;
             mvwprintw(system_win_, row, uptime_x, "%s", uptime.str().c_str());
 
+            // Per-tick process churn (kernel event feed, issue #60)
+            if (sp.events_active) {
+                const std::string churn = format_churn_compact(sp);
+                int churn_x = uptime_x + static_cast<int>(uptime.str().length()) + 4;
+                mvwprintw(system_win_, row, churn_x, "%s", churn.c_str());
+            }
+
             // Collapse hint
             wattron(system_win_, A_DIM);
             mvwprintw(system_win_, row, max_x - 14, "[c] collapse");
@@ -168,6 +175,17 @@ void TuiApp::render_system_panel() const {
         uptime << "Uptime: " << format_uptime(sp.uptime_info.uptime_seconds);
         int uptime_x = load_x + static_cast<int>(load.str().length()) + 4;
         mvwprintw(system_win_, row, uptime_x, "%s", uptime.str().c_str());
+
+        // Per-tick process churn (kernel event feed, issue #60)
+        if (sp.events_active) {
+            std::ostringstream churn;
+            churn << "Churn: +" << sp.fork_events << "/-" << sp.exit_events;
+            if (sp.short_lived_exits > 0) {
+                churn << " (" << sp.short_lived_exits << " unseen)";
+            }
+            int churn_x = uptime_x + static_cast<int>(uptime.str().length()) + 4;
+            mvwprintw(system_win_, row, churn_x, "%s", churn.str().c_str());
+        }
 
         // Expand hint
         wattron(system_win_, A_DIM);

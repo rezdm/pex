@@ -1,8 +1,11 @@
 #include "single_instance.hpp"
 
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 
@@ -45,12 +48,42 @@ std::string SingleInstance::get_socket_path() {
         }
         // XDG_RUNTIME_DIR path too long, fall through to /tmp
     }
-    // Fallback: use /tmp with UID (always fits)
-    return "/tmp/pex-" + std::to_string(getuid()) + ".sock";
+    // Fallback: a private 0700 per-user directory under /tmp. A bare
+    // /tmp/pex-<uid>.sock is squattable: the name is predictable, and a
+    // squatter accepting connections makes every new pex exit believing an
+    // instance is already running. The directory is verified (ours, a real
+    // directory, not group/world-accessible) before use; on any doubt we
+    // return empty and the caller skips single-instance handling entirely.
+    const std::string dir = "/tmp/pex-" + std::to_string(getuid());
+    if (mkdir(dir.c_str(), 0700) != 0 && errno != EEXIST) {
+        return {};
+    }
+    // Open the directory itself (O_NOFOLLOW rejects a symlink swapped in for
+    // it) and verify/repair through the fd, so an attacker on a non-sticky
+    // /tmp cannot race a symlink between the check and a path-based chmod and
+    // have us chmod an arbitrary target.
+    const int dfd = open(dir.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (dfd < 0) {
+        return {};  // Not a real directory we own, or a symlink was swapped in
+    }
+    struct stat st{};
+    if (fstat(dfd, &st) != 0 || !S_ISDIR(st.st_mode) || st.st_uid != getuid()) {
+        close(dfd);
+        return {};  // Foreign-owned: do not trust it
+    }
+    if ((st.st_mode & 0077) != 0 && fchmod(dfd, 0700) != 0) {
+        close(dfd);
+        return {};
+    }
+    close(dfd);
+    return dir + "/pex.sock";
 }
 
 bool SingleInstance::try_become_primary() {
     socket_path_ = get_socket_path();
+    if (socket_path_.empty()) {
+        return true;  // No trustworthy socket location: run as primary
+    }
 
     // Try to connect to existing instance
     const int client_fd = socket(AF_UNIX, SOCK_STREAM, 0);

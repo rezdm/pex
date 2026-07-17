@@ -6,6 +6,7 @@
 #include "../../core/services/data_store.hpp"
 #include "../../core/services/name_resolver.hpp"
 #include "../../core/services/settings.hpp"
+#include "../../core/services/snapshot_diff.hpp"
 #include "../common/viewmodels/app_view_model.hpp"
 #include <chrono>
 #include <memory>
@@ -131,6 +132,12 @@ private:
 
     // Current snapshot from data store
     std::shared_ptr<DataSnapshot> current_data_;
+
+    // Process Explorer-style difference highlighting (issue #61): recomputed
+    // on every snapshot swap, so new-process green and exited-process red
+    // ghost rows last exactly one refresh interval.
+    bool diff_highlight_enabled_ = true;
+    SnapshotDiff snapshot_diff_;
 
     // ViewModel (holds all UI state)
     AppViewModel view_model_;

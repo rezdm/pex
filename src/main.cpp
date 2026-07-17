@@ -33,10 +33,12 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
         const auto details_provider = pex::make_details_data_provider();
         const auto system_provider = pex::make_system_data_provider();
         const auto killer = pex::make_process_killer();
+        const auto event_source = pex::make_process_event_source();
 
         pex::HistoryStore history_store;
         pex::DataStore data_store(process_provider.get(), system_provider.get());
         data_store.set_history_store(&history_store);
+        data_store.set_event_source(event_source.get());
 
         pex::ImGuiApp app(&data_store, system_provider.get(), details_provider.get(), killer.get(),
                           &history_store);
@@ -46,6 +48,11 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
         });
 
         app.run();
+
+        // Detach the callback before 'app' is destroyed: 'instance' outlives
+        // this scope and its listener thread could otherwise invoke
+        // request_focus() on a dead object.
+        instance.set_raise_callback({});
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;

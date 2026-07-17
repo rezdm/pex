@@ -102,7 +102,7 @@ std::optional<ProcessInfo> ProcfsReader::get_process_info(int pid, int64_t total
     info.is_kernel_thread = (flags & kPfKthread) != 0;
 
     auto& sys = SystemInfo::instance();
-    uint64_t boot_time = sys.get_boot_time_ticks();
+    uint64_t boot_time = sys.get_boot_time_seconds();
     long ticks = sys.get_clock_ticks_per_second();
     if (ticks > 0) {
         uint64_t start_seconds = boot_time + (starttime / ticks);

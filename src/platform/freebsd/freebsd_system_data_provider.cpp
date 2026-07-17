@@ -11,11 +11,13 @@
 #include <vm/vm_param.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+#include <algorithm>
 #include <cstring>
 #include <ctime>
 #include <cerrno>
 #include <cstdlib>
 #include <cstdio>
+#include <vector>
 
 #if __has_include(<sys/swap.h>)
 #include <sys/swap.h>
@@ -56,14 +58,21 @@ std::vector<CpuTimes> FreeBSDSystemDataProvider::get_per_cpu_times() {
 
 void FreeBSDSystemDataProvider::get_per_cpu_times(std::vector<CpuTimes>& out) {
     int ncpu = get_processor_count();
-    out.resize(ncpu);
+    out.assign(ncpu, CpuTimes{});
 
-    // Get per-CPU times via kern.cp_times
-    size_t len = sizeof(long) * CPUSTATES * ncpu;
-    std::vector<long> cp_times(CPUSTATES * ncpu);
+    // kern.cp_times is sized by kern.smp.maxcpus, which can exceed hw.ncpu
+    // (offline CPU slots); a buffer sized by ncpu makes the sysctl fail with
+    // ENOMEM and every per-CPU bar silently read zero. Query the size first.
+    size_t len = 0;
+    if (sysctlbyname("kern.cp_times", nullptr, &len, nullptr, 0) != 0 || len == 0) {
+        return;
+    }
+    std::vector<long> cp_times(len / sizeof(long));
 
     if (sysctlbyname("kern.cp_times", cp_times.data(), &len, nullptr, 0) == 0) {
-        for (int i = 0; i < ncpu; ++i) {
+        const int entries = static_cast<int>(len / (sizeof(long) * CPUSTATES));
+        const int n = std::min(ncpu, entries);
+        for (int i = 0; i < n; ++i) {
             long* cpu = &cp_times[i * CPUSTATES];
             out[i].user = cpu[CP_USER];
             out[i].nice = cpu[CP_NICE];
@@ -145,30 +154,10 @@ LoadAverage FreeBSDSystemDataProvider::get_load_average() {
         la.fifteen_min = loadavg[2];
     }
 
-    // Get process counts
-    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
-    size_t len = 0;
-    if (sysctl(mib, 3, nullptr, &len, nullptr, 0) == 0) {
-        la.total_tasks = len / sizeof(struct kinfo_proc);
-    }
-
-    // Running processes
-    mib[2] = KERN_PROC_PROC;  // Only actual processes, not threads
-    if (sysctl(mib, 3, nullptr, &len, nullptr, 0) == 0) {
-        std::vector<char> buf(len * 5 / 4);
-        size_t actual_len = buf.size();
-        if (sysctl(mib, 3, buf.data(), &actual_len, nullptr, 0) == 0) {
-            struct kinfo_proc* kp = reinterpret_cast<struct kinfo_proc*>(buf.data());
-            size_t count = actual_len / sizeof(struct kinfo_proc);
-            int running = 0;
-            for (size_t i = 0; i < count; ++i) {
-                if (kp[i].ki_stat == SRUN) {
-                    running++;
-                }
-            }
-            la.running_tasks = running;
-        }
-    }
+    // total_tasks/running_tasks stay 0: nothing displays them, and counting
+    // them here fetched the full kinfo_proc table again on every tick. The
+    // snapshot already carries process_count/running_count computed from the
+    // process list.
 
     return la;
 }
@@ -204,11 +193,11 @@ long FreeBSDSystemDataProvider::get_clock_ticks_per_second() const {
     return sysconf(_SC_CLK_TCK);
 }
 
-uint64_t FreeBSDSystemDataProvider::get_boot_time_ticks() const {
+uint64_t FreeBSDSystemDataProvider::get_boot_time_seconds() const {
     struct timeval boottime;
     size_t len = sizeof(boottime);
     if (sysctlbyname("kern.boottime", &boottime, &len, nullptr, 0) == 0) {
-        return static_cast<uint64_t>(boottime.tv_sec) * sysconf(_SC_CLK_TCK);
+        return static_cast<uint64_t>(boottime.tv_sec);
     }
     return 0;
 }

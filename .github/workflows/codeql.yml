@@ -69,11 +69,10 @@ jobs:
       with:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
-        config: |
-          paths-ignore:
-            - '_deps'
-            - 'build/_deps'
-            - '**/build/_deps'
+        # Vendored FetchContent checkouts (stb, ImGui, GLFW) are excluded from
+        # results in the filter-sarif step below, NOT here: for compiled
+        # languages a config paths-ignore does not filter results (extraction
+        # follows the build), so the filter step is the single source of truth.
         # If you wish to specify custom queries, you can do so here or in a config file.
         # By default, queries listed here will override any specified in a config file.
         # Prefix the list here with "+" to use these queries and those in the config file.
@@ -101,4 +100,40 @@ jobs:
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v4
       with:
+        category: "/language:${{matrix.language}}"
+        upload: never
+        output: sarif-results
+
+    # Config paths-ignore has no effect on results for compiled languages,
+    # so vendored code (FetchContent checkouts, generated build artifacts)
+    # is dropped from the SARIF before upload instead.
+    - name: Normalize SARIF file name
+      shell: bash
+      run: |
+        set -euo pipefail
+        shopt -s nullglob
+        files=(sarif-results/*.sarif)
+        # Fail loudly rather than let a glob mismatch silently drop results:
+        # exactly one SARIF is expected for the single c-cpp analysis.
+        if [ "${#files[@]}" -ne 1 ]; then
+          echo "::error::expected exactly one SARIF in sarif-results/, found ${#files[@]}: ${files[*]:-<none>}"
+          exit 1
+        fi
+        mv "${files[0]}" sarif-results/results.sarif
+
+    - name: Filter vendored code out of the results
+      # Pinned to the v1 tag's commit so a moved tag can't change filtering.
+      uses: advanced-security/filter-sarif@f3b8118a9349d88f7b1c0c488476411145b6270d
+      with:
+        patterns: |
+          +**/*
+          -**/_deps/**
+          -_codeql_build_dir/**
+        input: sarif-results/results.sarif
+        output: sarif-results/results.sarif
+
+    - name: Upload filtered results
+      uses: github/codeql-action/upload-sarif@v4
+      with:
+        sarif_file: sarif-results/results.sarif
         category: "/language:${{matrix.language}}"

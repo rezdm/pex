@@ -31,6 +31,8 @@ enum ColorPair {
     COLOR_PAIR_DIALOG_BUTTON,
     COLOR_PAIR_HELP_KEY,
     COLOR_PAIR_TREE_LINE,
+    COLOR_PAIR_ROW_NEW,     // New process (diff highlighting, issue #61)
+    COLOR_PAIR_ROW_EXITED,  // Exited process ghost row (issue #61)
 };
 
 // Initialize ncurses color pairs

@@ -31,9 +31,15 @@ void NameResolver::start() {
     resolver_thread_ = std::thread(&NameResolver::resolver_thread, this);
 }
 
+// running_ participates in the queue_cv_ wait predicate, so it must be
+// cleared while holding queue_mutex_ — otherwise the resolver thread can
+// evaluate the predicate, get preempted, miss the notify, and sleep a full
+// kNotifyInterval (same lost-wakeup pattern fixed in DataStore::stop()).
 void NameResolver::stop() {
-    if (!running_) return;
-    running_ = false;
+    {
+        std::lock_guard lock(queue_mutex_);
+        if (!running_.exchange(false)) return;
+    }
     queue_cv_.notify_all();
     if (resolver_thread_.joinable()) {
         resolver_thread_.join();

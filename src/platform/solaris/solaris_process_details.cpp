@@ -57,7 +57,10 @@ int parse_port_from_line(const std::string& line) {
     while (end < line.size() && std::isdigit(static_cast<unsigned char>(line[end])) != 0) {
         ++end;
     }
-    return std::stoi(line.substr(pos, end - pos));
+    // from_chars: no exceptions on malformed/out-of-range pfiles output
+    int port = 0;
+    std::from_chars(line.data() + pos, line.data() + end, port);
+    return port;
 }
 
 bool parse_socket_endpoint(const std::string& line, std::string& endpoint, int& family) {
@@ -95,7 +98,9 @@ bool parse_socket_endpoint(const std::string& line, std::string& endpoint, int& 
 PfilesParseResult parse_pfiles(int pid) {
     PfilesParseResult result;
 
-    std::string cmd = std::format("pfiles -F {} 2>/dev/null", pid);
+    // Absolute path: under pfexec the child inherits our elevated privileges,
+    // so the binary must not be resolved through a user-controlled PATH.
+    std::string cmd = std::format("/usr/bin/pfiles -F {} 2>/dev/null", pid);
     FILE* pipe = popen(cmd.c_str(), "r");
     if (!pipe) {
         return result;
@@ -148,7 +153,9 @@ PfilesParseResult parse_pfiles(int pid) {
         if (pos > 0 && pos < line.size() && line[pos] == ':') {
             flush_socket();
 
-            int fd_num = std::stoi(line.substr(0, pos));
+            // from_chars: no exceptions on out-of-range digit runs
+            int fd_num = 0;
+            std::from_chars(line.data(), line.data() + pos, fd_num);
             std::string rest = trim(line.substr(pos + 1));
 
             FileHandleInfo fh;
@@ -398,12 +405,19 @@ std::vector<FileHandleInfo> SolarisProcessDataProvider::get_file_handles(int pid
         });
     }
 
+    // pfiles briefly *stops the target process*, so only shell out when the
+    // native /proc data is missing or incomplete — not on every refresh.
+    const bool any_incomplete = std::ranges::any_of(handles, [](const FileHandleInfo& fh) {
+        return fh.path.empty() || fh.path == "[unknown]" ||
+               fh.type.empty() || fh.type == "unknown";
+    });
+
     if (needs_fallback) {
         auto parsed = parse_pfiles(pid);
         if (!parsed.handles.empty()) {
             return parsed.handles;
         }
-    } else {
+    } else if (any_incomplete) {
         auto parsed = parse_pfiles(pid);
         if (!parsed.handles.empty()) {
             std::map<int, FileHandleInfo> parsed_map;
@@ -446,10 +460,9 @@ std::vector<NetworkConnectionInfo> SolarisProcessDataProvider::get_network_conne
                 continue;
             }
 
-            int fd = open(entry.path().string().c_str(), O_RDONLY);
-            if (fd < 0) {
-                fd = open_fd_dup(entry.path().string());
-            }
+            // O_NONBLOCK only: a plain open() blocks indefinitely on a FIFO
+            // with no writer, freezing the details panel.
+            int fd = open_fd_dup(entry.path().string());
             if (fd < 0) continue;
 
             int sock_type = 0;
@@ -565,8 +578,10 @@ std::vector<MemoryMapInfo> SolarisProcessDataProvider::get_memory_maps(int pid) 
 std::vector<EnvironmentVariable> SolarisProcessDataProvider::get_environment_variables(int pid) {
     std::vector<EnvironmentVariable> env;
 
-    // Best-effort: use pargs -e to read environment (requires privileges for other users)
-    std::string cmd = std::format("pargs -e {} 2>/dev/null", pid);
+    // Best-effort: use pargs -e to read environment (requires privileges for
+    // other users). Absolute path: under pfexec the child inherits our
+    // elevated privileges, so it must not resolve through the PATH.
+    std::string cmd = std::format("/usr/bin/pargs -e {} 2>/dev/null", pid);
     FILE* pipe = popen(cmd.c_str(), "r");
     if (!pipe) {
         add_error("get_environment_variables", "popen failed");
