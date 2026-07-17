@@ -7,6 +7,19 @@
 
 namespace pex {
 
+// Row background tints for selection and difference highlighting (issue #61),
+// named once so the tree and flat-list views can't drift apart.
+static const ImVec4 kSelectedRowBg(0.3f, 0.5f, 0.8f, 0.5f);
+static const ImVec4 kNewRowBg(0.1f, 0.5f, 0.1f, 0.45f);      // process appeared this tick
+static const ImVec4 kExitedRowBg(0.55f, 0.1f, 0.1f, 0.5f);   // ghost row for an exited process
+
+// Paint the current table row's background (both stripe targets).
+static void set_row_bg(const ImVec4& color) {
+    const ImU32 packed = ImGui::GetColorU32(color);
+    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, packed);
+    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, packed);
+}
+
 // Helper function to get color for process state
 static ImVec4 get_state_color(const char state) {
     switch (state) {
@@ -131,10 +144,7 @@ void ImGuiApp::render_ghost_row(const ProcessInfo& info) {
     // Offset the ID space: the PID may already be recycled by a live row
     ImGui::PushID(-info.pid - 1);
     ImGui::TableNextRow();
-    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
-        ImGui::GetColorU32(ImVec4(0.55f, 0.1f, 0.1f, 0.5f)));
-    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1,
-        ImGui::GetColorU32(ImVec4(0.55f, 0.1f, 0.1f, 0.5f)));
+    set_row_bg(kExitedRowBg);
 
     ImGui::TableNextColumn();
     ImGui::Text("%s", info.name.c_str());
@@ -177,20 +187,13 @@ void ImGuiApp::render_process_tree_node(ProcessNode& node, const int depth,
     const bool is_selected = (node.info.pid == view_model_.process_list.selected_pid);
 
     if (is_selected) {
-        ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
-            ImGui::GetColorU32(ImVec4(0.3f, 0.5f, 0.8f, 0.5f)));
-        ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1,
-            ImGui::GetColorU32(ImVec4(0.3f, 0.5f, 0.8f, 0.5f)));
+        set_row_bg(kSelectedRowBg);
         if (view_model_.process_list.scroll_to_selected) {
             ImGui::SetScrollHereY(0.5f);
             view_model_.process_list.scroll_to_selected = false;
         }
     } else if (snapshot_diff_.new_pids.contains(node.info.pid)) {
-        // New since the previous snapshot (issue #61): green for one tick
-        ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
-            ImGui::GetColorU32(ImVec4(0.1f, 0.5f, 0.1f, 0.45f)));
-        ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1,
-            ImGui::GetColorU32(ImVec4(0.1f, 0.5f, 0.1f, 0.45f)));
+        set_row_bg(kNewRowBg);  // New since the previous snapshot (issue #61)
     }
 
     ImGui::TableNextColumn();
@@ -422,20 +425,13 @@ void ImGuiApp::render_process_list() {
             ImGui::TableNextRow();
 
             if ((node->info.pid == view_model_.process_list.selected_pid)) {
-                ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
-                    ImGui::GetColorU32(ImVec4(0.3f, 0.5f, 0.8f, 0.5f)));
-                ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1,
-                    ImGui::GetColorU32(ImVec4(0.3f, 0.5f, 0.8f, 0.5f)));
+                set_row_bg(kSelectedRowBg);
                 if (view_model_.process_list.scroll_to_selected) {
                     ImGui::SetScrollHereY(0.5f);
                     view_model_.process_list.scroll_to_selected = false;
                 }
             } else if (snapshot_diff_.new_pids.contains(node->info.pid)) {
-                // New since the previous snapshot (issue #61): green for one tick
-                ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
-                    ImGui::GetColorU32(ImVec4(0.1f, 0.5f, 0.1f, 0.45f)));
-                ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1,
-                    ImGui::GetColorU32(ImVec4(0.1f, 0.5f, 0.1f, 0.45f)));
+                set_row_bg(kNewRowBg);  // New since the previous snapshot (issue #61)
             }
 
             ImGui::TableNextColumn();

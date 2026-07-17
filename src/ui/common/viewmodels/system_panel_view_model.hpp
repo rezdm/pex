@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../../core/model/system_info.hpp"
+#include <string>
 #include <vector>
 
 namespace pex {
@@ -42,5 +43,17 @@ struct SystemPanelViewModel {
     // Overall CPU usage
     double cpu_usage = 0.0;
 };
+
+// Compact per-tick churn string for the TUI status line, e.g.
+// "Churn: +12/-11 (2 unseen)". Single source so the two panel layouts
+// (expanded/collapsed) cannot drift.
+inline std::string format_churn_compact(const SystemPanelViewModel& sp) {
+    std::string s = "Churn: +" + std::to_string(sp.fork_events) +
+                    "/-" + std::to_string(sp.exit_events);
+    if (sp.short_lived_exits > 0) {
+        s += " (" + std::to_string(sp.short_lived_exits) + " unseen)";
+    }
+    return s;
+}
 
 } // namespace pex
