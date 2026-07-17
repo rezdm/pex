@@ -11,7 +11,6 @@
 
 #include <cstring>
 #include <sstream>
-#include <unordered_set>
 
 namespace pex {
 
@@ -117,10 +116,6 @@ std::vector<ProcessInfo> FreeBSDProcessDataProvider::get_all_processes(int64_t t
     size_t count = len / sizeof(struct kinfo_proc);
     struct kinfo_proc* kp = reinterpret_cast<struct kinfo_proc*>(buf.data());
 
-    // Indices into 'processes' whose exe path/argv must be fetched (cache miss)
-    std::vector<std::pair<size_t, uint64_t>> misses;
-    std::unordered_set<int> current_pids;
-
     for (size_t i = 0; i < count; ++i) {
         // Skip kernel idle processes - these accumulate idle time across all CPUs
         // and don't represent meaningful process activity. The name is typically
@@ -158,63 +153,43 @@ std::vector<ProcessInfo> FreeBSDProcessDataProvider::get_all_processes(int64_t t
         auto start_sec = std::chrono::seconds(kp[i].ki_start.tv_sec);
         info.start_time = std::chrono::system_clock::time_point(start_sec);
 
-        // Exe path and argv are cached per process instance: fetching them
-        // costs a sysctl + procstat round-trip per PID per tick otherwise
-        // (issue #52). exec() keeps the start time but replaces comm, so the
-        // entry is validated by both.
-        const uint64_t start_us =
-            static_cast<uint64_t>(kp[i].ki_start.tv_sec) * 1000000ULL +
-            static_cast<uint64_t>(kp[i].ki_start.tv_usec);
-        current_pids.insert(info.pid);
-        if (const auto it = proc_strings_cache_.find(info.pid);
-            it != proc_strings_cache_.end() &&
-            it->second.start_us == start_us && it->second.comm == info.name) {
-            info.executable_path = it->second.executable_path;
-            info.command_line = it->second.command_line;
-        } else {
-            misses.emplace_back(processes.size(), start_us);
-        }
+        info.executable_path = get_executable_path(info.pid);
 
         processes.push_back(std::move(info));
     }
 
-    // Fetch exe paths and command lines for cache misses only
-    if (!misses.empty()) {
-        struct procstat* ps = procstat_open_sysctl();
-        for (const auto& [idx, start_us] : misses) {
-            auto& info = processes[idx];
-            info.executable_path = get_executable_path(info.pid);
-            if (ps) {
-                unsigned int cnt;
-                kinfo_proc* kproc = procstat_getprocs(ps, KERN_PROC_PID, info.pid, &cnt);
-                if (kproc && cnt > 0) {
-                    char** args = procstat_getargv(ps, kproc, 0);
-                    if (args) {
-                        std::ostringstream cmdline;
-                        for (int j = 0; args[j] != nullptr; ++j) {
-                            if (j > 0) cmdline << ' ';
-                            cmdline << args[j];
-                        }
-                        info.command_line = cmdline.str();
-                        // Fall back to argv[0] only if the kernel path lookup failed
-                        if (info.executable_path.empty() && args[0]) {
-                            info.executable_path = args[0];
-                        }
-                        procstat_freeargv(ps);
+    // Fetch command lines every tick from a single procstat handle. This is
+    // NOT cached: a process can rewrite its argv at runtime via
+    // setproctitle() (sshd/postgres/sendmail do so constantly) with its comm
+    // and start time unchanged, so any (pid, start, comm)-keyed cache would
+    // freeze the command line at its first-observed value for the whole
+    // process lifetime. The argv fetch is the work that must run each tick
+    // for the column to stay live.
+    struct procstat* ps = procstat_open_sysctl();
+    if (ps) {
+        for (auto& info : processes) {
+            unsigned int cnt;
+            kinfo_proc* kproc = procstat_getprocs(ps, KERN_PROC_PID, info.pid, &cnt);
+            if (kproc && cnt > 0) {
+                char** args = procstat_getargv(ps, kproc, 0);
+                if (args) {
+                    std::ostringstream cmdline;
+                    for (int j = 0; args[j] != nullptr; ++j) {
+                        if (j > 0) cmdline << ' ';
+                        cmdline << args[j];
                     }
-                    procstat_freeprocs(ps, kproc);
+                    info.command_line = cmdline.str();
+                    // Fall back to argv[0] only if the kernel path lookup failed
+                    if (info.executable_path.empty() && args[0]) {
+                        info.executable_path = args[0];
+                    }
+                    procstat_freeargv(ps);
                 }
+                procstat_freeprocs(ps, kproc);
             }
-            proc_strings_cache_[info.pid] =
-                {start_us, info.name, info.executable_path, info.command_line};
         }
-        if (ps) procstat_close(ps);
+        procstat_close(ps);
     }
-
-    // Drop cache entries for processes that no longer exist
-    std::erase_if(proc_strings_cache_, [&current_pids](const auto& entry) {
-        return !current_pids.contains(entry.first);
-    });
 
     for (auto& info : processes) {
         if (info.command_line.empty()) {

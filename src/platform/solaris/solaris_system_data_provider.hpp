@@ -2,6 +2,7 @@
 
 #include "../interfaces/i_system_data_provider.hpp"
 #include <kstat.h>
+#include <vector>
 
 namespace pex {
 
@@ -29,6 +30,15 @@ public:
 private:
     mutable kstat_ctl_t* kc_ = nullptr;
     void ensure_kstat() const;
+
+    // Stable slot assignment for per-CPU stats: kstat cpu_stat instance IDs
+    // can be sparse and change as CPUs go on/offline. get_per_cpu_times keys
+    // each CPU to a fixed slot by instance id so that slot N is the same
+    // physical CPU on every tick — the collection thread diffs slot-to-slot,
+    // so a shifting mapping would subtract counters of different CPUs.
+    // Slots are only ever appended (an offlined CPU keeps its slot, zero-fill)
+    // so indices never move under the delta math.
+    mutable std::vector<int> cpu_slot_instances_;
 };
 
 } // namespace pex

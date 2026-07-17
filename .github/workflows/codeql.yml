@@ -114,10 +114,21 @@ jobs:
     # is dropped from the SARIF before upload instead.
     - name: Normalize SARIF file name
       shell: bash
-      run: mv sarif-results/*.sarif sarif-results/results.sarif
+      run: |
+        set -euo pipefail
+        shopt -s nullglob
+        files=(sarif-results/*.sarif)
+        # Fail loudly rather than let a glob mismatch silently drop results:
+        # exactly one SARIF is expected for the single c-cpp analysis.
+        if [ "${#files[@]}" -ne 1 ]; then
+          echo "::error::expected exactly one SARIF in sarif-results/, found ${#files[@]}: ${files[*]:-<none>}"
+          exit 1
+        fi
+        mv "${files[0]}" sarif-results/results.sarif
 
     - name: Filter vendored code out of the results
-      uses: advanced-security/filter-sarif@v1
+      # Pinned to the v1 tag's commit so a moved tag can't change filtering.
+      uses: advanced-security/filter-sarif@f3b8118a9349d88f7b1c0c488476411145b6270d
       with:
         patterns: |
           +**/*

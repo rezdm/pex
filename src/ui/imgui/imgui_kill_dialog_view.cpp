@@ -20,6 +20,17 @@ void ImGuiApp::execute_kill(const bool force) {
     auto& kd = view_model_.kill_dialog;
     if (kd.target_pid <= 0) return;
 
+    // No start-time token means the process was already gone (or unreadable)
+    // when the dialog opened. Signaling now would hit whatever has since
+    // recycled the PID with no way to verify identity — the exact hazard the
+    // token guards against — so refuse rather than let the killer skip the
+    // check on a null token.
+    if (!kd.target_token) {
+        kd.error_message = "Process no longer exists (its PID may have been reused). Kill aborted.";
+        kd.show_force_option = false;
+        return;
+    }
+
     KillResult result;
     if (kd.is_tree_kill) {
         result = killer_->kill_process_tree(kd.target_pid, force, kd.target_token);

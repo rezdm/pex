@@ -222,6 +222,15 @@ void TuiApp::request_kill_process(int pid, const std::string& name, bool is_tree
 void TuiApp::execute_kill(bool force) {
     auto& kd = view_model_.kill_dialog;
 
+    // No start-time token means the process was already gone (or unreadable)
+    // when the dialog opened; signaling now could hit a recycled PID
+    // unverified, so refuse rather than let the killer skip the check.
+    if (!kd.target_token) {
+        kd.error_message = "Process no longer exists (PID may be reused)";
+        kd.show_force_option = false;
+        return;
+    }
+
     KillResult result;
     if (kd.is_tree_kill) {
         result = killer_->kill_process_tree(kd.target_pid, force, kd.target_token);

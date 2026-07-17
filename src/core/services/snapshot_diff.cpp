@@ -9,6 +9,12 @@ SnapshotDiff compute_snapshot_diff(const DataSnapshot* previous, const DataSnaps
     SnapshotDiff diff;
     if (!previous || !current) return diff;
 
+    // DataStore publishes a non-null but empty snapshot from its constructor,
+    // before the first /proc scan. Diffing the first populated snapshot
+    // against it would mark every process "new" and flash the whole table
+    // green on launch; an empty baseline is treated as "no baseline".
+    if (previous->process_map.empty()) return diff;
+
     for (const auto& [pid, node] : current->process_map) {
         if (!previous->process_map.contains(pid)) {
             diff.new_pids.insert(pid);

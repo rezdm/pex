@@ -2,6 +2,7 @@
 
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 #include <sys/un.h>
 #include <unistd.h>
 #include <cerrno>
@@ -57,13 +58,24 @@ std::string SingleInstance::get_socket_path() {
     if (mkdir(dir.c_str(), 0700) != 0 && errno != EEXIST) {
         return {};
     }
-    struct stat st{};
-    if (lstat(dir.c_str(), &st) != 0 || !S_ISDIR(st.st_mode) || st.st_uid != getuid()) {
-        return {};  // Symlink or foreign-owned entry: do not trust it
+    // Open the directory itself (O_NOFOLLOW rejects a symlink swapped in for
+    // it) and verify/repair through the fd, so an attacker on a non-sticky
+    // /tmp cannot race a symlink between the check and a path-based chmod and
+    // have us chmod an arbitrary target.
+    const int dfd = open(dir.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (dfd < 0) {
+        return {};  // Not a real directory we own, or a symlink was swapped in
     }
-    if ((st.st_mode & 0077) != 0 && chmod(dir.c_str(), 0700) != 0) {
+    struct stat st{};
+    if (fstat(dfd, &st) != 0 || !S_ISDIR(st.st_mode) || st.st_uid != getuid()) {
+        close(dfd);
+        return {};  // Foreign-owned: do not trust it
+    }
+    if ((st.st_mode & 0077) != 0 && fchmod(dfd, 0700) != 0) {
+        close(dfd);
         return {};
     }
+    close(dfd);
     return dir + "/pex.sock";
 }
 

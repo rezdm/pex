@@ -202,29 +202,42 @@ void DataStore::collect_data() {
                                              proc.io_read_bytes, proc.io_write_bytes};
     }
 
-    // Process churn from the kernel event feed (issue #60). Runs before the
-    // prune below: previous_proc_counters_ still holds last tick's PIDs, so
-    // an exit whose PID is in neither map belongs to a process that appeared
-    // in no snapshot — one polling alone would never have seen.
+    // Process churn from the kernel event feed (issue #60). A "short-lived"
+    // (unseen) exit is one we can prove lived entirely between polls: we saw
+    // its Fork via the event stream and it was never observed in a snapshot.
+    // Keying off a tracked fork set — rather than "PID absent from both
+    // counter maps" — avoids miscounting the first tick (empty baseline) and
+    // processes the poller filtered or failed to parse as short-lived.
     if (event_source_ && event_source_->is_active()) {
         new_snapshot->events_active = true;
         for (const ProcessEvent& ev : event_source_->drain()) {
             switch (ev.type) {
                 case ProcessEventType::Fork:
                     new_snapshot->fork_events++;
+                    // Born since the last poll and not yet seen in a snapshot
+                    if (!current_pids.contains(ev.pid) &&
+                        !previous_proc_counters_.contains(ev.pid)) {
+                        forked_unseen_pids_.insert(ev.pid);
+                    }
                     break;
                 case ProcessEventType::Exec:
                     new_snapshot->exec_events++;
                     break;
                 case ProcessEventType::Exit:
                     new_snapshot->exit_events++;
-                    if (!previous_proc_counters_.contains(ev.pid) &&
-                        !current_pids.contains(ev.pid)) {
+                    if (const auto it = forked_unseen_pids_.find(ev.pid);
+                        it != forked_unseen_pids_.end()) {
                         new_snapshot->short_lived_exits++;
+                        forked_unseen_pids_.erase(it);
                     }
                     break;
             }
         }
+        // A tracked PID now visible to polling is no longer "unseen".
+        std::erase_if(forked_unseen_pids_,
+                      [&current_pids](int pid) { return current_pids.contains(pid); });
+        // Safety bound against leaked forks whose exit event was dropped.
+        if (forked_unseen_pids_.size() > 100000) forked_unseen_pids_.clear();
     }
 
     // Prune stale entries for processes that no longer exist

@@ -61,6 +61,7 @@ bool FreeBSDProcessEventSource::start() {
     }
 
     running_ = true;
+    active_ = true;
     event_thread_ = std::thread(&FreeBSDProcessEventSource::event_thread_func, this);
     return true;
 }
@@ -81,7 +82,10 @@ void FreeBSDProcessEventSource::stop() {
 }
 
 bool FreeBSDProcessEventSource::is_active() const {
-    return running_;
+    // Health, not lifecycle: false once the event thread has exited (including
+    // an abnormal kevent() failure), so DataStore stops advertising the feed
+    // as live and the churn line disappears instead of freezing at zero.
+    return active_;
 }
 
 std::vector<ProcessEvent> FreeBSDProcessEventSource::drain() {
@@ -92,6 +96,14 @@ std::vector<ProcessEvent> FreeBSDProcessEventSource::drain() {
 }
 
 void FreeBSDProcessEventSource::event_thread_func() {
+    // Clear the health flag on every exit path (normal stop or a fatal
+    // kevent() error), so is_active() reflects a dead feed. running_ stays as
+    // the lifecycle flag so stop() still joins this thread exactly once.
+    struct ClearActiveOnExit {
+        std::atomic<bool>& flag;
+        ~ClearActiveOnExit() { flag = false; }
+    } clear_active{active_};
+
     struct kevent kevs[64];
 
     while (running_) {
