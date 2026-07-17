@@ -169,6 +169,38 @@ jobs:
     - name: Run unit tests
       run: ./build/pex_tests
 
+  # AddressSanitizer + UndefinedBehaviorSanitizer over the platform-neutral
+  # core and its unit tests. Only pex_tests (and pex_core) are built and run
+  # — no GUI/TUI/platform providers — so this is a fast, dependency-light
+  # check for UB and memory errors in the core logic.
+  sanitizers:
+    name: Sanitizers (ASan+UBSan)
+    runs-on: ubuntu-latest
+    env:
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      ASAN_OPTIONS: detect_leaks=1
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake g++
+
+    - name: Configure
+      run: >
+        cmake -B build -DCMAKE_BUILD_TYPE=Debug
+        -DBUILD_GUI=OFF -DBUILD_TUI=OFF
+        -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"
+        -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+
+    - name: Build tests
+      run: cmake --build build --target pex_tests -j$(nproc)
+
+    - name: Run tests under sanitizers
+      run: ./build/pex_tests
+
   # musl libc portability (TUI + core only; the GL stack is skipped). Built
   # inside an Alpine container via docker run so actions/checkout still runs
   # on the glibc host — GitHub's bundled node cannot execute under musl.
