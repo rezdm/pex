@@ -3,7 +3,7 @@
 [![CMake Multi-Platform Build](https://github.com/rezdm/pex/actions/workflows/cmake-multi-platform.yml/badge.svg)](https://github.com/rezdm/pex/actions/workflows/cmake-multi-platform.yml)
 [![CodeQL](https://github.com/rezdm/pex/actions/workflows/codeql.yml/badge.svg)](https://github.com/rezdm/pex/actions/workflows/codeql.yml)
 
-A Linux process explorer similar to Windows Process Explorer. Also runs on FreeBSD and Solaris.
+A Linux process explorer similar to Windows Process Explorer. Also runs on FreeBSD and Solaris, with **experimental TUI-only support on Windows**.
 
 ## Why
 
@@ -82,6 +82,7 @@ Being able to compile (C++23, CMake >= 3.20). Tested to run on:
 * FreeBSD 15-RELEASE, XFCE/X11
 * Solaris 11.4, GNOME/X11
 * Solaris, Debian, FreeBSD: terminal
+* Windows 10/11: terminal only (`pexc.exe`), experimental — see below
 
 ## Continuous integration
 
@@ -92,6 +93,7 @@ C library (see [`.github/workflows/cmake-multi-platform.yml`](.github/workflows/
 |---|---|
 | Ubuntu (latest) | GCC / glibc — primary Linux build (GUI + TUI) |
 | Debian (latest) | GCC / glibc — Debian container |
+| Windows (TUI only) | native `windows-latest` runner; MSYS2/UCRT64 + PDCursesMod, `pexc.exe` only |
 | Ubuntu (clang) | Clang instead of GCC — catches GCC-isms and a different warning set |
 | GCC 13 (C++23 floor) | pins the minimum toolchain (libstdc++ `std::format` landed in GCC 13.1) |
 | Sanitizers (ASan+UBSan) | core + unit tests under Address/UndefinedBehavior sanitizers |
@@ -120,6 +122,24 @@ make -j$(nproc)
   -DPEX_PLATFORM=freebsd  # FreeBSD
   -DPEX_PLATFORM=solaris  # Solaris
 ```
+
+### Windows (experimental, TUI only)
+Only the terminal app (`pexc.exe`) is built on Windows; the GUI is not. Curses
+comes from PDCursesMod (WinCon backend), fetched automatically. Build in an
+**MSYS2 UCRT64** shell (`pacman -S mingw-w64-ucrt-x86_64-gcc
+mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja`):
+```bash
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+Notes:
+* Run under **Windows Terminal** rather than the legacy console for much better
+  redraw performance.
+* The Details panel (open files, memory maps, environment) reads other
+  processes via the native API; some data for elevated processes needs pexc to
+  run **as Administrator**.
+* Per-process state (all shown as Running) and thread stack traces are not
+  available on Windows.
 
 To build only the TUI (no X11/OpenGL needed):
 ```bash
