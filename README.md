@@ -1,5 +1,8 @@
 # PEX - Process Explorer for Linux
 
+[![CMake Multi-Platform Build](https://github.com/rezdm/pex/actions/workflows/cmake-multi-platform.yml/badge.svg)](https://github.com/rezdm/pex/actions/workflows/cmake-multi-platform.yml)
+[![CodeQL](https://github.com/rezdm/pex/actions/workflows/codeql.yml/badge.svg)](https://github.com/rezdm/pex/actions/workflows/codeql.yml)
+
 A Linux process explorer similar to Windows Process Explorer. Also runs on FreeBSD and Solaris.
 
 ## Why
@@ -79,6 +82,25 @@ Being able to compile (C++23, CMake >= 3.20). Tested to run on:
 * FreeBSD 15-RELEASE, XFCE/X11
 * Solaris 11.4, GNOME/X11
 * Solaris, Debian, FreeBSD: terminal
+
+## Continuous integration
+
+Every push and pull request builds across a matrix that varies OS, compiler and
+C library (see [`.github/workflows/cmake-multi-platform.yml`](.github/workflows/cmake-multi-platform.yml)):
+
+| Job | Covers |
+|---|---|
+| Ubuntu (latest) | GCC / glibc — primary Linux build (GUI + TUI) |
+| Debian (latest) | GCC / glibc — Debian container |
+| Ubuntu (clang) | Clang instead of GCC — catches GCC-isms and a different warning set |
+| GCC 13 (C++23 floor) | pins the minimum toolchain (libstdc++ `std::format` landed in GCC 13.1) |
+| Sanitizers (ASan+UBSan) | core + unit tests under Address/UndefinedBehavior sanitizers |
+| Alpine (musl, TUI) | musl libc portability — TUI + core, GL stack skipped |
+| FreeBSD (latest) | native build + tests in a FreeBSD VM |
+| Solaris x86 (latest) | native build + tests in a Solaris VM |
+
+Every job builds the binaries and runs the unit tests; a separate CodeQL
+workflow runs static analysis. **GCC 13 is the minimum supported compiler.**
 
 ## Building
 
