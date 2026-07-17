@@ -3,17 +3,19 @@
 #include "../interfaces/i_process_data_provider.hpp"
 #include "../../core/model/errors.hpp"
 
+#include <cstdint>
 #include <map>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace pex {
 
-// Windows process data provider (issue #43, Phase 1).
-// Implemented: process tree, CPU/memory/threads/user/start time, I/O
-// counters, per-PID network connections, loaded modules.
-// Phase 2 (returns empty for now): open handles, memory maps, environment.
+// Windows process data provider (issue #43).
+// Process enumeration uses a single NtQuerySystemInformation call; the
+// Details tabs (open handles, memory maps, environment, network, threads,
+// libraries) are implemented via the native APIs.
 class WindowsProcessDataProvider final : public IProcessDataProvider {
 public:
     WindowsProcessDataProvider();
@@ -45,6 +47,18 @@ private:
     // SID-string -> username cache to avoid repeated LookupAccountSid calls
     std::mutex username_cache_mutex_;
     std::map<std::string, std::string> username_cache_;
+
+    // Per-process cache of the immutable strings (user, exe path, command
+    // line), keyed by pid and validated by process creation time. These never
+    // change for a process instance, so caching them means get_all_processes
+    // opens no per-process handle in steady state. Collection thread only.
+    struct ProcStrings {
+        uint64_t create_time = 0;  // CreateTime (FILETIME ticks) at capture
+        std::string user_name;
+        std::string executable_path;
+        std::string command_line;
+    };
+    std::unordered_map<int, ProcStrings> proc_strings_;
 };
 
 } // namespace pex

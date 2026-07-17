@@ -18,6 +18,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <unordered_set>
 
 namespace pex {
 
@@ -128,6 +129,82 @@ struct SYSTEM_HANDLE_INFORMATION_EX {
     ULONG_PTR Reserved;
     SYSTEM_HANDLE_ENTRY_EX Handles[1];
 };
+
+// SystemProcessInformation returns every process (and its threads) in one
+// call. winternl's SYSTEM_PROCESS_INFORMATION hides the times/IO fields behind
+// reserved bytes, so use fully-specified structs matching the documented x64
+// layout (natural alignment reproduces the kernel layout).
+constexpr ULONG kSystemProcessInformation = 5;
+
+struct SysThreadInfo {
+    LARGE_INTEGER KernelTime;
+    LARGE_INTEGER UserTime;
+    LARGE_INTEGER CreateTime;
+    ULONG         WaitTime;
+    PVOID         StartAddress;
+    struct { HANDLE UniqueProcess; HANDLE UniqueThread; } ClientId;
+    LONG          Priority;
+    LONG          BasePriority;
+    ULONG         ContextSwitches;
+    ULONG         ThreadState;   // KTHREAD_STATE
+    ULONG         WaitReason;    // KWAIT_REASON
+};
+
+struct SysProcInfo {
+    ULONG         NextEntryOffset;
+    ULONG         NumberOfThreads;
+    LARGE_INTEGER WorkingSetPrivateSize;
+    ULONG         HardFaultCount;
+    ULONG         NumberOfThreadsHighWatermark;
+    ULONGLONG     CycleTime;
+    LARGE_INTEGER CreateTime;
+    LARGE_INTEGER UserTime;
+    LARGE_INTEGER KernelTime;
+    UNICODE_STRING ImageName;
+    LONG          BasePriority;
+    HANDLE        UniqueProcessId;
+    HANDLE        InheritedFromUniqueProcessId;
+    ULONG         HandleCount;
+    ULONG         SessionId;
+    ULONG_PTR     UniqueProcessKey;
+    SIZE_T        PeakVirtualSize;
+    SIZE_T        VirtualSize;
+    ULONG         PageFaultCount;
+    SIZE_T        PeakWorkingSetSize;
+    SIZE_T        WorkingSetSize;
+    SIZE_T        QuotaPeakPagedPoolUsage;
+    SIZE_T        QuotaPagedPoolUsage;
+    SIZE_T        QuotaPeakNonPagedPoolUsage;
+    SIZE_T        QuotaNonPagedPoolUsage;
+    SIZE_T        PagefileUsage;
+    SIZE_T        PeakPagefileUsage;
+    SIZE_T        PrivatePageCount;
+    LARGE_INTEGER ReadOperationCount;
+    LARGE_INTEGER WriteOperationCount;
+    LARGE_INTEGER OtherOperationCount;
+    LARGE_INTEGER ReadTransferCount;
+    LARGE_INTEGER WriteTransferCount;
+    LARGE_INTEGER OtherTransferCount;
+    // SysThreadInfo Threads[NumberOfThreads] follows immediately.
+};
+
+// Derive a process state char from its threads' KTHREAD_STATE / KWAIT_REASON.
+char derive_process_state(const SysProcInfo* p) {
+    const auto* threads = reinterpret_cast<const SysThreadInfo*>(
+        reinterpret_cast<const char*>(p) + sizeof(SysProcInfo));
+    bool any_active = false;
+    bool all_suspended = p->NumberOfThreads > 0;
+    for (ULONG i = 0; i < p->NumberOfThreads; ++i) {
+        const ULONG st = threads[i].ThreadState;
+        // Running(2), Ready(1), Standby(3), DeferredReady(7) = on/for the CPU
+        if (st == 2 || st == 1 || st == 3 || st == 7) any_active = true;
+        // Suspended = Waiting(5) with WrSuspended(5)
+        if (!(st == 5 && threads[i].WaitReason == 5)) all_suspended = false;
+    }
+    if (any_active) return 'R';
+    if (all_suspended) return 'T';  // every thread suspended
+    return 'S';                     // waiting / sleeping
+}
 
 // Convert an NT device path (\Device\HarddiskVolumeN\...) to a DOS path
 // (C:\...) using the drive-letter -> device mapping; leaves it unchanged if
@@ -310,37 +387,105 @@ std::vector<ProcessInfo> WindowsProcessDataProvider::get_all_processes(int64_t t
         if (GlobalMemoryStatusEx(&ms)) total_memory = static_cast<int64_t>(ms.ullTotalPhys);
     }
 
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snapshot == INVALID_HANDLE_VALUE) {
-        add_error("get_all_processes", "CreateToolhelp32Snapshot failed");
+    if (!nt().QuerySystemInformation) {
+        add_error("get_all_processes", "NtQuerySystemInformation unavailable");
         return processes;
     }
 
-    PROCESSENTRY32W entry{};
-    entry.dwSize = sizeof(entry);
-    for (BOOL ok = Process32FirstW(snapshot, &entry); ok; ok = Process32NextW(snapshot, &entry)) {
-        ProcessInfo info;
-        info.pid = static_cast<int>(entry.th32ProcessID);
-        info.parent_pid = static_cast<int>(entry.th32ParentProcessID);
-        info.name = narrow(entry.szExeFile);
-        info.thread_count = static_cast<int>(entry.cntThreads);
-        info.state_char = 'R';  // Windows exposes no R/S/D process state
-        // PID 0 (System Idle) and PID 4 (System) are kernel
-        info.is_kernel_thread = (info.pid == 0 || info.pid == 4 || info.parent_pid == 4);
+    // One call returns every process with name/pid/ppid/threads/times/memory/IO
+    // — no per-process handle opens (which dominated the old Toolhelp path).
+    ULONG size = 512 * 1024;
+    std::vector<char> buf;
+    LONG status = 0;
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        buf.resize(size);
+        ULONG needed = 0;
+        status = nt().QuerySystemInformation(kSystemProcessInformation, buf.data(), size, &needed);
+        if (status == 0) break;
+        if (status == kStatusInfoLengthMismatch) {
+            size = needed ? needed + (128 * 1024) : size * 2;
+            continue;
+        }
+        add_error("get_all_processes", "NtQuerySystemInformation failed");
+        return processes;
+    }
+    if (status != 0) return processes;
 
-        if (HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
-                                   entry.th32ProcessID)) {
-            fill_process_details(info, h, total_memory);
-            CloseHandle(h);
+    std::unordered_set<int> current_pids;
+
+    for (size_t offset = 0;;) {
+        const auto* p = reinterpret_cast<const SysProcInfo*>(buf.data() + offset);
+        const int pid = static_cast<int>(reinterpret_cast<uintptr_t>(p->UniqueProcessId));
+
+        ProcessInfo info;
+        info.pid = pid;
+        info.parent_pid = static_cast<int>(reinterpret_cast<uintptr_t>(p->InheritedFromUniqueProcessId));
+        info.thread_count = static_cast<int>(p->NumberOfThreads);
+        info.state_char = derive_process_state(p);
+        info.is_kernel_thread = (pid == 0 || pid == 4 || info.parent_pid == 4);
+
+        if (p->ImageName.Buffer && p->ImageName.Length > 0) {
+            info.name = narrow(std::wstring(p->ImageName.Buffer,
+                                            p->ImageName.Length / sizeof(wchar_t)).c_str());
+        } else {
+            info.name = (pid == 0) ? "System Idle Process" : std::format("(pid {})", pid);
         }
-        if (info.name.empty()) info.name = std::format("(pid {})", info.pid);
-        if (info.command_line.empty()) {
-            info.command_line = info.executable_path.empty() ? info.name : info.executable_path;
+
+        info.user_time = static_cast<uint64_t>(p->UserTime.QuadPart);      // 100 ns units
+        info.kernel_time = static_cast<uint64_t>(p->KernelTime.QuadPart);
+        info.resident_memory = static_cast<int64_t>(p->WorkingSetSize);
+        info.virtual_memory = static_cast<int64_t>(p->VirtualSize);
+        info.io_read_bytes = static_cast<uint64_t>(p->ReadTransferCount.QuadPart);
+        info.io_write_bytes = static_cast<uint64_t>(p->WriteTransferCount.QuadPart);
+        info.priority = p->BasePriority;
+        if (total_memory > 0) {
+            info.memory_percent = static_cast<double>(info.resident_memory) /
+                                  static_cast<double>(total_memory) * 100.0;
         }
+        if (const auto ct = static_cast<uint64_t>(p->CreateTime.QuadPart); ct > 0) {
+            info.start_time = std::chrono::system_clock::from_time_t(
+                static_cast<time_t>(ct / 10'000'000ULL - kFiletimeEpochDelta));
+        }
+
+        // Immutable strings (user, exe path, command line): fetch once per
+        // process instance and cache, so steady state opens no handles.
+        current_pids.insert(pid);
+        const auto ct = static_cast<uint64_t>(p->CreateTime.QuadPart);
+        auto& cache = proc_strings_[pid];
+        if (cache.create_time != ct) {
+            cache = {ct, {}, {}, {}};
+            if (HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                                       static_cast<DWORD>(pid))) {
+                cache.user_name = get_username_for_pid(h);
+                wchar_t path[MAX_PATH];
+                DWORD path_len = MAX_PATH;
+                if (QueryFullProcessImageNameW(h, 0, path, &path_len)) {
+                    cache.executable_path = narrow(path);
+                }
+                CloseHandle(h);
+            }
+            if (HANDLE hv = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
+                                        FALSE, static_cast<DWORD>(pid))) {
+                cache.command_line = read_command_line(hv);
+                CloseHandle(hv);
+            }
+        }
+        info.user_name = cache.user_name;
+        info.executable_path = cache.executable_path;
+        info.command_line = cache.command_line.empty()
+            ? (info.executable_path.empty() ? info.name : info.executable_path)
+            : cache.command_line;
 
         processes.push_back(std::move(info));
+
+        if (p->NextEntryOffset == 0) break;
+        offset += p->NextEntryOffset;
     }
-    CloseHandle(snapshot);
+
+    // Drop cache entries for processes that no longer exist.
+    std::erase_if(proc_strings_, [&current_pids](const auto& e) {
+        return !current_pids.contains(e.first);
+    });
 
     return processes;
 }
