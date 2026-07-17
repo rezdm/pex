@@ -1,22 +1,10 @@
 #include "imgui_app.hpp"
 #include "imgui.h"
 #include "../../platform/platform_factory.hpp"
-#include <algorithm>
-#include <cctype>
+#include "../../core/string_utils.hpp"
 #include <format>
 
 namespace pex {
-
-namespace {
-
-std::string lower_copy(const std::string& s) {
-    std::string result = s;
-    std::ranges::transform(result, result.begin(),
-                           [](unsigned char c) { return std::tolower(c); });
-    return result;
-}
-
-} // namespace
 
 void ImGuiApp::stop_handle_search() {
     find_cancel_ = true;
@@ -30,7 +18,7 @@ void ImGuiApp::start_handle_search() {
     if (!current_data_) return;
     stop_handle_search();  // Join any previous worker
 
-    const std::string query = lower_copy(find_query_);
+    const std::string query = to_lower_copy(find_query_);
     if (query.empty()) return;
 
     if (!find_provider_) {
@@ -64,12 +52,12 @@ void ImGuiApp::start_handle_search() {
             std::vector<HandleSearchResult> batch;
 
             for (const auto& fh : find_provider_->get_file_handles(pid)) {
-                if (lower_copy(fh.path).find(query) != std::string::npos) {
+                if (to_lower_copy(fh.path).find(query) != std::string::npos) {
                     batch.push_back({pid, name, fh.type, fh.path});
                 }
             }
             for (const auto& lib : find_provider_->get_libraries(pid)) {
-                if (lower_copy(lib.path).find(query) != std::string::npos) {
+                if (to_lower_copy(lib.path).find(query) != std::string::npos) {
                     batch.push_back({pid, name, "library", lib.path});
                 }
             }
