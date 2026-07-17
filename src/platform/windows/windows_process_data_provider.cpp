@@ -12,8 +12,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <cwchar>
 #include <format>
+#include <memory>
+#include <mutex>
+#include <thread>
 
 namespace pex {
 
@@ -372,38 +376,69 @@ std::vector<FileHandleInfo> WindowsProcessDataProvider::get_file_handles(const i
     HANDLE target = OpenProcess(PROCESS_DUP_HANDLE, FALSE, static_cast<DWORD>(pid));
     if (!target) return handles;
 
+    // Duplicate this pid's handles into our process (fast, never hangs).
+    struct DupHandle { HANDLE h; ULONG access; int fd; };
+    std::vector<DupHandle> dups;
     const HANDLE self = GetCurrentProcess();
-    for (ULONG_PTR i = 0; i < info->NumberOfHandles; ++i) {
+    constexpr size_t kMaxHandles = 8192;
+    for (ULONG_PTR i = 0; i < info->NumberOfHandles && dups.size() < kMaxHandles; ++i) {
         const SYSTEM_HANDLE_ENTRY_EX& e = info->Handles[i];
         if (e.UniqueProcessId != static_cast<ULONG_PTR>(pid)) continue;
-
         HANDLE dup = nullptr;
-        if (!DuplicateHandle(target, static_cast<HANDLE>(e.HandleValue), self, &dup,
-                             0, FALSE, DUPLICATE_SAME_ACCESS) || !dup) {
-            continue;
+        if (DuplicateHandle(target, static_cast<HANDLE>(e.HandleValue), self, &dup,
+                            0, FALSE, DUPLICATE_SAME_ACCESS) && dup) {
+            dups.push_back({dup, e.GrantedAccess,
+                            static_cast<int>(reinterpret_cast<uintptr_t>(e.HandleValue))});
         }
-
-        // Type never hangs; name can (synchronous pipes with the classic
-        // access mask), so skip the name query for those.
-        const std::string type = query_object_string(dup, kObjectTypeInformation);
-        if (type == "File") {
-            std::string path;
-            if (e.GrantedAccess != kHangProneAccess) {
-                path = nt_path_to_dos(query_object_string(dup, kObjectNameInformation));
-            }
-            FileHandleInfo fh;
-            fh.fd = static_cast<int>(reinterpret_cast<uintptr_t>(e.HandleValue));
-            // \Device\NamedPipe\... and \Device\Afd (sockets) also surface as
-            // type "File"; classify by the resolved name.
-            if (path.rfind("\\Device\\NamedPipe", 0) == 0) fh.type = "pipe";
-            else if (path.rfind("\\Device\\Afd", 0) == 0)  fh.type = "socket";
-            else                                            fh.type = "file";
-            fh.path = path.empty() ? "(name unavailable)" : path;
-            handles.push_back(std::move(fh));
-        }
-        CloseHandle(dup);
     }
     CloseHandle(target);
+    if (dups.empty()) return handles;
+
+    // Resolve type/name on a worker thread with a total timeout. NtQueryObject
+    // can hang indefinitely on some synchronous handles, and get_file_handles
+    // runs on the UI thread when the details panel refreshes — a stuck query
+    // would freeze the whole app (which is exactly what happened). On timeout
+    // we return what completed; the detached worker keeps draining and closing
+    // its own dups (the shared state outlives it via the shared_ptr) while the
+    // UI stays responsive. A genuinely stuck query leaks that one thread +
+    // handle, which is rare and bounded.
+    struct QueryState {
+        std::mutex mtx;
+        std::condition_variable cv;
+        std::vector<FileHandleInfo> results;
+        bool done = false;
+    };
+    auto state = std::make_shared<QueryState>();
+
+    std::thread([state, work = std::move(dups)]() {
+        for (const auto& d : work) {
+            const std::string type = query_object_string(d.h, kObjectTypeInformation);
+            if (type == "File") {
+                std::string path;
+                if (d.access != kHangProneAccess) {
+                    path = nt_path_to_dos(query_object_string(d.h, kObjectNameInformation));
+                }
+                FileHandleInfo fh;
+                fh.fd = d.fd;
+                if (path.rfind("\\Device\\NamedPipe", 0) == 0) fh.type = "pipe";
+                else if (path.rfind("\\Device\\Afd", 0) == 0)  fh.type = "socket";
+                else                                            fh.type = "file";
+                fh.path = path.empty() ? "(name unavailable)" : path;
+                std::lock_guard lock(state->mtx);
+                state->results.push_back(std::move(fh));
+            }
+            CloseHandle(d.h);
+        }
+        std::lock_guard lock(state->mtx);
+        state->done = true;
+        state->cv.notify_one();
+    }).detach();
+
+    {
+        std::unique_lock lock(state->mtx);
+        state->cv.wait_for(lock, std::chrono::milliseconds(750), [&] { return state->done; });
+        handles = state->results;  // whatever is ready (copied under the lock)
+    }
 
     std::ranges::sort(handles, [](const FileHandleInfo& a, const FileHandleInfo& b) {
         return a.fd < b.fd;
