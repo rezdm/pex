@@ -32,4 +32,26 @@ public:
                                          std::optional<uint64_t> expected_token = std::nullopt) = 0;
 };
 
+// Shared PID-recycle guard for every killer implementation: returns a failure
+// KillResult if 'pid' no longer refers to the process instance identified by
+// 'token' (gone or recycled), or nullopt when it is safe to signal. Keeping
+// this in one place stops the per-platform copies (and their user-facing
+// messages) from drifting apart.
+[[nodiscard]] inline std::optional<KillResult> check_kill_token(
+    IProcessKiller& killer, const int pid, const std::optional<uint64_t>& token) {
+    if (!token) return std::nullopt;
+    KillResult result;
+    const auto current = killer.process_start_token(pid);
+    if (!current) {
+        result.error_message = "Process not found. It may have already terminated.";
+        return result;
+    }
+    if (*current != *token) {
+        result.error_message =
+            "PID was reused by a different process since the dialog opened. Kill aborted.";
+        return result;
+    }
+    return std::nullopt;
+}
+
 } // namespace pex
