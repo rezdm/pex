@@ -23,11 +23,13 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "SunOS")
     set(PEX_PLATFORM_DEFAULT "solaris")
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(PEX_PLATFORM_DEFAULT "windows")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(PEX_PLATFORM_DEFAULT "macos")
 else()
-    message(FATAL_ERROR "Unsupported platform: ${CMAKE_SYSTEM_NAME}. Supported: Linux, FreeBSD, SunOS (Solaris), Windows.")
+    message(FATAL_ERROR "Unsupported platform: ${CMAKE_SYSTEM_NAME}. Supported: Linux, FreeBSD, SunOS (Solaris), Windows, Darwin (macOS).")
 endif()
-set(PEX_PLATFORM "${PEX_PLATFORM_DEFAULT}" CACHE STRING "Platform backend (linux, freebsd, solaris, windows)")
-set_property(CACHE PEX_PLATFORM PROPERTY STRINGS linux freebsd solaris windows)
+set(PEX_PLATFORM "${PEX_PLATFORM_DEFAULT}" CACHE STRING "Platform backend (linux, freebsd, solaris, windows, macos)")
+set_property(CACHE PEX_PLATFORM PROPERTY STRINGS linux freebsd solaris windows macos)
 
 # Windows is TUI-only (issue #43): Process Explorer already owns the GUI niche
 if(PEX_PLATFORM STREQUAL "windows")
@@ -208,8 +210,21 @@ elseif(PEX_PLATFORM STREQUAL "windows")
     )
     set(PEX_PLATFORM_DEFINE "PEX_PLATFORM_WINDOWS")
     set(PEX_PLATFORM_LIBS psapi iphlpapi ws2_32 ntdll advapi32)
+elseif(PEX_PLATFORM STREQUAL "macos")
+    set(PEX_PLATFORM_SOURCES
+        src/platform/macos/macos_process_data_provider.cpp
+        src/platform/macos/macos_process_details.cpp
+        src/platform/macos/macos_system_data_provider.cpp
+        src/platform/macos/macos_process_killer.cpp
+        src/platform/macos/macos_process_event_source.cpp
+        src/platform/macos/platform_factory_macos.cpp
+    )
+    set(PEX_PLATFORM_DEFINE "PEX_PLATFORM_MACOS")
+    # libproc and Mach are in libSystem (linked by default); frameworks for
+    # the host_* Mach calls come via CoreFoundation.
+    set(PEX_PLATFORM_LIBS "-framework CoreFoundation")
 else()
-    message(FATAL_ERROR "Unknown PEX_PLATFORM: ${PEX_PLATFORM}. Use 'linux', 'freebsd', 'solaris', or 'windows'.")
+    message(FATAL_ERROR "Unknown PEX_PLATFORM: ${PEX_PLATFORM}. Use 'linux', 'freebsd', 'solaris', 'windows', or 'macos'.")
 endif()
 
 add_library(pex_platform STATIC ${PEX_PLATFORM_SOURCES})
