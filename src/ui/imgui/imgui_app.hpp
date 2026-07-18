@@ -9,6 +9,7 @@
 #include "../common/viewmodels/app_view_model.hpp"
 #include "../../core/services/name_resolver.hpp"
 #include "../../core/services/settings.hpp"
+#include "imgui_renderer.hpp"
 #include <memory>
 #include <atomic>
 #include <mutex>
@@ -135,6 +136,9 @@ private:
     // Window pointer for focus handling
     GLFWwindow* window_ = nullptr;
     std::atomic<bool> focus_requested_{false};
+
+    // Graphics backend (OpenGL on Linux/BSD/Solaris, Metal on macOS)
+    std::unique_ptr<ImGuiRenderer> renderer_;
 
     // Name resolver for DNS and service lookups
     NameResolver name_resolver_;
