@@ -55,6 +55,9 @@ private:
                                const std::unordered_map<int, std::vector<const ProcessInfo*>>& ghost_children);
     void render_process_list();
     void render_details_panel();
+    // Shown in a details tab when its list is empty and we likely lack the
+    // privileges to read another process (Linux: capabilities; macOS/BSD: root).
+    void render_details_access_note(bool list_empty);
     void render_file_handles_tab();
     void render_network_tab();
     void render_threads_tab();

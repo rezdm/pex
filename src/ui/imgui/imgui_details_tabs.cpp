@@ -3,11 +3,29 @@
 #include <charconv>
 #include <algorithm>
 #include <numeric>
+#include <unistd.h>  // geteuid/getpid for the privilege note
 
 namespace pex {
 
+void ImGuiApp::render_details_access_note(bool list_empty) {
+    // Only nudge when a tab is empty, we are unprivileged, and the target is
+    // another process: our own process is always fully readable, and a
+    // privileged run that shows nothing genuinely has nothing. The wording
+    // stays conditional so it is still honest for a genuinely-empty list.
+    if (!list_empty || geteuid() == 0) return;
+    const int pid = view_model_.details_panel.details_pid;
+    if (pid <= 0 || pid == getpid()) return;
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.2f, 1.0f));
+    ImGui::TextWrapped(
+        "Nothing to show. Inspecting another process's files, sockets, threads or "
+        "memory may require elevated privileges — run pex with sudo, or see "
+        "PRIVILEGES.md.");
+    ImGui::PopStyleColor();
+}
+
 void ImGuiApp::render_file_handles_tab() {
     auto& dp = view_model_.details_panel;
+    render_details_access_note(dp.file_handles.empty());
 
     if (ImGui::BeginTable("FileHandles", 3,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
@@ -63,6 +81,7 @@ void ImGuiApp::render_file_handles_tab() {
 
 void ImGuiApp::render_network_tab() {
     auto& dp = view_model_.details_panel;
+    render_details_access_note(dp.network_connections.empty());
 
     auto normalize_ip = [](std::string ip) -> std::string {
         if (ip.size() >= 2 && ip.front() == '[' && ip.back() == ']') {
@@ -236,6 +255,7 @@ void ImGuiApp::render_network_tab() {
 
 void ImGuiApp::render_threads_tab() {
     auto& dp = view_model_.details_panel;
+    render_details_access_note(dp.threads.empty());
     const float width = ImGui::GetContentRegionAvail().x;
 
     ImGui::BeginChild("ThreadsList", ImVec2(width * 0.5f, 0), true);
@@ -366,6 +386,7 @@ void ImGuiApp::render_threads_tab() {
 
 void ImGuiApp::render_memory_tab() {
     auto& dp = view_model_.details_panel;
+    render_details_access_note(dp.memory_maps.empty());
 
     if (ImGui::BeginTable("Memory", 4,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
@@ -425,6 +446,7 @@ void ImGuiApp::render_memory_tab() {
 
 void ImGuiApp::render_environment_tab() {
     auto& dp = view_model_.details_panel;
+    render_details_access_note(dp.environment_vars.empty());
 
     if (ImGui::BeginTable("Environment", 2,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |
@@ -476,6 +498,7 @@ void ImGuiApp::render_environment_tab() {
 
 void ImGuiApp::render_libraries_tab() {
     auto& dp = view_model_.details_panel;
+    render_details_access_note(dp.libraries.empty());
 
     if (ImGui::BeginTable("Libraries", 4,
             ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY |

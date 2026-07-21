@@ -16,12 +16,28 @@ SingleInstance::SingleInstance() = default;
 SingleInstance::~SingleInstance() {
     running_ = false;
 
-    // Wake the listener out of accept() with shutdown(), but do NOT close the
-    // fd yet: closing while the listener thread may still be using it races
-    // with fd reuse (another thread could be handed the same fd number).
-    // Only close after the thread has been joined.
+    // Wake the listener out of accept(). shutdown() interrupts a blocked
+    // accept() on Linux, but NOT on macOS/BSD — there accept() keeps blocking
+    // and join() below would hang forever, so the whole process never exits
+    // (observed on macOS: the window closes but pex stays running). So also
+    // make a throwaway self-connection to our own socket, which forces
+    // accept() to return on every platform. Do NOT close server_fd_ yet:
+    // closing while the listener may still use it races with fd reuse.
     if (server_fd_ >= 0) {
         shutdown(server_fd_, SHUT_RDWR);
+        if (listener_.joinable() && !socket_path_.empty()) {
+            const int wake_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+            if (wake_fd >= 0) {
+                sockaddr_un addr{};
+                addr.sun_family = AF_UNIX;
+                strncpy(addr.sun_path, socket_path_.c_str(), sizeof(addr.sun_path) - 1);
+                // Best-effort: on Linux shutdown() already woke accept() (and
+                // this connect may fail with ECONNREFUSED); on macOS/BSD this
+                // is what actually unblocks it.
+                (void)connect(wake_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+                close(wake_fd);
+            }
+        }
     }
 
     if (listener_.joinable()) {

@@ -70,10 +70,22 @@ std::string basename_of(const std::string& path) {
 std::vector<ThreadInfo> MacosProcessDataProvider::get_threads(int pid) {
     std::vector<ThreadInfo> threads;
 
-    const int needed = proc_pidinfo(pid, PROC_PIDLISTTHREADS, 0, nullptr, 0);
-    if (needed <= 0) return threads;
+    // Size the thread-id buffer from the task's thread count. PROC_PIDLISTTHREADS
+    // with a NULL buffer does not reliably report the needed size on all macOS
+    // versions (it can return 0, which previously made the Threads tab always
+    // empty); pti_threadnum is authoritative.
+    int nthreads = 0;
+    struct proc_taskinfo ti;
+    if (proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &ti, sizeof(ti)) == static_cast<int>(sizeof(ti))) {
+        nthreads = ti.pti_threadnum;
+    }
+    if (nthreads <= 0) {
+        const int needed = proc_pidinfo(pid, PROC_PIDLISTTHREADS, 0, nullptr, 0);
+        nthreads = needed > 0 ? needed / static_cast<int>(sizeof(uint64_t)) : 0;
+    }
+    if (nthreads <= 0) return threads;
 
-    std::vector<uint64_t> tids(needed / sizeof(uint64_t) + 16);
+    std::vector<uint64_t> tids(nthreads + 16);  // margin for threads spawned since the count
     const int got = proc_pidinfo(pid, PROC_PIDLISTTHREADS, 0, tids.data(),
                                  static_cast<int>(tids.size() * sizeof(uint64_t)));
     const int count = got > 0 ? got / static_cast<int>(sizeof(uint64_t)) : 0;
