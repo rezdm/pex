@@ -6,6 +6,9 @@
 #include "../src/core/services/history_store.hpp"
 #include "../src/core/services/settings.hpp"
 #include "../src/core/services/snapshot_diff.hpp"
+#ifdef __linux__
+#include "../src/platform/linux/procfs/procfs_stat_parse.hpp"
+#endif
 
 #include <chrono>
 #include <cstdio>
@@ -245,6 +248,38 @@ void test_snapshot_diff() {
     }
 }
 
+#ifdef __linux__
+void test_procfs_thread_stat() {
+    using pex::procfs::parse_thread_stat;
+
+    // Synthetic /proc/<tid>/stat. processor is field 39 (=7 here); the adjacent
+    // fields are distinct decoys — exit_signal(38)=17, rt_priority(40)=88 — so
+    // an off-by-one in the field skip is caught (issue #87). rss(24) is 678,
+    // then exactly 14 fields (25..38) precede processor.
+    const std::string line =
+        "4242 (test proc) R 1 1 1 0 -1 4194560 120 0 1 0 55 22 0 0 20 0 3 0 "
+        "987654 123456789 678 18446744073709551615 4194304 4210000 140730000000 "
+        "0 0 0 0 0 0 0 0 0 17 7 88 0 0";
+    const auto f = parse_thread_stat(line);
+    CHECK(f.ok);
+    CHECK_EQ(f.state, 'R');
+    CHECK_EQ(f.priority, 20);
+    CHECK_EQ(f.processor, 7);  // field 39, NOT 88 (field 40) or 17 (field 38)
+
+    // comm containing ')' must not break the last-')' split.
+    const auto g = parse_thread_stat(
+        "10 (a) b) S 1 1 1 0 -1 0 0 0 0 0 1 2 0 0 19 0 1 0 5 100 20 "
+        "0 0 0 0 0 0 0 0 0 0 0 0 0 0 3 0 0");
+    CHECK(g.ok);
+    CHECK_EQ(g.state, 'S');
+    CHECK_EQ(g.processor, 3);
+
+    // Truncated / malformed line: processor stays -1, not garbage.
+    const auto h = parse_thread_stat("1 (x) R 1 2 3");
+    CHECK_EQ(h.processor, -1);
+}
+#endif
+
 } // namespace
 
 int main() {
@@ -267,6 +302,9 @@ int main() {
     test_history_store();
     test_csv_export_formula_injection(tmpdir);
     test_snapshot_diff();
+#ifdef __linux__
+    test_procfs_thread_stat();
+#endif
 
     std::printf("%d checks, %d failure(s)\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

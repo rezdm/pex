@@ -210,6 +210,12 @@ void DataStore::collect_data() {
     // processes the poller filtered or failed to parse as short-lived.
     if (event_source_ && event_source_->is_active()) {
         new_snapshot->events_active = true;
+        // A PID that polling has now observed in this snapshot is no longer
+        // "unseen": drop those *before* draining events, so an exit arriving in
+        // the same tick as a PID's first poll-observation is not miscounted as
+        // short-lived (issue #84).
+        std::erase_if(forked_unseen_pids_,
+                      [&current_pids](int pid) { return current_pids.contains(pid); });
         for (const ProcessEvent& ev : event_source_->drain()) {
             switch (ev.type) {
                 case ProcessEventType::Fork:
@@ -233,9 +239,6 @@ void DataStore::collect_data() {
                     break;
             }
         }
-        // A tracked PID now visible to polling is no longer "unseen".
-        std::erase_if(forked_unseen_pids_,
-                      [&current_pids](int pid) { return current_pids.contains(pid); });
         // Safety bound against leaked forks whose exit event was dropped.
         if (forked_unseen_pids_.size() > 100000) forked_unseen_pids_.clear();
     }
@@ -268,6 +271,13 @@ void DataStore::collect_data() {
         if (int ppid = node->info.parent_pid; ppid != pid && nodes.find(ppid) != nodes.end()) {
             children_map[ppid].push_back(pid);
         }
+    }
+
+    // Deterministic sibling order: the unordered_map iteration above is
+    // unstable, so sort each parent's children by pid to stop sibling rows
+    // shuffling between otherwise-identical refreshes (issue #91).
+    for (auto& [ppid, kids] : children_map) {
+        std::ranges::sort(kids);
     }
 
     // Recursive function to attach children
