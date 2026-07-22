@@ -124,6 +124,9 @@ void ImGuiApp::render_process_tree() {
             render_ghost_row(*info);
         }
 
+        // One-shot: every force-open request has now been applied this paint.
+        force_open_pids_.clear();
+
         ImGui::EndTable();
     }
 }
@@ -206,18 +209,19 @@ void ImGuiApp::render_process_tree_node(ProcessNode& node, const int depth,
         flags |= ImGuiTreeNodeFlags_DefaultOpen;
     }
 
+    // Search/jump asked this node be open regardless of any prior manual
+    // collapse — DefaultOpen alone can't reopen an already-created node, so
+    // force it (issue #89).
+    if (force_open_pids_.contains(node.info.pid)) {
+        ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+    }
+
     const std::string label = std::format("{}##{}", node.info.name, node.info.pid);
     const bool is_open = ImGui::TreeNodeEx(label.c_str(), flags);
 
     if (ImGui::IsItemClicked()) {
         view_model_.process_list.selected_pid = node.info.pid;
         refresh_selected_details();
-    }
-    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
-        view_model_.process_popup.target_pid = node.info.pid;
-        view_model_.process_popup.is_visible = true;
-        view_model_.process_popup.include_tree = true;
-        view_model_.process_popup.clear_history();
     }
 
     const ImVec2 row_min = ImGui::GetItemRectMin();
@@ -273,13 +277,26 @@ void ImGuiApp::render_process_tree_node(ProcessNode& node, const int depth,
     ImGui::TableNextColumn();
     ImGui::Text("%s", node.info.command_line.c_str());
 
-    if (ImGui::IsMouseClicked(0) && !ImGui::IsItemClicked() && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows)) {
+    // Row-wide mouse handling: select on a click anywhere in the row (except
+    // the tree label, handled above so the arrow still toggles expand), and
+    // open the history popup on a double-click anywhere in the row — issue #92
+    // previously only the name cell responded to double-click.
+    if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows)) {
         const ImVec2 mouse_pos = ImGui::GetMousePos();
         const float win_x = ImGui::GetWindowPos().x;
-        if (const float win_w = ImGui::GetWindowWidth(); mouse_pos.x >= win_x && mouse_pos.x <= win_x + win_w &&
-                                                         mouse_pos.y >= row_y_min && mouse_pos.y <= row_y_max) {
-            view_model_.process_list.selected_pid = node.info.pid;
-            refresh_selected_details();
+        const float win_w = ImGui::GetWindowWidth();
+        if (mouse_pos.x >= win_x && mouse_pos.x <= win_x + win_w &&
+            mouse_pos.y >= row_y_min && mouse_pos.y <= row_y_max) {
+            if (ImGui::IsMouseClicked(0) && !ImGui::IsItemClicked()) {
+                view_model_.process_list.selected_pid = node.info.pid;
+                refresh_selected_details();
+            }
+            if (ImGui::IsMouseDoubleClicked(0)) {
+                view_model_.process_popup.target_pid = node.info.pid;
+                view_model_.process_popup.is_visible = true;
+                view_model_.process_popup.include_tree = true;
+                view_model_.process_popup.clear_history();
+            }
         }
     }
 
@@ -413,6 +430,14 @@ void ImGuiApp::render_process_list() {
                 }
                 return ascending ? (result < 0) : (result > 0);
             });
+        }
+
+        // Remember the painted order (live rows only, ghosts excluded) so
+        // keyboard Up/Down can follow the on-screen sort next frame (issue #90).
+        last_list_order_.clear();
+        last_list_order_.reserve(rows.size());
+        for (const RowRef& r : rows) {
+            if (r.node) last_list_order_.push_back(r.node->info.pid);
         }
 
         for (const RowRef& row_ref : rows) {

@@ -417,8 +417,10 @@ void ImGuiApp::render_memory_tab() {
             std::ranges::sort(dp.memory_maps, [col, asc](const MemoryMapInfo& a, const MemoryMapInfo& b) {
                 int result = 0;
                 switch (col) {
-                    case 0: result = a.address.compare(b.address); break;
-                    case 1: result = a.size.compare(b.size); break;
+                    case 0: result = a.address.compare(b.address); break;  // fixed-width hex: lexicographic == numeric
+                    // Sort by the numeric byte count, not the formatted string
+                    // ("100 KB" would otherwise sort before "2 MB") — issue #88.
+                    case 1: result = (a.size_bytes < b.size_bytes) ? -1 : (a.size_bytes > b.size_bytes) ? 1 : 0; break;
                     case 2: result = a.permissions.compare(b.permissions); break;
                     case 3: result = a.pathname.compare(b.pathname); break;
                     default: result = 0;
@@ -531,7 +533,8 @@ void ImGuiApp::render_libraries_tab() {
                 switch (col) {
                     case 0: result = a.name.compare(b.name); break;
                     case 1: result = (a.total_size < b.total_size) ? -1 : (a.total_size > b.total_size) ? 1 : 0; break;
-                    case 2: result = a.base_address.compare(b.base_address); break;
+                    // Sort by the numeric base address, not the hex string (issue #88).
+                    case 2: result = (a.base_addr < b.base_addr) ? -1 : (a.base_addr > b.base_addr) ? 1 : 0; break;
                     case 3: result = a.path.compare(b.path); break;
                     default: result = 0;
                 }
