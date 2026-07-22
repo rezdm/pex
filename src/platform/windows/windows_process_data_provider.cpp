@@ -528,7 +528,7 @@ std::vector<ThreadInfo> WindowsProcessDataProvider::get_threads(const int pid) {
     return threads;
 }
 
-std::string WindowsProcessDataProvider::get_thread_stack(int, int) {
+std::string WindowsProcessDataProvider::get_thread_stack(int, int64_t) {
     return "";  // Would need StackWalk64 + symbols (Phase 2+)
 }
 

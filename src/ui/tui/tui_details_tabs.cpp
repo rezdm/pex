@@ -215,8 +215,8 @@ void TuiApp::render_threads_tab() const {
         const int state_color = get_state_color(thr.state);
         wattron(details_win_, COLOR_PAIR(state_color));
 
-        mvwprintw(details_win_, row, 2, "%-8d %-20s   %c   %-8d %-4d %s",
-                  thr.tid,
+        mvwprintw(details_win_, row, 2, "%-8lld %-20s   %c   %-8d %-4d %s",
+                  static_cast<long long>(thr.tid),
                   name.c_str(),
                   thr.state,
                   thr.priority,

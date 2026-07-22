@@ -48,8 +48,8 @@ struct DetailsPanelViewModel {
 
     // Thread selection for stack view
     int selected_thread_idx = -1;
-    int selected_thread_tid = -1;
-    int cached_stack_tid = -1;
+    int64_t selected_thread_tid = -1;  // matches ThreadInfo::tid width (issue #95)
+    int64_t cached_stack_tid = -1;
     std::string cached_stack;
 
     // Dirty flag for re-sorting after refresh

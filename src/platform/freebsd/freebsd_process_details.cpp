@@ -52,7 +52,7 @@ std::vector<ThreadInfo> FreeBSDProcessDataProvider::get_threads(int pid) {
     return threads;
 }
 
-std::string FreeBSDProcessDataProvider::get_thread_stack([[maybe_unused]] int pid, [[maybe_unused]] int tid) {
+std::string FreeBSDProcessDataProvider::get_thread_stack([[maybe_unused]] int pid, [[maybe_unused]] int64_t tid) {
     // Thread stack traces require kernel debugging support
     // Return empty for now - could potentially use ptrace or procfs if available
     return "";

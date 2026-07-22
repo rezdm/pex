@@ -169,10 +169,12 @@ ImGui UI as the other platforms. Process data comes from `libproc` + Mach +
 Notes:
 * Data for **your own** processes is complete without privileges; other users'
   file/network/env/maps details and `KERN_PROCARGS2` argv/env need `sudo`.
-* **SIP** blocks `task_for_pid` on Apple-signed processes even as root, so
-  per-thread kernel stacks are unavailable and some system-daemon details stay
-  hidden — pex reads everything via `libproc` and degrades gracefully. See
-  **[PRIVILEGES.md](PRIVILEGES.md)**.
+* **SIP + the hardened runtime/AMFI** block `task_for_pid` unless the binary
+  carries a debugger entitlement — **`sudo` does not help**. So **per-thread
+  stack traces are unavailable on macOS regardless of privilege** (would need
+  code-signing pex with a debugger entitlement), and some system-daemon details
+  stay hidden even as root. pex reads everything else via `libproc` and degrades
+  gracefully. See **[PRIVILEGES.md](PRIVILEGES.md)**.
 
 #### FreeBSD
 I am using `pex` in FreeBSD 15-RELEASE, with XFCE, X11 in VirtualBox 7.2. Seems to work -- shows all that I need.

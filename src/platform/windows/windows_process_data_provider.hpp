@@ -24,7 +24,7 @@ public:
     std::optional<ProcessInfo> get_process_info(int pid, int64_t total_memory) override;
 
     std::vector<ThreadInfo> get_threads(int pid) override;
-    std::string get_thread_stack(int pid, int tid) override;
+    std::string get_thread_stack(int pid, int64_t tid) override;
 
     std::vector<FileHandleInfo> get_file_handles(int pid) override;
     std::vector<NetworkConnectionInfo> get_network_connections(int pid) override;

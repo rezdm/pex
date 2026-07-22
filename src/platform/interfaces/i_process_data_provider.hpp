@@ -16,7 +16,7 @@ public:
     virtual std::optional<ProcessInfo> get_process_info(int pid, int64_t total_memory) = 0;
 
     virtual std::vector<ThreadInfo> get_threads(int pid) = 0;
-    virtual std::string get_thread_stack(int pid, int tid) = 0;
+    virtual std::string get_thread_stack(int pid, int64_t tid) = 0;
 
     virtual std::vector<FileHandleInfo> get_file_handles(int pid) = 0;
     virtual std::vector<NetworkConnectionInfo> get_network_connections(int pid) = 0;
