@@ -47,12 +47,17 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
             app.request_focus();
         });
 
-        app.run();
+        // Detach that this-capturing callback before 'app' is destroyed, on
+        // BOTH the normal and the exception path: 'instance' outlives this
+        // scope, and its listener thread could otherwise invoke request_focus()
+        // on a destroyed app if run() throws (issue #82). Declared after 'app'
+        // so it is destroyed first, i.e. before 'app'.
+        struct RaiseCallbackGuard {
+            pex::SingleInstance& si;
+            ~RaiseCallbackGuard() { si.set_raise_callback({}); }
+        } raise_guard{instance};
 
-        // Detach the callback before 'app' is destroyed: 'instance' outlives
-        // this scope and its listener thread could otherwise invoke
-        // request_focus() on a dead object.
-        instance.set_raise_callback({});
+        app.run();
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;

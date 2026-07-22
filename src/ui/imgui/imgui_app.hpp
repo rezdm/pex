@@ -95,6 +95,12 @@ private:
     void start_handle_search();
     void stop_handle_search();
 
+    // Idempotent teardown of background workers + detachment of their
+    // this-capturing callbacks. Called both at run()'s normal tail and in the
+    // destructor, so an exception escaping run() cannot leave a worker calling
+    // back into a destroyed ImGuiApp (issue #82).
+    void shutdown_workers();
+
     // History / Top Consumers view (issue #9)
     void render_history_view();
 

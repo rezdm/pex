@@ -155,6 +155,19 @@ KillResult FreeBSDProcessKiller::kill_process_tree(int pid, bool force,
         start_times[kp[i].ki_pid] = kp[i].ki_start;
     }
 
+    // Re-validate the root against the caller's token AFTER enumeration: the
+    // root could have exited and had its PID reused between the initial check
+    // and this scan, so signal the tree only if the fresh identity matches
+    // (issue #81).
+    if (expected_token) {
+        const auto st = start_times.find(pid);
+        if (st == start_times.end() || pack_start_time(st->second) != *expected_token) {
+            result.success = false;
+            result.error_message = "Root process changed identity (PID reused since scan); tree kill aborted.";
+            return result;
+        }
+    }
+
     // Find all children iteratively
     bool found_new = true;
     while (found_new) {
@@ -198,6 +211,13 @@ KillResult FreeBSDProcessKiller::kill_process_tree(int pid, bool force,
                 result.error_message = "SIGTERM sent. Process tree may still be running. Use Force Kill (SIGKILL) if it doesn't terminate.";
                 return result;
             }
+        }
+        // Root gone. Surface a genuine partial failure (some victims were denied)
+        // instead of reporting a clean success the UI silently dismisses (#81).
+        if (any_permission_denied) {
+            result.success = false;
+            result.error_message = "Tree kill partially failed: some processes could not be signaled (permission denied).";
+            return result;
         }
         result.success = true;
         result.process_still_running = false;
