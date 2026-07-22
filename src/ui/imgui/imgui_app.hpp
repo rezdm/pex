@@ -16,6 +16,7 @@
 #include <chrono>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 struct GLFWwindow;
@@ -128,6 +129,14 @@ private:
 
     // ViewModel (holds all UI state - single source of truth)
     AppViewModel view_model_;
+
+    // Tree nodes to force-open on the next paint, populated by expand_ancestors.
+    // ImGuiTreeNodeFlags_DefaultOpen does NOT reopen a node the user already
+    // collapsed, so search/jump must force it via SetNextItemOpen (issue #89).
+    std::unordered_set<int> force_open_pids_;
+    // PIDs in last-rendered list-view row order, so keyboard Up/Down follows the
+    // on-screen sort instead of raw tree-traversal order (issue #90).
+    std::vector<int> last_list_order_;
 
     // Details refresh tracking (avoid heavy syscalls every tick)
     int details_last_pid_ = -1;

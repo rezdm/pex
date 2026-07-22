@@ -43,7 +43,21 @@ std::vector<ProcessNode*> ImGuiApp::get_visible_items() const {
         for (auto& root : current_data_->process_tree) {
             collect_visible_items(root.get(), items, show_kernel);
         }
+    } else if (!last_list_order_.empty()) {
+        // List view: follow the order the rows were last painted in (which
+        // honors the active column sort), so keyboard Up/Down matches what's on
+        // screen (issue #90). One frame stale, which is fine — the order only
+        // changes when the data or sort changes.
+        items.reserve(last_list_order_.size());
+        for (const int pid : last_list_order_) {
+            if (const auto it = current_data_->process_map.find(pid);
+                    it != current_data_->process_map.end()) {
+                if (!show_kernel && it->second->info.is_kernel_thread) continue;
+                items.push_back(it->second);
+            }
+        }
     } else {
+        // Fallback before the first list paint: raw tree-order flatten.
         std::function<void(ProcessNode*)> flatten;
         flatten = [&](ProcessNode* node) {
             if (!show_kernel && node->info.is_kernel_thread) return;
@@ -177,7 +191,10 @@ void ImGuiApp::expand_ancestors(int pid) {
         const auto parent_it = current_data_->process_map.find(parent);
         if (parent_it == current_data_->process_map.end()) break;
         collapsed.erase(parent);
-        parent_it->second->is_expanded = true;  // Take effect this frame
+        parent_it->second->is_expanded = true;
+        // DefaultOpen won't reopen an already-collapsed node; force it open on
+        // the next paint via SetNextItemOpen (issue #89).
+        force_open_pids_.insert(parent);
         current = parent;
     }
 }
