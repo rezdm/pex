@@ -1,4 +1,5 @@
 #include "../procfs_reader.hpp"
+#include "procfs_stat_parse.hpp"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -88,33 +89,10 @@ std::vector<ThreadInfo> ProcfsReader::get_threads(int pid) {
                     if (comm_start != std::string::npos && comm_end != std::string::npos && comm_end > comm_start) {
                         thread.name = stat.substr(comm_start + 1, comm_end - comm_start - 1);
 
-                        if (comm_end + 2 < stat.size()) {
-                            std::istringstream iss(stat.substr(comm_end + 2));
-                            std::string state;
-                            int ppid = 0, pgrp = 0, session = 0, tty_nr = 0, tpgid = 0;
-                            unsigned int flags = 0;
-                            uint64_t minflt = 0, cminflt = 0, majflt = 0, cmajflt = 0, utime = 0, stime = 0;
-                            int64_t cutime = 0, cstime = 0, priority = 0, nice = 0, num_threads = 0, itrealvalue = 0, starttime = 0;
-                            uint64_t vsize = 0, rss = 0;
-                            uint64_t dummy[15] = {};
-                            int processor = 0;
-
-                            iss >> state >> ppid >> pgrp >> session >> tty_nr >> tpgid >> flags
-                                >> minflt >> cminflt >> majflt >> cmajflt >> utime >> stime
-                                >> cutime >> cstime >> priority >> nice >> num_threads >> itrealvalue >> starttime
-                                >> vsize >> rss;
-
-                            for (auto& d : dummy) iss >> d;
-                            iss >> processor;
-
-                            thread.state = state.empty() ? '?' : state[0];
-                            thread.priority = static_cast<int>(priority);
-                            thread.processor = iss.fail() ? -1 : processor;
-                        } else {
-                            thread.state = '?';
-                            thread.priority = 0;
-                            thread.processor = -1;
-                        }
+                        const procfs::ThreadStatFields f = procfs::parse_thread_stat(stat);
+                        thread.state = f.state;
+                        thread.priority = f.priority;
+                        thread.processor = f.processor;
                     } else {
                         thread.name = "???";
                         thread.state = '?';

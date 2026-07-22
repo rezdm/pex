@@ -95,7 +95,11 @@ void ImGuiApp::run() {
         throw std::runtime_error("Failed to create GLFW window");
     }
 
-    // Set window icon from embedded resource (no-op on macOS)
+    // Set window icon from embedded resource. Skipped on macOS: Cocoa has no
+    // per-window icons, so glfwSetWindowIcon there only logs a GLFW error
+    // (65548) to our error callback — noise for no effect (issue #96). The app
+    // icon on macOS comes from the bundle, not this call.
+#ifndef __APPLE__
     {
         int width, height, channels;
         unsigned char* pixels = stbi_load_from_memory(
@@ -110,6 +114,7 @@ void ImGuiApp::run() {
             stbi_image_free(pixels);
         }
     }
+#endif
 
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();

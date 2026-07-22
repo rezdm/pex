@@ -238,11 +238,16 @@ void TuiApp::execute_kill(bool force) {
         result = killer_->kill_process(kd.target_pid, force, kd.target_token);
     }
 
-    if (result.success) {
+    // A delivered-but-not-yet-effective SIGTERM is reported as
+    // success=true AND process_still_running=true. Only close on a clean
+    // termination; otherwise fall through to offer the SIGKILL escalation
+    // (issue #80 — previously testing success first made this unreachable,
+    // unlike the GUI which requires success && !process_still_running).
+    if (result.success && !result.process_still_running) {
         kd.is_visible = false;
         kd.target_pid = -1;
     } else if (result.process_still_running && !force) {
-        // Process didn't terminate, offer force kill
+        // SIGTERM delivered but the process is still alive: offer force kill
         kd.show_force_option = true;
         kd.error_message = "Process still running after SIGTERM";
     } else {

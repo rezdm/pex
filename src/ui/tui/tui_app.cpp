@@ -202,6 +202,10 @@ void TuiApp::run() {
                     : SnapshotDiff{};
                 current_data_ = new_data;
                 view_model_.update_from_snapshot(current_data_);
+                // A new snapshot means the selected process's dynamic details
+                // (network, files, threads, ...) may have changed; re-fetch
+                // them so open tabs don't show stale data (issue #94).
+                details_needs_refresh_ = true;
                 needs_render = true;
             }
             last_update = now;
