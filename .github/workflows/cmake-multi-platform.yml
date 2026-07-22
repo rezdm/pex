@@ -120,6 +120,30 @@ jobs:
       run: |
         test -f build/pexc.exe && echo "pexc.exe: OK"
 
+  # macOS (Darwin) via the native macos-latest runner (Apple clang / libc++).
+  # TUI + core for now (uses the SDK's ncurses); the Metal GUI is added later,
+  # so GUI is off here. Also the C++23 (std::format) toolchain-floor check.
+  build-macos:
+    name: macOS (Metal GUI + TUI)
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Configure
+      run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build
+      run: cmake --build build -j$(sysctl -n hw.ncpu)
+
+    - name: Verify binaries
+      run: |
+        test -f build/pex  && echo "pex (Metal GUI): OK"
+        test -f build/pexc && echo "pexc (TUI): OK"
+
+    - name: Run unit tests
+      run: ./build/pex_tests
+
   # Clang build: catches GCC-isms and surfaces a different set of -Wall
   # -Wextra -Wpedantic diagnostics than the GCC jobs. Uses the system
   # libstdc++, so std::format etc. come from GCC's standard library.

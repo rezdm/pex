@@ -1,9 +1,9 @@
 #include "imgui_app.hpp"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
-#include "imgui_impl_opengl3.h"
 #include "../../core/format_utils.hpp"
 #include "../../core/services/history_store.hpp"
+#define GLFW_INCLUDE_NONE  // renderer glue owns the graphics API; no GL here
 #include <GLFW/glfw3.h>
 #include <cstdlib>
 #include <format>
@@ -62,6 +62,9 @@ void ImGuiApp::run() {
     view_model_.system_panel.is_visible = settings_.get_bool("gui.system_panel", true);
     diff_highlight_enabled_ = settings_.get_bool("diff_highlight", true);
 
+    // Pick the graphics backend for this build (Metal on macOS, else OpenGL 3)
+    renderer_ = make_imgui_renderer();
+
     // Initialize GLFW
     glfwSetErrorCallback([](int code, const char* desc) {
         std::fprintf(stderr, "GLFW error %d: %s\n", code, desc ? desc : "(null)");
@@ -70,10 +73,8 @@ void ImGuiApp::run() {
         throw std::runtime_error("Failed to initialize GLFW");
     }
 
-    // GL 3.3 + GLSL 330
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    // Backend-specific window hints (GL context version, or GLFW_NO_API for Metal)
+    renderer_->set_window_hints();
 
     // Set Wayland app_id for desktop integration
     glfwWindowHintString(GLFW_WAYLAND_APP_ID, "pex");
@@ -94,10 +95,7 @@ void ImGuiApp::run() {
         throw std::runtime_error("Failed to create GLFW window");
     }
 
-    glfwMakeContextCurrent(window_);
-    glfwSwapInterval(1);
-
-    // Set window icon from embedded resource
+    // Set window icon from embedded resource (no-op on macOS)
     {
         int width, height, channels;
         unsigned char* pixels = stbi_load_from_memory(
@@ -128,9 +126,8 @@ void ImGuiApp::run() {
     style.FrameRounding = 2.0f;
     style.ScrollbarRounding = 2.0f;
 
-    // Setup Platform/Renderer backends
-    ImGui_ImplGlfw_InitForOpenGL(window_, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    // Setup Platform/Renderer backends (context-current + backend init)
+    renderer_->init(window_);
 
     // Start background threads
     name_resolver_.start();
@@ -177,23 +174,14 @@ void ImGuiApp::run() {
             recent_errors_cache_ = data_store_->get_recent_errors();
         }
 
-        // Start the Dear ImGui frame
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-
-        render();
-
-        // Rendering
-        ImGui::Render();
-        int display_w, display_h;
-        glfwGetFramebufferSize(window_, &display_w, &display_h);
-        glViewport(0, 0, display_w, display_h);
-        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-        glfwSwapBuffers(window_);
+        // Draw one frame through the active backend. The renderer runs its
+        // own *_NewFrame around this body, then submits + presents.
+        renderer_->render_frame(window_, [this]() {
+            ImGui_ImplGlfw_NewFrame();
+            ImGui::NewFrame();
+            render();
+            ImGui::Render();
+        });
     }
 
     // Persist settings (issue #1) - window size must be read before destroy
@@ -218,7 +206,7 @@ void ImGuiApp::run() {
     name_resolver_.stop();
 
     // Cleanup
-    ImGui_ImplOpenGL3_Shutdown();
+    renderer_->shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
 

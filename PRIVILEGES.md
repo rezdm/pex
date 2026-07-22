@@ -3,16 +3,17 @@
 pex works without any special privileges: you always get the full process tree
 with CPU and memory for every process. Elevation is only needed to see the
 *details* of **other users' processes** (open files, network, environment,
-memory maps, I/O), to kill them, and — on Linux — to subscribe to the kernel
-process-event feed behind the "Churn" line. Without it those panels just show
-"access denied" / stay empty for foreign processes, and pex collects data by
-polling only.
+memory maps, I/O), to kill them, and — on Linux, and more completely on
+macOS/BSD — to subscribe to the kernel process-event feed behind the "Churn"
+line. Without it those panels just show "access denied" / stay empty for
+foreign processes, and pex collects data by polling only.
 
 | OS | Mechanism | Scope of elevation | GUI-friendly |
 |---|---|---|---|
 | Linux | file capabilities (`setcap`) | 4 capabilities, this binary only | yes — works on Wayland, unlike sudo |
 | Solaris | RBAC profile + `pfexec` | 3 privileges, this binary + assigned users only | yes |
 | FreeBSD | `sudo` / `doas` | full root for the session | X11 only, see caveat |
+| macOS | `sudo` (no capabilities/RBAC) | full root — but SIP still hides Apple-signed processes | yes, but see SIP caveat |
 
 Do **not** make the binary setuid root: it would run the whole GUI/rendering
 stack as root, which is exactly what the recipes below avoid.
@@ -188,6 +189,55 @@ Footnotes:
   from non-root regardless of the above.
 * Settings saved while running under sudo land in **root's**
   `~/.config/pex/pex.conf` (and root's `imgui.ini`), not yours.
+
+---
+
+## macOS
+
+macOS has no file capabilities and no RBAC for this; reading other users'
+open files, network sockets, environment (`KERN_PROCARGS2`), and memory maps
+requires root. Use `sudo`.
+
+But root is **not** the whole story here — **System Integrity Protection
+(SIP)** caps what any process, even root, may inspect:
+
+* `task_for_pid()` is denied for Apple-signed / platform binaries regardless
+  of privilege. pex never calls it (it reads everything through `libproc` and
+  `sysctl`), so it degrades gracefully rather than failing — but it means some
+  details of system daemons stay hidden even under `sudo`, and per-thread
+  kernel stacks are unavailable on macOS for everyone.
+* `KERN_PROCARGS2` (the argv/env source) only returns another process's
+  arguments to root; unprivileged, you see full argv/env for **your own**
+  processes and just the name/path for others.
+* The "Churn" line is fed by a `kqueue`/`EVFILT_PROC` watch. Without root it
+  can only attach to processes you already own, so foreign short-lived
+  processes are missed; the feed is best-effort and pex still polls.
+
+### TUI
+
+```bash
+sudo pexc
+```
+
+### GUI (Metal)
+
+Unlike Wayland, a Terminal-launched GUI runs fine as root on macOS:
+
+```bash
+sudo /opt/pex/pex
+```
+
+Caveats:
+* Settings and `imgui.ini` saved while running under `sudo` land in **root's**
+  home (`/var/root/…`), not yours.
+* The "proper" alternative to `sudo` — code-signing the binary with a
+  debugging entitlement (`com.apple.security.get-task-allow` and friends) —
+  needs an Apple provisioning profile and still won't lift SIP on Apple-signed
+  targets, so it buys little for a self-built tool. `sudo` is the pragmatic
+  choice.
+
+Without any elevation pex is still fully useful: the complete process tree
+with CPU/memory, and full detail for **your own** processes.
 
 ---
 

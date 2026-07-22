@@ -3,7 +3,7 @@
 [![CMake Multi-Platform Build](https://github.com/rezdm/pex/actions/workflows/cmake-multi-platform.yml/badge.svg)](https://github.com/rezdm/pex/actions/workflows/cmake-multi-platform.yml)
 [![CodeQL](https://github.com/rezdm/pex/actions/workflows/codeql.yml/badge.svg)](https://github.com/rezdm/pex/actions/workflows/codeql.yml)
 
-A Linux process explorer similar to Windows Process Explorer. Also runs on FreeBSD and Solaris, with **experimental TUI-only support on Windows**.
+A Linux process explorer similar to Windows Process Explorer. Also runs on FreeBSD and Solaris, with **experimental support on macOS (Metal GUI + TUI) and TUI-only on Windows**.
 
 ## Why
 
@@ -21,7 +21,7 @@ It started as AI generated code for a one-off need, then turned out to be useful
   * **History – Top Consumers** view (GUI): rank processes by average CPU / memory / I/O over the last 1 min / 5 min / all recorded, with trend sparklines — including processes that have already exited
   * Export everything to CSV for offline analysis
 * **Difference highlighting** (Process Explorer style) — new processes flash green, exited processes linger as red ghost rows for one refresh interval. In the GUI the ghost stays *in place* (under its parent in tree view, in sorted position in list view); the TUI pins ghosts to the bottom of the process panel so they are visible regardless of scroll. Toggle in the GUI View menu (`diff_highlight` setting)
-* **Process churn from the kernel** — with the event feed active (Linux proc connector, needs `cap_net_admin`, see [PRIVILEGES.md](PRIVILEGES.md); FreeBSD kqueue `EVFILT_PROC`), the system panel counts forks/execs/exits per tick, including short-lived processes that live and die between refreshes — the ones polling never sees
+* **Process churn from the kernel** — with the event feed active (Linux proc connector, needs `cap_net_admin`, see [PRIVILEGES.md](PRIVILEGES.md); FreeBSD/macOS kqueue `EVFILT_PROC`), the system panel counts forks/execs/exits per tick, including short-lived processes that live and die between refreshes — the ones polling never sees
 * **Find open file / handle** — search all processes for an open file, socket, pipe or loaded library by path substring (like Process Explorer's "Find Handle or DLL")
 * **Kill** process or whole process tree (SIGTERM, escalate to SIGKILL), with PID-reuse guards
 * **Search** by process name or command line, including processes under collapsed tree nodes
@@ -30,7 +30,7 @@ It started as AI generated code for a one-off need, then turned out to be useful
 * Settings (window size, view mode, panels, refresh interval) persist across runs in `~/.config/pex/pex.conf`; GUI window/table layout persists via `imgui.ini`
 
 Two frontends, same data layer:
-* `pex` — GUI (Dear ImGui + GLFW + OpenGL), works on X11 and Wayland
+* `pex` — GUI (Dear ImGui + GLFW), OpenGL on X11/Wayland and Metal on macOS
 * `pexc` — ncurses TUI with near feature parity (no charts); ~5 MB RSS if memory matters
 
 ## Screenshots
@@ -38,6 +38,10 @@ Two frontends, same data layer:
 ![GUI version](pex-screenshot.png)
 
 ![Console (TUI) version](pexc-screenshot.png)
+
+GUI running on macOS (Metal renderer, Apple Silicon):
+
+![macOS (Metal) GUI](pex-macos.jpeg)
 
 ## Keys
 
@@ -82,6 +86,7 @@ Being able to compile (C++23, CMake >= 3.20). Tested to run on:
 * FreeBSD 15-RELEASE, XFCE/X11
 * Solaris 11.4, GNOME/X11
 * Solaris, Debian, FreeBSD: terminal
+* macOS: GUI (Metal) + terminal, experimental — see below
 * Windows 10/11: terminal only (`pexc.exe`), experimental — see below
 
 ## Continuous integration
@@ -94,6 +99,7 @@ C library (see [`.github/workflows/cmake-multi-platform.yml`](.github/workflows/
 | Ubuntu (latest) | GCC / glibc — primary Linux build (GUI + TUI) |
 | Debian (latest) | GCC / glibc — Debian container |
 | Windows (TUI only) | native `windows-latest` runner; MSYS2/UCRT64 + PDCursesMod, `pexc.exe` only |
+| macOS (Metal GUI + TUI) | native `macos-latest` runner; Apple clang/libc++, GUI over Metal + `pexc` |
 | Ubuntu (clang) | Clang instead of GCC — catches GCC-isms and a different warning set |
 | GCC 13 (C++23 floor) | pins the minimum toolchain (libstdc++ `std::format` landed in GCC 13.1) |
 | Sanitizers (ASan+UBSan) | core + unit tests under Address/UndefinedBehavior sanitizers |
@@ -145,6 +151,28 @@ To build only the TUI (no X11/OpenGL needed):
 ```bash
 cmake .. -DBUILD_GUI=OFF
 ```
+
+### macOS (experimental)
+Both apps build with the Xcode command-line tools (`xcode-select --install`)
+and CMake. The platform is auto-detected (`Darwin` → `macos`); no
+`-DPEX_PLATFORM` needed:
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(sysctl -n hw.ncpu)
+```
+This produces `pex` (GUI) and `pexc` (TUI). Because **OpenGL is deprecated on
+macOS**, the GUI renders through **Metal** (GLFW window + `CAMetalLayer`,
+`imgui_impl_metal`); everything above the renderer seam is the same shared
+ImGui UI as the other platforms. Process data comes from `libproc` + Mach +
+`sysctl`.
+
+Notes:
+* Data for **your own** processes is complete without privileges; other users'
+  file/network/env/maps details and `KERN_PROCARGS2` argv/env need `sudo`.
+* **SIP** blocks `task_for_pid` on Apple-signed processes even as root, so
+  per-thread kernel stacks are unavailable and some system-daemon details stay
+  hidden — pex reads everything via `libproc` and degrades gracefully. See
+  **[PRIVILEGES.md](PRIVILEGES.md)**.
 
 #### FreeBSD
 I am using `pex` in FreeBSD 15-RELEASE, with XFCE, X11 in VirtualBox 7.2. Seems to work -- shows all that I need.
@@ -201,7 +229,7 @@ Copy pex executable and pex.png to a folder of choice and set capabilities:
 ```bash
 sudo setcap 'cap_sys_ptrace,cap_dac_read_search,cap_kill,cap_net_admin+ep' {path-to-executable-location}/pex
 ```
-pex runs fine without this — you just won't see details (files, network, environment, ...) of other users' processes, and the churn line stays hidden. `cap_kill` (kill others' processes) and `cap_net_admin` (kernel process-event feed) are optional — drop them if unwanted. For the full story per OS (Linux capabilities incl. a group-restricted variant, Solaris RBAC/pfexec, FreeBSD sudo/doas), see **[PRIVILEGES.md](PRIVILEGES.md)**.
+pex runs fine without this — you just won't see details (files, network, environment, ...) of other users' processes, and the churn line stays hidden. `cap_kill` (kill others' processes) and `cap_net_admin` (kernel process-event feed) are optional — drop them if unwanted. For the full story per OS (Linux capabilities incl. a group-restricted variant, Solaris RBAC/pfexec, FreeBSD sudo/doas, macOS sudo + SIP caveats), see **[PRIVILEGES.md](PRIVILEGES.md)**.
 
 May be create .desktop file for GNOME:
 ```

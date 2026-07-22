@@ -9,6 +9,7 @@
 #include "../common/viewmodels/app_view_model.hpp"
 #include "../../core/services/name_resolver.hpp"
 #include "../../core/services/settings.hpp"
+#include "imgui_renderer.hpp"
 #include <memory>
 #include <atomic>
 #include <mutex>
@@ -54,6 +55,9 @@ private:
                                const std::unordered_map<int, std::vector<const ProcessInfo*>>& ghost_children);
     void render_process_list();
     void render_details_panel();
+    // Shown in a details tab when its list is empty and we likely lack the
+    // privileges to read another process (Linux: capabilities; macOS/BSD: root).
+    void render_details_access_note(bool list_empty);
     void render_file_handles_tab();
     void render_network_tab();
     void render_threads_tab();
@@ -135,6 +139,9 @@ private:
     // Window pointer for focus handling
     GLFWwindow* window_ = nullptr;
     std::atomic<bool> focus_requested_{false};
+
+    // Graphics backend (OpenGL on Linux/BSD/Solaris, Metal on macOS)
+    std::unique_ptr<ImGuiRenderer> renderer_;
 
     // Name resolver for DNS and service lookups
     NameResolver name_resolver_;

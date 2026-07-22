@@ -23,11 +23,13 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "SunOS")
     set(PEX_PLATFORM_DEFAULT "solaris")
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(PEX_PLATFORM_DEFAULT "windows")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(PEX_PLATFORM_DEFAULT "macos")
 else()
-    message(FATAL_ERROR "Unsupported platform: ${CMAKE_SYSTEM_NAME}. Supported: Linux, FreeBSD, SunOS (Solaris), Windows.")
+    message(FATAL_ERROR "Unsupported platform: ${CMAKE_SYSTEM_NAME}. Supported: Linux, FreeBSD, SunOS (Solaris), Windows, Darwin (macOS).")
 endif()
-set(PEX_PLATFORM "${PEX_PLATFORM_DEFAULT}" CACHE STRING "Platform backend (linux, freebsd, solaris, windows)")
-set_property(CACHE PEX_PLATFORM PROPERTY STRINGS linux freebsd solaris windows)
+set(PEX_PLATFORM "${PEX_PLATFORM_DEFAULT}" CACHE STRING "Platform backend (linux, freebsd, solaris, windows, macos)")
+set_property(CACHE PEX_PLATFORM PROPERTY STRINGS linux freebsd solaris windows macos)
 
 # Windows is TUI-only (issue #43): Process Explorer already owns the GUI niche
 if(PEX_PLATFORM STREQUAL "windows")
@@ -53,6 +55,11 @@ endif()
 # GUI dependencies (GLFW, ImGui, stb, OpenGL) - only when building GUI
 # =============================================================================
 if(BUILD_GUI)
+    # macOS renders through Metal (.mm backends); everyone else uses OpenGL 3.
+    if(APPLE)
+        enable_language(OBJCXX)
+    endif()
+
     include(EmbedResource)
 
     # Embed the icon as a C array
@@ -103,8 +110,13 @@ if(BUILD_GUI)
     )
     FetchContent_MakeAvailable(stb)
 
-    # Find OpenGL
-    find_package(OpenGL REQUIRED)
+    # Renderer backend: Metal (.mm, ARC) on macOS, OpenGL 3 elsewhere.
+    if(APPLE)
+        set(PEX_IMGUI_BACKEND ${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm)
+    else()
+        find_package(OpenGL REQUIRED)
+        set(PEX_IMGUI_BACKEND ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
+    endif()
 
     # ImGui library (imgui_demo.cpp intentionally excluded: nothing calls
     # ShowDemoWindow and it bloats the release binary)
@@ -114,13 +126,22 @@ if(BUILD_GUI)
         ${imgui_SOURCE_DIR}/imgui_tables.cpp
         ${imgui_SOURCE_DIR}/imgui_widgets.cpp
         ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+        ${PEX_IMGUI_BACKEND}
     )
     target_include_directories(imgui PUBLIC
         ${imgui_SOURCE_DIR}
         ${imgui_SOURCE_DIR}/backends
     )
-    target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
+    if(APPLE)
+        # imgui_impl_metal.mm requires ARC; link the Metal stack.
+        set_source_files_properties(${imgui_SOURCE_DIR}/backends/imgui_impl_metal.mm
+            PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+        target_link_libraries(imgui PUBLIC glfw
+            "-framework Metal" "-framework MetalKit"
+            "-framework QuartzCore" "-framework Cocoa")
+    else()
+        target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
+    endif()
 endif()
 
 # =============================================================================
@@ -208,8 +229,21 @@ elseif(PEX_PLATFORM STREQUAL "windows")
     )
     set(PEX_PLATFORM_DEFINE "PEX_PLATFORM_WINDOWS")
     set(PEX_PLATFORM_LIBS psapi iphlpapi ws2_32 ntdll advapi32)
+elseif(PEX_PLATFORM STREQUAL "macos")
+    set(PEX_PLATFORM_SOURCES
+        src/platform/macos/macos_process_data_provider.cpp
+        src/platform/macos/macos_process_details.cpp
+        src/platform/macos/macos_system_data_provider.cpp
+        src/platform/macos/macos_process_killer.cpp
+        src/platform/macos/macos_process_event_source.cpp
+        src/platform/macos/platform_factory_macos.cpp
+    )
+    set(PEX_PLATFORM_DEFINE "PEX_PLATFORM_MACOS")
+    # libproc and Mach are in libSystem (linked by default); frameworks for
+    # the host_* Mach calls come via CoreFoundation.
+    set(PEX_PLATFORM_LIBS "-framework CoreFoundation")
 else()
-    message(FATAL_ERROR "Unknown PEX_PLATFORM: ${PEX_PLATFORM}. Use 'linux', 'freebsd', 'solaris', or 'windows'.")
+    message(FATAL_ERROR "Unknown PEX_PLATFORM: ${PEX_PLATFORM}. Use 'linux', 'freebsd', 'solaris', 'windows', or 'macos'.")
 endif()
 
 add_library(pex_platform STATIC ${PEX_PLATFORM_SOURCES})
@@ -227,6 +261,12 @@ endif()
 # pex_ui_imgui - ImGui UI library (only when building GUI)
 # =============================================================================
 if(BUILD_GUI)
+    if(APPLE)
+        set(PEX_RENDERER_SRC src/ui/imgui/imgui_renderer_metal.mm)
+    else()
+        set(PEX_RENDERER_SRC src/ui/imgui/imgui_renderer_opengl.cpp)
+    endif()
+
     add_library(pex_ui_imgui STATIC
         src/ui/imgui/imgui_app.cpp
         src/ui/imgui/imgui_app_menus.cpp
@@ -239,7 +279,12 @@ if(BUILD_GUI)
         src/ui/imgui/imgui_find_handle_dialog.cpp
         src/ui/imgui/imgui_history_view.cpp
         src/ui/imgui/imgui_input.cpp
+        ${PEX_RENDERER_SRC}
     )
+    if(APPLE)
+        set_source_files_properties(src/ui/imgui/imgui_renderer_metal.mm
+            PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    endif()
     target_include_directories(pex_ui_imgui PUBLIC src PRIVATE ${stb_SOURCE_DIR} ${CMAKE_BINARY_DIR}/generated)
     target_link_libraries(pex_ui_imgui PUBLIC pex_core pex_platform imgui)
 
@@ -251,11 +296,16 @@ if(BUILD_GUI)
         src/stb_impl.cpp
     )
     target_include_directories(pex PRIVATE ${stb_SOURCE_DIR} ${CMAKE_BINARY_DIR}/generated)
-    target_link_libraries(pex PRIVATE pex_ui_imgui OpenGL::GL)
+    target_link_libraries(pex PRIVATE pex_ui_imgui)
+    if(NOT APPLE)
+        target_link_libraries(pex PRIVATE OpenGL::GL)
+    endif()
 
     install(TARGETS pex RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-    install(FILES pex.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
-    install(FILES src/pex.png DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps)
+    if(NOT APPLE)
+        install(FILES pex.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+        install(FILES src/pex.png DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps)
+    endif()
 endif()
 
 # =============================================================================
