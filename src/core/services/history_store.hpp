@@ -6,6 +6,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace pex {
@@ -80,6 +81,12 @@ public:
     void record(const DataSnapshot& snapshot);
 
     [[nodiscard]] size_t sample_count() const;
+
+    // How many of the most-recent samples have wall_time >= oldest. Lets the UI
+    // express "last N minutes" as a real time window instead of a tick count
+    // tied to the current refresh interval, which is wrong for history recorded
+    // at a since-changed interval (issue #86).
+    [[nodiscard]] size_t count_since(std::chrono::system_clock::time_point oldest) const;
 
     // Summed series for a set of PIDs (e.g. a process subtree), most recent
     // max_points ticks. Ticks where none of the PIDs existed contribute 0.

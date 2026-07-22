@@ -73,11 +73,14 @@ void ImGuiApp::render_history_view() {
             ImGui::TextDisabled("(%zu ticks recorded, ~%.0f s span)", recorded, span_sec);
         }
 
-        // Window selection -> tick count
-        const int refresh_ms = std::max(1, data_store_->get_refresh_interval());
+        // Real time windows (issue #86): count how many of the most-recent
+        // samples fall within the last 1/5 minutes by wall-clock, instead of a
+        // tick count derived from the *current* refresh interval — which is
+        // wrong for history recorded at a since-changed interval.
+        const auto now_wall = std::chrono::system_clock::now();
         size_t window_ticks = SIZE_MAX;  // All recorded
-        if (history_window_idx_ == 0) window_ticks = static_cast<size_t>(60'000 / refresh_ms);
-        else if (history_window_idx_ == 1) window_ticks = static_cast<size_t>(300'000 / refresh_ms);
+        if (history_window_idx_ == 0) window_ticks = history_->count_since(now_wall - std::chrono::minutes(1));
+        else if (history_window_idx_ == 1) window_ticks = history_->count_since(now_wall - std::chrono::minutes(5));
 
         // Refresh the cached aggregation on parameter change or once per second
         const auto now = std::chrono::steady_clock::now();
