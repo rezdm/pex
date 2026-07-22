@@ -2,6 +2,7 @@
 
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <fcntl.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -49,7 +50,12 @@ SingleInstance::~SingleInstance() {
         server_fd_ = -1;
     }
 
-    if (!socket_path_.empty()) {
+    // Only the instance that actually bound the socket may remove it. A
+    // secondary launch computes socket_path_ too but never bound it — deleting
+    // the file here would orphan the running primary's socket, so a later
+    // launch couldn't find it and would wrongly become a second primary
+    // (issue #79).
+    if (owns_socket_ && !socket_path_.empty()) {
         unlink(socket_path_.c_str());
     }
 }
@@ -146,6 +152,10 @@ bool SingleInstance::try_become_primary() {
         return true; // Can't listen, proceed anyway
     }
 
+    // We bound and listened: this instance owns the socket file and is
+    // responsible for removing it on exit (issue #79).
+    owns_socket_ = true;
+
     // Start listener thread
     running_ = true;
     listener_ = std::thread(&SingleInstance::listen_thread, this);
@@ -168,7 +178,14 @@ void SingleInstance::listen_thread() const {
             continue;
         }
 
-        // Read command
+        // Bound the read: a client that connects but never writes (or never
+        // closes) must not wedge this thread — the destructor's join() would
+        // then hang forever (issue #79). A couple of seconds is ample for the
+        // local RAISE handshake.
+        struct timeval tv{};
+        tv.tv_sec = 2;
+        setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
         char buffer[64];
         const ssize_t n = read(client_fd, buffer, sizeof(buffer) - 1);
         close(client_fd);

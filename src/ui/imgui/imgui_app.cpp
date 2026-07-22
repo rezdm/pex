@@ -47,7 +47,22 @@ ImGuiApp::ImGuiApp(DataStore* data_store,
 }
 
 ImGuiApp::~ImGuiApp() {
-    stop_handle_search();
+    shutdown_workers();
+}
+
+// Stop every background worker and detach the callbacks that capture `this`.
+// Order matters: stop() joins each worker thread first, so once we clear the
+// callbacks no thread can still be about to invoke one. Idempotent — stop()
+// on an already-stopped worker is a no-op and clearing an empty callback is
+// harmless — so this is safe to call from both run()'s tail and ~ImGuiApp().
+void ImGuiApp::shutdown_workers() {
+    stop_handle_search();          // joins the find worker (posts GLFW events)
+    if (data_store_) {
+        data_store_->stop();       // joins the collection thread
+        data_store_->set_on_data_updated({});
+    }
+    name_resolver_.stop();         // joins the resolver thread
+    name_resolver_.set_on_resolved({});
 }
 
 void ImGuiApp::run() {
@@ -205,10 +220,9 @@ void ImGuiApp::run() {
         settings_.save();
     }
 
-    // Stop background threads (find worker first: it posts GLFW events)
-    stop_handle_search();
-    data_store_->stop();
-    name_resolver_.stop();
+    // Stop background workers + detach their callbacks (idempotent; also run
+    // by the destructor on the exception path).
+    shutdown_workers();
 
     // Cleanup
     renderer_->shutdown();

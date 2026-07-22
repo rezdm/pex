@@ -216,6 +216,16 @@ KillResult LinuxProcessKiller::kill_process_tree(int pid, bool force,
         return result;
     }
 
+    // Re-validate the root against the caller's token AFTER enumeration: if the
+    // root exited and its PID was reused in the window between the initial
+    // check and this scan, the fresh start time won't match and we must not
+    // signal the whole tree of an unrelated process (issue #81).
+    if (expected_token && start_times[pid] != *expected_token) {
+        result.success = false;
+        result.error_message = "Root process changed identity (PID reused since scan); tree kill aborted.";
+        return result;
+    }
+
     // Post-order traversal to get kill order (children before parents)
     std::vector<int> kill_order;
     std::set<int> visited;
@@ -282,15 +292,25 @@ KillResult LinuxProcessKiller::kill_process_tree(int pid, bool force,
         }
     }
 
-    result.success = true;
-    result.process_still_running = false;
-
-    if ((skipped > 0 || failed > 0) && result.error_message.empty()) {
+    // Root is gone. A "skipped" count is not a failure — those changed identity
+    // since the scan and were correctly left alone. A "failed" count (a signal
+    // that returned an error other than ESRCH) IS a partial failure and must be
+    // surfaced as success=false, not left as a note on a success the UI can
+    // silently dismiss (issue #81).
+    if (failed > 0) {
+        result.success = false;
+        result.process_still_running = false;
         result.error_message = std::format(
-            "Kill tree completed with warnings: skipped {} process(es), failed to signal {} process(es).",
-            skipped, failed);
+            "Tree kill partially failed: {} process(es) could not be signaled.", failed);
+        return result;
     }
 
+    result.success = true;
+    result.process_still_running = false;
+    if (skipped > 0) {
+        result.error_message = std::format(
+            "Tree kill completed; {} process(es) skipped (PID reused since scan).", skipped);
+    }
     return result;
 }
 

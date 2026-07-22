@@ -125,6 +125,15 @@ KillResult MacosProcessKiller::kill_process_tree(int pid, bool force,
         return result;
     }
 
+    // Re-validate the root against the caller's token AFTER enumeration: if the
+    // root exited and its PID was reused between the initial check and this
+    // snapshot, the fresh start time won't match and we must not signal the
+    // whole tree of an unrelated process (issue #81).
+    if (expected_token && start_of[pid] != *expected_token) {
+        result.error_message = "Root process changed identity (PID reused since scan); tree kill aborted.";
+        return result;
+    }
+
     // Collect descendants (children first).
     std::set<int> tree{pid};
     bool grew = true;
@@ -155,6 +164,12 @@ KillResult MacosProcessKiller::kill_process_tree(int pid, bool force,
             result.success = true;
             result.process_still_running = true;
             result.error_message = "SIGTERM sent. Process tree may still be running. Use Force Kill (SIGKILL) if it doesn't terminate.";
+            return result;
+        }
+        // Root gone. Surface a genuine partial failure (some victims were denied)
+        // instead of reporting a clean success the UI silently dismisses (#81).
+        if (any_denied) {
+            result.error_message = "Tree kill partially failed: some processes could not be signaled (permission denied).";
             return result;
         }
         result.success = true;

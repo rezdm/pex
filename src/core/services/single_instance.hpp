@@ -26,6 +26,7 @@ private:
     static std::string get_socket_path();
 
     int server_fd_ = -1;
+    bool owns_socket_ = false;  // true only if THIS instance bound+listened (issue #79)
     std::string socket_path_;
     mutable std::mutex callback_mutex_;
     std::function<void()> raise_callback_;
