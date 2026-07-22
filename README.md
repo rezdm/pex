@@ -39,6 +39,10 @@ Two frontends, same data layer:
 
 ![Console (TUI) version](pexc-screenshot.png)
 
+GUI running on macOS (Metal renderer, Apple Silicon):
+
+![macOS (Metal) GUI](pex-macos.jpeg)
+
 ## Keys
 
 ### GUI (pex)
