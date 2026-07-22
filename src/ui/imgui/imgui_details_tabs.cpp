@@ -290,7 +290,7 @@ void ImGuiApp::render_threads_tab() {
             std::ranges::sort(dp.threads, [col, asc](const ThreadInfo& a, const ThreadInfo& b) {
                 int result = 0;
                 switch (col) {
-                    case 0: result = a.tid - b.tid; break;
+                    case 0: result = (a.tid < b.tid) ? -1 : (a.tid > b.tid) ? 1 : 0; break;  // 3-way: tid is int64_t (issue #95)
                     case 1: result = a.name.compare(b.name); break;
                     case 2: result = a.state - b.state; break;
                     case 3: result = a.priority - b.priority; break;
@@ -328,7 +328,7 @@ void ImGuiApp::render_threads_tab() {
                 dp.cached_stack.clear();
             }
             ImGui::SameLine();
-            ImGui::Text("%d", thread.tid);
+            ImGui::Text("%lld", static_cast<long long>(thread.tid));
 
             ImGui::TableNextColumn();
             ImGui::Text("%s", thread.name.c_str());
@@ -353,10 +353,10 @@ void ImGuiApp::render_threads_tab() {
     ImGui::BeginChild("StackTrace", ImVec2(0, 0), true);
 
     if (dp.selected_thread_idx >= 0 && dp.selected_thread_idx < static_cast<int>(dp.threads.size()) && dp.details_pid > 0) {
-        const int tid = dp.threads[dp.selected_thread_idx].tid;
+        const int64_t tid = dp.threads[dp.selected_thread_idx].tid;
         dp.selected_thread_tid = tid;
 
-        ImGui::Text("Stack for TID %d", tid);
+        ImGui::Text("Stack for TID %lld", static_cast<long long>(tid));
         ImGui::SameLine();
         if (ImGui::SmallButton("Refresh")) {
             dp.cached_stack_tid = -1;

@@ -59,7 +59,7 @@ struct ProcessInfo {
 };
 
 struct ThreadInfo {
-    int tid = 0;                    // Thread ID (Linux: TID, Windows: thread ID)
+    int64_t tid = 0;                // Thread ID (macOS Mach thread IDs are 64-bit; narrowing to int made them negative — issue #95)
     std::string name;               // Thread name if available
     char state = '?';               // Same state chars as ProcessInfo
     int priority = 0;

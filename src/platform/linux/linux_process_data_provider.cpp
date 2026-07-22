@@ -16,7 +16,7 @@ std::vector<ThreadInfo> LinuxProcessDataProvider::get_threads(int pid) {
     return ProcfsReader::get_threads(pid);
 }
 
-std::string LinuxProcessDataProvider::get_thread_stack(int pid, int tid) {
+std::string LinuxProcessDataProvider::get_thread_stack(int pid, int64_t tid) {
     return ProcfsReader::get_thread_stack(pid, tid);
 }
 

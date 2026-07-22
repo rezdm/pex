@@ -323,7 +323,7 @@ std::vector<ThreadInfo> SolarisProcessDataProvider::get_threads(int pid) {
     return threads;
 }
 
-std::string SolarisProcessDataProvider::get_thread_stack([[maybe_unused]] int pid, [[maybe_unused]] int tid) {
+std::string SolarisProcessDataProvider::get_thread_stack([[maybe_unused]] int pid, [[maybe_unused]] int64_t tid) {
     // Would require pstack or dtrace - return empty for now
     return "";
 }

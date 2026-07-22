@@ -97,7 +97,7 @@ std::vector<ThreadInfo> MacosProcessDataProvider::get_threads(int pid) {
             continue;
         }
         ThreadInfo t;
-        t.tid = static_cast<int>(tids[i]);
+        t.tid = static_cast<int64_t>(tids[i]);  // Mach thread IDs are 64-bit (issue #95)
         t.name = pti.pth_name[0] ? pti.pth_name : "";
         t.state = map_thread_state(pti.pth_run_state);
         t.priority = pti.pth_curpri;
@@ -107,7 +107,7 @@ std::vector<ThreadInfo> MacosProcessDataProvider::get_threads(int pid) {
 }
 
 std::string MacosProcessDataProvider::get_thread_stack([[maybe_unused]] int pid,
-                                                       [[maybe_unused]] int tid) {
+                                                       [[maybe_unused]] int64_t tid) {
     // Per-thread kernel stacks require task_for_pid (SIP-restricted); unavailable.
     return {};
 }

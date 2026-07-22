@@ -199,13 +199,20 @@ open files, network sockets, environment (`KERN_PROCARGS2`), and memory maps
 requires root. Use `sudo`.
 
 But root is **not** the whole story here — **System Integrity Protection
-(SIP)** caps what any process, even root, may inspect:
+(SIP)** and the **hardened runtime / AMFI** cap what any process, even root,
+may inspect:
 
-* `task_for_pid()` is denied for Apple-signed / platform binaries regardless
-  of privilege. pex never calls it (it reads everything through `libproc` and
-  `sysctl`), so it degrades gracefully rather than failing — but it means some
-  details of system daemons stay hidden even under `sudo`, and per-thread
-  kernel stacks are unavailable on macOS for everyone.
+* `task_for_pid()` (needed to read another process's threads for stack
+  unwinding) is denied to any binary lacking a debugger entitlement — **root
+  does not lift this**. It's not only SIP protecting Apple-signed targets:
+  AMFI/the hardened runtime blocks it for arbitrary targets too. Granting it
+  would require code-signing pex with `com.apple.security.cs.debugger` /
+  `get-task-allow`, which needs an Apple Developer ID or local ad-hoc signing —
+  infrastructure this project doesn't ship. So **per-thread stack traces are
+  unavailable on macOS regardless of `sudo`**, by design, not as a bug. pex
+  never calls `task_for_pid()` — it reads everything else through `libproc` and
+  `sysctl` — so it degrades gracefully; but some details of system daemons also
+  stay hidden even under `sudo`.
 * `KERN_PROCARGS2` (the argv/env source) only returns another process's
   arguments to root; unprivileged, you see full argv/env for **your own**
   processes and just the name/path for others.

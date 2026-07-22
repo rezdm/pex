@@ -137,7 +137,7 @@ std::vector<ThreadInfo> ProcfsReader::get_threads(int pid) {
     return threads;
 }
 
-std::string ProcfsReader::get_thread_stack(const int pid, const int tid) {
+std::string ProcfsReader::get_thread_stack(const int pid, const int64_t tid) {
     const std::string path = "/proc/" + std::to_string(pid) + "/task/" + std::to_string(tid) + "/stack";
 
     const int fd = open(path.c_str(), O_RDONLY);
