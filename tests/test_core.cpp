@@ -157,6 +157,12 @@ void test_history_store() {
     const auto ps = hs.get_series({1}, 10);
     CHECK_EQ(ps.cpu_user.size(), size_t{3});
     if (!ps.cpu_user.empty()) CHECK_EQ(ps.cpu_user.back(), 40.0f);
+
+    // count_since: all 3 samples are recent (recorded ~now); none in the
+    // future. This backs the real-time history windows (issue #86).
+    const auto now = std::chrono::system_clock::now();
+    CHECK_EQ(hs.count_since(now - std::chrono::hours(1)), size_t{3});
+    CHECK_EQ(hs.count_since(now + std::chrono::hours(1)), size_t{0});
 }
 
 void test_csv_export_formula_injection(const std::string& tmpdir) {

@@ -67,6 +67,17 @@ size_t HistoryStore::sample_count() const {
     return samples_.size();
 }
 
+size_t HistoryStore::count_since(const std::chrono::system_clock::time_point oldest) const {
+    std::lock_guard lock(mutex_);
+    // samples_ runs oldest -> newest; count the contiguous newest run in-window.
+    size_t n = 0;
+    for (auto it = samples_.rbegin(); it != samples_.rend(); ++it) {
+        if (it->wall_time < oldest) break;
+        ++n;
+    }
+    return n;
+}
+
 ProcessHistorySeries HistoryStore::get_series(const std::vector<int>& pids,
                                               const size_t max_points) const {
     ProcessHistorySeries series;
@@ -86,12 +97,15 @@ ProcessHistorySeries HistoryStore::get_series(const std::vector<int>& pids,
     for (auto& v : series.per_cpu_user) v.reserve(count);
     for (auto& v : series.per_cpu_kernel) v.reserve(count);
 
+    // O(1) membership instead of a linear scan of `pids` per process per sample.
+    const std::unordered_set<int> pid_set(pids.begin(), pids.end());
+
     for (size_t i = first; i < samples_.size(); i++) {
         const HistorySample& s = samples_[i];
 
         float user = 0.0f, kernel = 0.0f, mem = 0.0f;
         for (const ProcessSample& ps : s.processes) {
-            if (std::find(pids.begin(), pids.end(), ps.pid) != pids.end()) {
+            if (pid_set.contains(ps.pid)) {
                 user += ps.cpu_user_percent;
                 kernel += ps.cpu_kernel_percent;
                 mem += ps.memory_percent;
@@ -209,8 +223,18 @@ bool HistoryStore::export_csv(const std::string& base_path, std::string& error) 
     sys_file << "time,cpu_usage_pct,memory_used_bytes,memory_total_bytes,process_count,thread_count\n";
     proc_file << "time,pid,name,cpu_user_pct,cpu_kernel_pct,mem_pct,rss_bytes,io_read_bps,io_write_bps\n";
 
-    std::lock_guard lock(mutex_);
-    for (const HistorySample& s : samples_) {
+    // Snapshot under the lock, then write the (potentially large) files without
+    // holding it, so a slow export doesn't block the collector's next record()
+    // (issue #86).
+    std::deque<HistorySample> samples;
+    std::unordered_map<int, std::string> names;
+    {
+        std::lock_guard lock(mutex_);
+        samples = samples_;
+        names = process_names_;
+    }
+
+    for (const HistorySample& s : samples) {
         const std::string ts = format_wall_time(s.wall_time);
 
         sys_file << ts << ',' << s.cpu_usage << ',' << s.memory_used << ','
@@ -218,7 +242,7 @@ bool HistoryStore::export_csv(const std::string& base_path, std::string& error) 
 
         for (const ProcessSample& ps : s.processes) {
             std::string name;
-            if (const auto it = process_names_.find(ps.pid); it != process_names_.end()) {
+            if (const auto it = names.find(ps.pid); it != names.end()) {
                 name = it->second;
             }
             // CSV-quote the name (it may contain commas/quotes). Process

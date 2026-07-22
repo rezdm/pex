@@ -42,10 +42,14 @@ void ImGuiApp::update_popup_history() {
         }
     }
 
-    const auto now = std::chrono::steady_clock::now();
-    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - pp.last_update).count();
-    if (elapsed < 500) return;
-    pp.last_update = now;
+    // Append one sample per *new* snapshot only. current_data_ changes once per
+    // refresh interval; a fixed wall-clock poll sampled the same snapshot twice
+    // (a 0% reading) or split one tick's counter delta over half the elapsed
+    // time (a ~2x spike). Consuming the already-correct per-process percentages
+    // (computed once per tick by DataStore with the right elapsed time) avoids
+    // re-deriving deltas with an unrelated denominator entirely (issue #85).
+    if (current_data_->timestamp == pp.last_sampled_time) return;
+    pp.last_sampled_time = current_data_->timestamp;
 
     const auto it = current_data_->process_map.find(pp.target_pid);
     if (it == current_data_->process_map.end()) return;
@@ -59,49 +63,24 @@ void ImGuiApp::update_popup_history() {
         pids.push_back(pp.target_pid);
     }
 
-    uint64_t total_utime = 0, total_stime = 0;
-    float total_mem_pct = 0.0f;
-
-    // Use CPU times from the data snapshot (platform-independent)
+    // Sum the already-computed shares (of all cores) across the pid set.
+    float user_pct = 0.0f, kernel_pct = 0.0f, mem_pct = 0.0f;
     for (int pid : pids) {
         if (auto proc_it = current_data_->process_map.find(pid); proc_it != current_data_->process_map.end()) {
-            total_utime += proc_it->second->info.user_time;
-            total_stime += proc_it->second->info.kernel_time;
-            total_mem_pct += proc_it->second->info.memory_percent;
+            user_pct += static_cast<float>(proc_it->second->info.cpu_user_percent);
+            kernel_pct += static_cast<float>(proc_it->second->info.cpu_kernel_percent);
+            mem_pct += static_cast<float>(proc_it->second->info.memory_percent);
         }
     }
 
-    if (pp.prev_utime > 0) {
-        // Guard against PID reuse: if times decreased, treat delta as zero
-        const uint64_t user_delta = (total_utime >= pp.prev_utime) ? total_utime - pp.prev_utime : 0;
-        const uint64_t kernel_delta = (total_stime >= pp.prev_stime) ? total_stime - pp.prev_stime : 0;
-
-        const long ticks_per_sec = system_provider_->get_clock_ticks_per_second();
-        const unsigned int cpu_count = system_provider_->get_processor_count();
-
-        const float elapsed_sec = elapsed / 1000.0f;
-        const float ticks_in_period = ticks_per_sec * elapsed_sec;
-
-        float user_pct = 0.0f, kernel_pct = 0.0f;
-        if (ticks_in_period > 0) {
-            const float pct_of_one_cpu_user = (static_cast<float>(user_delta) / ticks_in_period) * 100.0f;
-            const float pct_of_one_cpu_kernel = (static_cast<float>(kernel_delta) / ticks_in_period) * 100.0f;
-            user_pct = pct_of_one_cpu_user / static_cast<float>(cpu_count);
-            kernel_pct = pct_of_one_cpu_kernel / static_cast<float>(cpu_count);
-        }
-
-        pp.cpu_user_history.push_back(user_pct);
-        pp.cpu_kernel_history.push_back(kernel_pct);
-
-        if (pp.cpu_user_history.size() > ProcessPopupViewModel::kHistorySize) {
-            pp.cpu_user_history.erase(pp.cpu_user_history.begin());
-            pp.cpu_kernel_history.erase(pp.cpu_kernel_history.begin());
-        }
+    pp.cpu_user_history.push_back(user_pct);
+    pp.cpu_kernel_history.push_back(kernel_pct);
+    if (pp.cpu_user_history.size() > ProcessPopupViewModel::kHistorySize) {
+        pp.cpu_user_history.erase(pp.cpu_user_history.begin());
+        pp.cpu_kernel_history.erase(pp.cpu_kernel_history.begin());
     }
-    pp.prev_utime = total_utime;
-    pp.prev_stime = total_stime;
 
-    pp.memory_history.push_back(total_mem_pct);
+    pp.memory_history.push_back(mem_pct);
     if (pp.memory_history.size() > ProcessPopupViewModel::kHistorySize) {
         pp.memory_history.erase(pp.memory_history.begin());
     }
