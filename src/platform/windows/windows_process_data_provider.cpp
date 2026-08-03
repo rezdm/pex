@@ -11,6 +11,7 @@
 #include <sddl.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cwchar>
@@ -585,8 +586,25 @@ std::vector<FileHandleInfo> WindowsProcessDataProvider::get_file_handles(const i
     // would freeze the whole app (which is exactly what happened). On timeout
     // we return what completed; the detached worker keeps draining and closing
     // its own dups (the shared state outlives it via the shared_ptr) while the
-    // UI stays responsive. A genuinely stuck query leaks that one thread +
-    // handle, which is rare and bounded.
+    // UI stays responsive.
+    //
+    // Bound the leak (issue #93): a worker whose NtQueryObject truly never
+    // returns blocks forever, retaining its remaining duplicated handles — and
+    // with the details panel refreshing twice a second, a hang-prone target
+    // used to accumulate one permanently-blocked thread per refresh, without
+    // limit. Cap the number of outstanding workers instead: at the cap, skip
+    // the query (close the dups, return empty) rather than spawn another
+    // doomed thread. Hung workers never release their slot — by design: once
+    // kMaxOutstandingWorkers queries are wedged, every further query would
+    // wedge too, so refusing is the correct degradation.
+    static std::atomic<int> outstanding_workers{0};
+    constexpr int kMaxOutstandingWorkers = 8;
+
+    if (outstanding_workers.load(std::memory_order_relaxed) >= kMaxOutstandingWorkers) {
+        for (const auto& d : dups) CloseHandle(d.h);
+        return handles;
+    }
+
     struct QueryState {
         std::mutex mtx;
         std::condition_variable cv;
@@ -595,6 +613,7 @@ std::vector<FileHandleInfo> WindowsProcessDataProvider::get_file_handles(const i
     };
     auto state = std::make_shared<QueryState>();
 
+    outstanding_workers.fetch_add(1, std::memory_order_relaxed);
     std::thread([state, work = std::move(dups)]() {
         for (const auto& d : work) {
             const std::string type = query_object_string(d.h, kObjectTypeInformation);
@@ -614,9 +633,14 @@ std::vector<FileHandleInfo> WindowsProcessDataProvider::get_file_handles(const i
             }
             CloseHandle(d.h);
         }
-        std::lock_guard lock(state->mtx);
-        state->done = true;
+        {
+            std::lock_guard lock(state->mtx);
+            state->done = true;
+        }
         state->cv.notify_one();
+        // Only a worker that actually finished releases its slot; a hung one
+        // keeps it, so the cap above bounds total leaked threads/handles.
+        outstanding_workers.fetch_sub(1, std::memory_order_relaxed);
     }).detach();
 
     {
